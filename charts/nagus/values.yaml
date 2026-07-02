@@ -1,0 +1,135 @@
+# Default values for the nagus chart. See charts/nagus/README-esque NOTES.txt.
+
+image:
+  repository: registry.orac.local/homelab/nagus
+  # tag defaults to .Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Which category bundle this release serves (v1 wires only "hdd").
+category: hdd
+
+# The long-running `nagus serve` process: read-only search surface plus an
+# optional in-process ingest loop (sqlite is single-writer, so one pod both
+# ingests and serves -- no cross-pod file sharing).
+serve:
+  listen: ":8080"
+  minCapacityTB: 6
+  # ingestInterval "0" disables scheduled ingest (the surface still serves the
+  # existing corpus). Set e.g. "30m" once a source is configured (ebay creds or
+  # demo mode), otherwise startup fails fast with "ingest enabled but no source".
+  ingestInterval: "0"
+  # offline scores against the built-in demo reference instead of the live feed.
+  offline: false
+
+ebay:
+  query: "internal hard drive"
+  # Live-ingest credentials are injected as env from a Secret; NEVER inline them
+  # here (they belong in Vault, synced via externalSecret below or a pre-made
+  # Secret named in existingSecret). The Secret must expose the keys
+  # NAGUS_EBAY_CLIENT_ID and NAGUS_EBAY_CLIENT_SECRET.
+  existingSecret: ""
+
+# demo.enabled makes the release self-contained and demonstrable with NO secrets
+# and NO network: it mounts the bundled eBay fixture and turns on offline scoring
+# + scheduled ingest, so `helm install ... --set demo.enabled=true` yields ranked
+# results in-cluster. Turn OFF for real deployments.
+demo:
+  enabled: false
+  ingestInterval: "1h"
+
+storage:
+  # backend: sqlite (default, PVC-backed single file) | postgres (shared CNPG).
+  # NOTE: the app store adapter wired in v1 is sqlite. postgres here is a
+  # documented placeholder for the shared cluster (design 12.1); selecting it
+  # does not yet switch the running store and is validated as a follow-on
+  # (nagus-nwc / nagus-quq).
+  backend: sqlite
+  sqlite:
+    path: /data/nagus.db
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      # existingClaim, if set, is used instead of creating a PVC.
+      existingClaim: ""
+  postgres:
+    host: postgres-rw.databases-app.svc.cluster.local
+    port: 5432
+    database: nagus
+    # Secret holding the CNPG managed-role credentials (provisioned via gitops).
+    existingSecret: nagus-db-role
+
+# externalSecret renders an external-secrets.io ExternalSecret that syncs the
+# eBay credentials from Vault into a k8s Secret consumed by the Deployment.
+externalSecret:
+  enabled: false
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  refreshInterval: "1h"
+  # target Secret name to create; defaults to "<fullname>-ebay" when empty.
+  targetName: ""
+  # data maps k8s Secret keys <- Vault paths.
+  data: []
+  #  - secretKey: NAGUS_EBAY_CLIENT_ID
+  #    remoteRef:
+  #      key: nagus/ebay
+  #      property: client_id
+  #  - secretKey: NAGUS_EBAY_CLIENT_SECRET
+  #    remoteRef:
+  #      key: nagus/ebay
+  #      property: client_secret
+
+service:
+  type: ClusterIP
+  port: 8080
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 3
+    periodSeconds: 10

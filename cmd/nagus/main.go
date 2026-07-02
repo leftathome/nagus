@@ -52,6 +52,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "nagus search:", err)
 			os.Exit(1)
 		}
+	case "serve":
+		if err := runServe(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "nagus serve:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -68,6 +73,7 @@ usage:
   nagus version
   nagus ingest -category hdd -db nagus.db (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query "internal hard drive"] [-limit 50]
   nagus search -category hdd -db nagus.db [-text STR] [-min-capacity 6] [-limit 20] [-offline] [-json]
+  nagus serve  -category hdd -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-min-capacity 6] [-offline] [-ebay-fixture FILE]
 
 ingest collects listings and stores normalized items; search surfaces ranked
 $/TB deals from the store (read-only). Use -offline on search to score against a

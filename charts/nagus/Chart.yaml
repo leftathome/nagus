@@ -1,0 +1,21 @@
+apiVersion: v2
+name: nagus
+description: >-
+  nagus acquisition/watch subsystem -- the HDD deal-watch vertical slice
+  (collect -> store -> hard-filter -> $/TB valuation -> score -> read-only
+  search_items surface). sqlite-backed by default; structured to expand to more
+  categories and to the shared Postgres/CNPG backend without restructuring.
+type: application
+# version is the chart version; appVersion tracks the nagus image tag.
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - acquisition
+  - watch
+  - deal-watch
+  - hdd
+sources:
+  - https://gitlab.orac.local/homelab/nagus
+maintainers:
+  - name: Steven Wagner

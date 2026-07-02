@@ -1,0 +1,28 @@
+nagus ({{ .Values.category }}) deployed as {{ include "nagus.fullname" . }}.
+
+Storage backend: {{ .Values.storage.backend }}{{ if eq .Values.storage.backend "sqlite" }} (sqlite at {{ .Values.storage.sqlite.path }}){{ end }}
+Ingest interval: {{ include "nagus.ingestInterval" . }}{{ if eq (include "nagus.ingestInterval" .) "0" }}  (scheduled ingest DISABLED){{ end }}
+Demo mode:       {{ .Values.demo.enabled }}
+
+Reach the read-only search surface:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "nagus.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl "http://127.0.0.1:{{ .Values.service.port }}/search?limit=5"
+  curl "http://127.0.0.1:{{ .Values.service.port }}/item?id=<id>"
+
+{{- if .Values.demo.enabled }}
+
+DEMO MODE is on: the pod ingests a bundled fixture and scores it offline (no
+secrets, no network). /search returns ranked HDD $/TB deals immediately. Turn
+demo off and configure a real source for production.
+{{- else if eq (include "nagus.ingestInterval" .) "0" }}
+
+Scheduled ingest is OFF, so the corpus starts empty. To collect real listings:
+  1. Provide eBay credentials via a Secret (set ebay.existingSecret, or
+     externalSecret.enabled=true to sync from Vault) exposing NAGUS_EBAY_CLIENT_ID
+     and NAGUS_EBAY_CLIENT_SECRET.
+  2. Set serve.ingestInterval (e.g. "30m").
+{{- end }}
+
+The surface is READ-ONLY (eyes, not hands): it never contacts sellers, bids, or
+buys. Any action path is separate and human-gated.
