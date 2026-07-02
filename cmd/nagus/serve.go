@@ -17,7 +17,6 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
-	"github.com/leftathome/nagus/internal/store/sqlitestore"
 )
 
 // server holds the wired pipeline behind the read-only HTTP surface. This is
@@ -133,7 +132,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	cat := fs.String("category", envOr("NAGUS_CATEGORY", "hdd"), "category bundle to serve (v1: hdd)")
-	db := fs.String("db", envOr("NAGUS_DB", "/data/nagus.db"), "sqlite store path")
+	sflags := registerStoreFlags(fs)
 	listen := fs.String("listen", envOr("NAGUS_LISTEN", ":8080"), "HTTP listen address")
 	interval := fs.Duration("ingest-interval", envDuration("NAGUS_INGEST_INTERVAL", 0), "in-process ingest interval (0 disables scheduled ingest)")
 	minCap := fs.Float64("min-capacity", envFloat("NAGUS_MIN_CAPACITY", category.DefaultMinCapacityTB), "hard-filter capacity floor in TB")
@@ -149,10 +148,11 @@ func runServe(args []string) error {
 		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
 	}
 
-	st, err := sqlitestore.New(*db)
+	st, closeSt, err := sflags.open(context.Background())
 	if err != nil {
-		return fmt.Errorf("open store %q: %w", *db, err)
+		return err
 	}
+	defer closeSt()
 
 	deps := category.HDDDeps{
 		Store:         st,
@@ -188,7 +188,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "nagus serve: category=%s db=%s listen=%s ingest-interval=%s\n", *cat, *db, *listen, interval.String())
+		fmt.Fprintf(os.Stderr, "nagus serve: category=%s backend=%s listen=%s ingest-interval=%s\n", *cat, *sflags.backend, *listen, interval.String())
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

@@ -57,6 +57,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
+{{/* The local basic-auth Secret name carrying the postgres role credentials. */}}
+{{- define "nagus.dbSecretName" -}}
+{{- if .Values.storage.postgres.existingSecret -}}
+{{- .Values.storage.postgres.existingSecret -}}
+{{- else -}}
+{{- printf "%s-db" (include "nagus.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Effective ingest interval: demo mode overrides serve.ingestInterval. */}}
 {{- define "nagus.ingestInterval" -}}
 {{- if .Values.demo.enabled -}}

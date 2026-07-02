@@ -44,10 +44,11 @@ demo:
 
 storage:
   # backend: sqlite (default, PVC-backed single file) | postgres (shared CNPG).
-  # NOTE: the app store adapter wired in v1 is sqlite. postgres here is a
-  # documented placeholder for the shared cluster (design 12.1); selecting it
-  # does not yet switch the running store and is validated as a follow-on
-  # (nagus-nwc / nagus-quq).
+  # Both adapters are wired (internal/store/{sqlitestore,postgresstore}).
+  # postgres targets the shared CloudNativePG cluster; the database + managed
+  # role are provisioned via gitops (design 12.1), and this chart consumes the
+  # resulting credentials Secret (storage.postgres.existingSecret). pgvector is
+  # deferred: v1 postgres is FTS-only.
   backend: sqlite
   sqlite:
     path: /data/nagus.db
@@ -62,8 +63,29 @@ storage:
     host: postgres-rw.databases-app.svc.cluster.local
     port: 5432
     database: nagus
-    # Secret holding the CNPG managed-role credentials (provisioned via gitops).
-    existingSecret: nagus-db-role
+    sslmode: require
+    role: nagus
+    # A pod can only mount Secrets in its OWN namespace, but the CNPG managed-role
+    # secret (nagus-db-role) is created in databases-app. So -- mirroring the
+    # aether/registry pattern in the gitops repo -- the chart syncs the SAME Vault
+    # key into a LOCAL basic-auth secret in this namespace, which the Deployment
+    # references. Keys: username/password. Set existingSecret to reference a
+    # pre-made local secret instead and disable externalSecret below.
+    existingSecret: ""
+    userKey: username
+    passwordKey: password
+    externalSecret:
+      enabled: true
+      secretStoreRef:
+        name: vault-backend
+        kind: ClusterSecretStore
+      refreshInterval: "1h"
+      # Vault key + property holding the role password. This is the SAME key the
+      # gitops externalsecret-nagus-role.yaml uses, so both the managed role and
+      # this consumer secret derive from one source of truth.
+      remoteRef:
+        key: eso/nagus/infrastructure
+        property: postgres_password
 
 # externalSecret renders an external-secrets.io ExternalSecret that syncs the
 # eBay credentials from Vault into a k8s Secret consumed by the Deployment.

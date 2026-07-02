@@ -40,8 +40,30 @@ spec:
           env:
             - name: NAGUS_CATEGORY
               value: {{ .Values.category | quote }}
+            - name: NAGUS_STORE_BACKEND
+              value: {{ .Values.storage.backend | quote }}
             - name: NAGUS_DB
               value: {{ .Values.storage.sqlite.path | quote }}
+            {{- if eq .Values.storage.backend "postgres" }}
+            - name: NAGUS_PG_HOST
+              value: {{ .Values.storage.postgres.host | quote }}
+            - name: NAGUS_PG_PORT
+              value: {{ .Values.storage.postgres.port | quote }}
+            - name: NAGUS_PG_DB
+              value: {{ .Values.storage.postgres.database | quote }}
+            - name: NAGUS_PG_SSLMODE
+              value: {{ .Values.storage.postgres.sslmode | default "require" | quote }}
+            - name: NAGUS_PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nagus.dbSecretName" . | quote }}
+                  key: {{ .Values.storage.postgres.userKey | default "username" | quote }}
+            - name: NAGUS_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nagus.dbSecretName" . | quote }}
+                  key: {{ .Values.storage.postgres.passwordKey | default "password" | quote }}
+            {{- end }}
             - name: NAGUS_LISTEN
               value: {{ .Values.serve.listen | quote }}
             - name: NAGUS_MIN_CAPACITY

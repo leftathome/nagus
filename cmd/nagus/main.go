@@ -28,7 +28,6 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
-	"github.com/leftathome/nagus/internal/store/sqlitestore"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -81,15 +80,10 @@ built-in reference instead of the live feed (for the fixture-driven proof).
 `)
 }
 
-// openStore opens the sqlite-backed store at dsn (a file path, or ":memory:").
-func openStore(dsn string) (store.Store, error) {
-	return sqlitestore.New(dsn)
-}
-
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	cat := fs.String("category", "hdd", "category bundle to ingest (v1: hdd)")
-	db := fs.String("db", "nagus.db", "sqlite store path (or :memory:)")
+	sflags := registerStoreFlags(fs)
 	fixture := fs.String("ebay-fixture", "", "path to an eBay Browse JSON fixture (offline ingest; skips the network)")
 	clientID := fs.String("client-id", "", "eBay OAuth client id (live ingest; prefer env/Vault injection)")
 	clientSecret := fs.String("client-secret", "", "eBay OAuth client secret (live ingest)")
@@ -108,10 +102,11 @@ func runIngest(args []string) error {
 		return err
 	}
 
-	st, err := openStore(*db)
+	st, closeSt, err := sflags.open(context.Background())
 	if err != nil {
-		return fmt.Errorf("open store %q: %w", *db, err)
+		return err
 	}
+	defer closeSt()
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "  "+format+"\n", a...) }
 	p := category.NewHDDPipeline(conn, category.HDDDeps{Store: st, Logf: logf})
 
@@ -119,8 +114,8 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("ingest[%s]: fetched=%d stored=%d skipped=%d (db=%s)\n",
-		*cat, res.Fetched, res.Stored, len(res.Skips), *db)
+	fmt.Printf("ingest[%s]: fetched=%d stored=%d skipped=%d (backend=%s)\n",
+		*cat, res.Fetched, res.Stored, len(res.Skips), *sflags.backend)
 	for _, s := range res.Skips {
 		fmt.Printf("  skip %s at %s: %s\n", s.SourceKey, s.Stage, s.Reason)
 	}
@@ -155,7 +150,7 @@ var demoReference = category.StaticReference{CentsPerTB: map[string]int64{
 func runSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	cat := fs.String("category", "hdd", "category to search (v1: hdd)")
-	db := fs.String("db", "nagus.db", "sqlite store path (or :memory:)")
+	sflags := registerStoreFlags(fs)
 	text := fs.String("text", "", "case-insensitive text match over title/tokens")
 	minCap := fs.Float64("min-capacity", category.DefaultMinCapacityTB, "hard-filter capacity floor in TB")
 	limit := fs.Int("limit", 20, "max items to surface")
@@ -168,10 +163,11 @@ func runSearch(args []string) error {
 		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
 	}
 
-	st, err := openStore(*db)
+	st, closeSt, err := sflags.open(context.Background())
 	if err != nil {
-		return fmt.Errorf("open store %q: %w", *db, err)
+		return err
 	}
+	defer closeSt()
 	deps := category.HDDDeps{Store: st, MinCapacityTB: *minCap}
 	if *offline {
 		deps.Reference = demoReference
