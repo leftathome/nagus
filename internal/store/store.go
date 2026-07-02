@@ -26,12 +26,12 @@ import (
 // exactly these structured predicates -- range, recency, category -- which is
 // why a pure semantic index (memory-core) is a companion, not a replacement.
 type Query struct {
-	Category      string    // exact category match; "" = any
+	Category      string     // exact category match; "" = any
 	Class         item.Class // exact class match; "" = any
-	MaxPriceCents int64     // upper bound; 0 = no bound (note: item price 0 == unknown)
-	Since         time.Time // only items with SeenAt >= Since; zero = no bound
-	Text          string    // case-insensitive token/substring match over Title+Tokens
-	Limit         int       // max rows; 0 = no limit
+	MaxPriceCents int64      // upper bound; 0 = no bound (note: item price 0 == unknown)
+	Since         time.Time  // only items with SeenAt >= Since; zero = no bound
+	Text          string     // case-insensitive token/substring match over Title+Tokens
+	Limit         int        // max rows; 0 = no limit
 }
 
 // Store is the item persistence + query adapter. Implementations MUST be safe
