@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nagus.fullname" . }}
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # sqlite is a single-writer single file: never run >1 replica against one PVC.
+  # Recreate avoids two pods briefly sharing the RWO volume during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "nagus.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nagus.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "nagus.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nagus
+          image: {{ include "nagus.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          args:
+            - serve
+          env:
+            - name: NAGUS_CATEGORY
+              value: {{ .Values.category | quote }}
+            - name: NAGUS_DB
+              value: {{ .Values.storage.sqlite.path | quote }}
+            - name: NAGUS_LISTEN
+              value: {{ .Values.serve.listen | quote }}
+            - name: NAGUS_MIN_CAPACITY
+              value: {{ .Values.serve.minCapacityTB | quote }}
+            - name: NAGUS_INGEST_INTERVAL
+              value: {{ include "nagus.ingestInterval" . | quote }}
+            - name: NAGUS_OFFLINE
+              value: {{ or .Values.demo.enabled .Values.serve.offline | quote }}
+            - name: NAGUS_EBAY_QUERY
+              value: {{ .Values.ebay.query | quote }}
+            {{- if .Values.demo.enabled }}
+            - name: NAGUS_EBAY_FIXTURE
+              value: /demo/browse_search.json
+            {{- end }}
+          {{- $secret := include "nagus.ebaySecretName" . }}
+          {{- if and $secret (not .Values.demo.enabled) }}
+          envFrom:
+            - secretRef:
+                name: {{ $secret }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.demo.enabled }}
+            - name: demo
+              mountPath: /demo
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if and (eq .Values.storage.backend "sqlite") .Values.storage.sqlite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "nagus.fullname" .)) .Values.storage.sqlite.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.demo.enabled }}
+        - name: demo
+          configMap:
+            name: {{ include "nagus.fullname" . }}-demo
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

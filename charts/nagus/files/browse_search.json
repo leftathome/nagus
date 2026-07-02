@@ -1,0 +1,74 @@
+{
+  "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?q=internal%20hard%20drive&limit=3",
+  "total": 3,
+  "limit": 3,
+  "offset": 0,
+  "itemSummaries": [
+    {
+      "itemId": "v1|110599999901|0",
+      "title": "Seagate Exos X18 16TB 7200RPM SATA 3.5in Enterprise Hard Drive ST18000NM000J",
+      "leafCategoryIds": ["175669"],
+      "condition": "New",
+      "conditionId": "1000",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999901",
+      "price": {
+        "value": "279.99",
+        "currency": "USD"
+      },
+      "seller": {
+        "username": "server_parts_outlet",
+        "feedbackPercentage": "99.5",
+        "feedbackScore": 15234
+      },
+      "itemLocation": {
+        "postalCode": "606**",
+        "country": "US"
+      },
+      "itemCreationDate": "2026-05-10T12:00:00.000Z"
+    },
+    {
+      "itemId": "v1|110599999902|0",
+      "title": "WD Red Pro 8TB NAS Internal Hard Drive HDD - Seller Refurbished",
+      "leafCategoryIds": ["175669"],
+      "condition": "Seller refurbished",
+      "conditionId": "2500",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999902",
+      "price": {
+        "value": "129.99",
+        "currency": "USD"
+      },
+      "seller": {
+        "username": "refurbdrivesdirect",
+        "feedbackPercentage": "98.2",
+        "feedbackScore": 8421
+      },
+      "itemLocation": {
+        "postalCode": "300**",
+        "country": "US"
+      },
+      "itemCreationDate": "2026-05-12T08:30:00.000Z"
+    },
+    {
+      "itemId": "v1|110599999903|0",
+      "title": "HGST Ultrastar He10 10TB SATA 3.5in Internal Hard Drive - Used, Tested",
+      "leafCategoryIds": ["175669"],
+      "condition": "Used",
+      "conditionId": "3000",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999903",
+      "price": {
+        "value": "89.5",
+        "currency": "USD"
+      },
+      "seller": {
+        "username": "datacenter_liquidators",
+        "feedbackPercentage": "97.8",
+        "feedbackScore": 42017
+      },
+      "itemLocation": {
+        "postalCode": "941**",
+        "country": "US"
+      },
+      "itemCreationDate": "2026-05-14T15:45:00.000Z"
+    }
+  ]
+}

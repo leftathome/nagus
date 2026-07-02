@@ -1,0 +1,13 @@
+{{- if .Values.demo.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nagus.fullname" . }}-demo
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+data:
+  # Bundled eBay Browse fixture so the release can ingest+score with no secrets
+  # and no network. Mounted read-only at /demo and consumed via NAGUS_EBAY_FIXTURE.
+  browse_search.json: |-
+    {{- .Files.Get "files/browse_search.json" | nindent 4 }}
+{{- end }}
