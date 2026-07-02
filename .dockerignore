@@ -1,0 +1,15 @@
+# Keep the build context to the Go source the multi-stage build needs.
+
+# Beads tracker Dolt DB mutates in place -- never needed in the image, and a
+# file growing between stat and read breaks COPY with "archive/tar: write too long".
+.beads/
+
+# VCS metadata -- large, never needed at build time.
+.git/
+.gitignore
+
+# Local scratch / artifacts.
+*.log
+*.sqlite
+*.sqlite3
+docs/

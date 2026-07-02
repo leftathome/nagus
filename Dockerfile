@@ -1,0 +1,13 @@
+FROM docker.io/golang:1.26 AS build
+WORKDIR /src
+COPY go.mod ./
+# go.sum is added once external deps land; keep this build cache-friendly.
+RUN go mod download || true
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}" -o /nagus ./cmd/nagus
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /nagus /nagus
+USER nonroot:nonroot
+ENTRYPOINT ["/nagus"]

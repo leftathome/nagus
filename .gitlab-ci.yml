@@ -1,0 +1,40 @@
+# nagus CI -- primary pipeline (development + testing) on gitlab.orac.local.
+#
+# Patterned on glovebox: GitLab CI is the primary dev/test loop; GitHub Actions
+# (.github/workflows) is the downstream public-mirror + release concern.
+#
+# v1 scaffold runs the unit gate (vet + race tests). Build/chart/release stages
+# land alongside the first connector image (kaniko via homelab/ci-templates,
+# same as glovebox) -- tracked in beads.
+
+stages:
+  - test
+
+variables:
+  GOPATH: "$CI_PROJECT_DIR/.cache/go"
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+  GOFLAGS: "-mod=mod"
+
+cache:
+  key:
+    files:
+      - go.mod
+  paths:
+    - .cache/go/pkg/mod
+    - .cache/go-build
+
+# Unit gate: vet + race tests. Runs on MRs, main, and tags.
+test:
+  stage: test
+  image: golang:1.26
+  before_script:
+    - "go version"
+    - "go env GOPATH GOMODCACHE GOCACHE"
+  script:
+    - "go vet ./..."
+    - "go test ./... -count=1 -race"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'

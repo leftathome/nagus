@@ -1,0 +1,22 @@
+# Beads / Dolt files (added by bd init). The tracker (issues.jsonl, Dolt creds,
+# hooks) is local-only: it carries PII and homelab topology. Canonical state
+# lives in Dolt; do not ship the tracker to public remotes.
+.beads/
+.beads-credential-key
+.dolt/
+*.db
+
+# Local store artifacts (SQLite adapter dev DBs).
+*.sqlite
+*.sqlite3
+
+# Private design/spec material not for the public mirror.
+docs/design/private-*.md
+
+# Root-built binaries.
+/nagus
+/*-connector
+
+# Editor / OS cruft.
+*.log
+.DS_Store
