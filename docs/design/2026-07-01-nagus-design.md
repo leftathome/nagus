@@ -279,6 +279,32 @@ agents run queries on demand.
 | | | category valuation APIs (BrickLink free; Zillapi/KicksDB/Regrid paid) |
 | | | ClawHub as a *distribution* channel (never in-process) |
 
+### 12.1 Deployment (Helm) and the Postgres/CNPG option
+
+nagus ships a **Helm chart** (`charts/nagus`), patterned on `charts/glovebox`,
+published to GHCR by CI on tag. `values.storage.backend` selects the store adapter:
+
+- **`sqlite`** (default): a PVC-backed single-file store. Zero external deps.
+- **`postgres`**: the shared **CloudNativePG** cluster `postgres` in namespace
+  `databases-app`. The app does NOT bundle Postgres and the chart does NOT create
+  the database -- per the homelab pattern, provisioning is a **gitops request** in
+  `clusters/orac/foundation/databases-app/`:
+  1. add a managed role `nagus` to `cluster-postgres.yaml` (`spec.managed.roles`,
+     `passwordSecret: nagus-db-role`),
+  2. add `database-nagus.yaml` (`kind: Database`, `cluster.name: postgres`,
+     `name: nagus`, `owner: nagus`),
+  3. add `externalsecret-nagus-role.yaml` (Vault-backed basic-auth, mirroring
+     `externalsecret-aether-role.yaml`).
+  The chart then consumes the `nagus-db-role` secret and connects to
+  `postgres-rw.databases-app.svc.cluster.local:5432`.
+
+**pgvector caveat:** the shared cluster image `ghcr.io/cloudnative-pg/postgresql:17`
+does not include pgvector. Vector/semantic search over the corpus therefore needs
+either a pgvector-capable image on the shared cluster (impacts the other tenants:
+aether, registry) or a dedicated nagus CNPG `Cluster`. v1 Postgres is FTS-only;
+pgvector is deferred. Semantic recall in v1 comes from the memory-core bridge
+(section 8), not pgvector.
+
 ### Repo boundaries
 - **glovebox** (existing repo): connectors + sanitization + the new **extract/tokenize** +
   emitting normalized items. Cross-repo work -> glovebox beads.
@@ -323,7 +349,10 @@ agents run queries on demand.
    A.8/A.10) so the reference-valuation adapter is trivial — exercising eBay + condition
    new/refurb/used. Lego is the
    cleanest *free* valuation adapter and a good third/showcase (appreciation mode).
-3. **Store tech:** SQLite+FTS5 vs DuckDB vs Postgres.
+3. **Store tech:** DECIDED -- a swappable `store.Store` adapter with two impls:
+   **SQLite+FTS5** (default, single-file, homelab) and **Postgres** on the shared
+   CloudNativePG cluster (see 12.1). Postgres text search = FTS/tsvector for v1;
+   **pgvector is a gated follow-on** (the shared CNPG image lacks the extension).
 4. **memory-core bridge vs standalone** for semantic recall (reuse openclaw-3wz vs new).
 5. **Parcel provider:** Regrid vs ATTOM vs Rentcast (coverage vs cost vs fields).
 6. **changedetection.io in v1 or v2** — v1 land is RSS+Zillapi (no browser); changedetection.io
