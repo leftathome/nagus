@@ -1,0 +1,20 @@
+{
+  "watches": [
+    {
+      "name": "cheap-big-hdd",
+      "category": "hdd",
+      "text": "",
+      "limit": 25,
+      "audience": "steve",
+      "strong_verdicts": ["great"]
+    },
+    {
+      "name": "any-good-enterprise-drive",
+      "category": "hdd",
+      "text": "exos",
+      "limit": 25,
+      "audience": "household",
+      "min_score": 80
+    }
+  ]
+}

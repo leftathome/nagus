@@ -1,0 +1,12 @@
+{{- if .Values.watches -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nagus.fullname" . }}-watches
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+data:
+  # Saved watches for the /watches delivery surface (design sections 10-11),
+  # rendered from .Values.watches into the JSON shape nagus loads.
+  watches.json: {{ dict "watches" .Values.watches | toJson | quote }}
+{{- end }}

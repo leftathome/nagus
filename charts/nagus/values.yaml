@@ -46,6 +46,17 @@ demo:
   enabled: false
   ingestInterval: "1h"
 
+# watches are saved search_items queries + notify thresholds that the /watches
+# endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
+# strong matches -> ping; audience is routed by openclaw's household resolver).
+# When non-empty, the chart renders a ConfigMap and points NAGUS_WATCHES at it.
+# See docs/examples/watches.hdd.json for the shape.
+watches: []
+  # - name: cheap-big-hdd
+  #   category: hdd
+  #   audience: steve
+  #   strong_verdicts: ["great"]
+
 storage:
   # backend: sqlite (default, PVC-backed single file) | postgres (shared CNPG).
   # Both adapters are wired (internal/store/{sqlitestore,postgresstore}).

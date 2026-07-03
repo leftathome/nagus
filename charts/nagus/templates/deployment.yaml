@@ -78,6 +78,10 @@ spec:
             - name: NAGUS_EBAY_FIXTURE
               value: /demo/browse_search.json
             {{- end }}
+            {{- if .Values.watches }}
+            - name: NAGUS_WATCHES
+              value: /etc/nagus/watches.json
+            {{- end }}
           {{- $secret := include "nagus.ebaySecretName" . }}
           {{- if and $secret (not .Values.demo.enabled) }}
           envFrom:
@@ -112,6 +116,11 @@ spec:
               mountPath: /demo
               readOnly: true
             {{- end }}
+            {{- if .Values.watches }}
+            - name: watches
+              mountPath: /etc/nagus
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           {{- if and (eq .Values.storage.backend "sqlite") .Values.storage.sqlite.persistence.enabled }}
@@ -126,6 +135,11 @@ spec:
         - name: demo
           configMap:
             name: {{ include "nagus.fullname" . }}-demo
+        {{- end }}
+        {{- if .Values.watches }}
+        - name: watches
+          configMap:
+            name: {{ include "nagus.fullname" . }}-watches
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

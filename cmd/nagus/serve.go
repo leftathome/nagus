@@ -17,6 +17,7 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
+	"github.com/leftathome/nagus/internal/watch"
 )
 
 // server holds the wired pipeline behind the read-only HTTP surface. This is
@@ -27,6 +28,7 @@ type server struct {
 	pipe     *pipeline.Pipeline
 	store    store.Store
 	category string
+	watches  watch.Config
 }
 
 func (s *server) routes() *http.ServeMux {
@@ -41,6 +43,7 @@ func (s *server) routes() *http.ServeMux {
 	})
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/item", s.handleItem)
+	mux.HandleFunc("/watches", s.handleWatches)
 	mux.HandleFunc("/mcp", s.handleMCP)
 	return mux
 }
@@ -114,6 +117,40 @@ func (s *server) handleItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, it)
 }
 
+// handleWatches evaluates the configured watches and returns, per watch, the
+// ranked candidates (quiet inbox) and strong matches (ping) plus the opaque
+// audience tag. Read-only: openclaw's delivery cron polls this and routes via
+// the household/audience resolver -- nagus reports, it does not deliver.
+func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	results, err := watch.EvaluateAll(r.Context(), s.pipe, s.watches)
+	if err != nil {
+		http.Error(w, "watch evaluation failed", http.StatusInternalServerError)
+		return
+	}
+	type watchOut struct {
+		Name           string      `json:"name"`
+		Audience       string      `json:"audience,omitempty"`
+		CandidateCount int         `json:"candidate_count"`
+		StrongCount    int         `json:"strong_count"`
+		Candidates     []searchRow `json:"candidates"`
+		Strong         []searchRow `json:"strong"`
+	}
+	out := make([]watchOut, 0, len(results))
+	for _, res := range results {
+		out = append(out, watchOut{
+			Name: res.Watch.Name, Audience: res.Watch.Audience,
+			CandidateCount: len(res.Candidates), StrongCount: len(res.Strong),
+			Candidates: scoredItemsToRows(res.Candidates),
+			Strong:     scoredItemsToRows(res.Strong),
+		})
+	}
+	writeJSON(w, map[string]any{"watches": out})
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
@@ -133,11 +170,21 @@ func runServe(args []string) error {
 	clientID := fs.String("client-id", envOr("NAGUS_EBAY_CLIENT_ID", ""), "eBay OAuth client id (live ingest)")
 	clientSecret := fs.String("client-secret", envOr("NAGUS_EBAY_CLIENT_SECRET", ""), "eBay OAuth client secret (live ingest)")
 	query := fs.String("query", envOr("NAGUS_EBAY_QUERY", "internal hard drive"), "eBay search query (live ingest)")
+	watchesPath := fs.String("watches", envOr("NAGUS_WATCHES", ""), "path to a JSON watches config (enables /watches for the delivery cron)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *cat != "hdd" {
 		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
+	}
+
+	var watches watch.Config
+	if *watchesPath != "" {
+		loaded, lerr := watch.LoadConfig(*watchesPath)
+		if lerr != nil {
+			return lerr
+		}
+		watches = loaded
 	}
 
 	st, closeSt, err := sflags.open(context.Background())
@@ -164,7 +211,7 @@ func runServe(args []string) error {
 		}
 	}
 	p := category.NewHDDPipeline(conn, deps)
-	srv := &server{pipe: p, store: st, category: *cat}
+	srv := &server{pipe: p, store: st, category: *cat, watches: watches}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

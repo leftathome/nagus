@@ -337,8 +337,15 @@ func (s *server) mcpGetItem(ctx context.Context, args json.RawMessage) (any, *rp
 // shared by /search (handleSearch) and the MCP search_items tool, so both
 // surfaces stay byte-for-byte in sync from one source of truth.
 func scoredToRows(res pipeline.SurfaceResult) []searchRow {
-	rows := make([]searchRow, 0, len(res.Items))
-	for i, sc := range res.Items {
+	return scoredItemsToRows(res.Items)
+}
+
+// scoredItemsToRows converts any ranked []pipeline.Scored slice into searchRows.
+// Used by /watches to render candidate and strong-match subsets identically to
+// the search surface.
+func scoredItemsToRows(items []pipeline.Scored) []searchRow {
+	rows := make([]searchRow, 0, len(items))
+	for i, sc := range items {
 		rows = append(rows, searchRow{
 			Rank: i + 1, ID: sc.Item.ID, Verdict: sc.Signal.Verdict,
 			Score: sc.Score.Value, Rationale: sc.Score.Rationale,

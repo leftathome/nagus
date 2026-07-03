@@ -10,6 +10,7 @@ import (
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/store"
+	"github.com/leftathome/nagus/internal/watch"
 )
 
 func newTestServer(t *testing.T) *server {
@@ -106,6 +107,51 @@ func TestServeGetItemNotFoundAndBadRequest(t *testing.T) {
 	}
 	if rec := do(t, srv, http.MethodGet, "/item"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("no id status = %d, want 400", rec.Code)
+	}
+}
+
+func TestServeWatches(t *testing.T) {
+	srv := newTestServer(t)
+	srv.watches = watch.Config{Watches: []watch.Watch{
+		{Name: "big-hdd", Category: "hdd", StrongVerdicts: []string{"great"}, Audience: "steve"},
+	}}
+	rec := do(t, srv, http.MethodGet, "/watches")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/watches status = %d", rec.Code)
+	}
+	var body struct {
+		Watches []struct {
+			Name           string      `json:"name"`
+			Audience       string      `json:"audience"`
+			CandidateCount int         `json:"candidate_count"`
+			StrongCount    int         `json:"strong_count"`
+			Candidates     []searchRow `json:"candidates"`
+			Strong         []searchRow `json:"strong"`
+		} `json:"watches"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Watches) != 1 {
+		t.Fatalf("want 1 watch, got %d", len(body.Watches))
+	}
+	w0 := body.Watches[0]
+	// Fixture: 3 hdd items survive the capacity floor; only the used drive is
+	// "great", so it is the single strong match (ping); all 3 are candidates.
+	if w0.Name != "big-hdd" || w0.Audience != "steve" {
+		t.Fatalf("watch meta = {%s,%s}, want {big-hdd,steve}", w0.Name, w0.Audience)
+	}
+	if w0.CandidateCount != 3 || len(w0.Candidates) != 3 {
+		t.Fatalf("candidate_count=%d len=%d, want 3", w0.CandidateCount, len(w0.Candidates))
+	}
+	if w0.StrongCount != 1 || len(w0.Strong) != 1 || w0.Strong[0].Verdict != "great" {
+		t.Fatalf("strong = %d %v, want 1 great", w0.StrongCount, w0.Strong)
+	}
+}
+
+func TestServeWatchesReadOnly(t *testing.T) {
+	if rec := do(t, newTestServer(t), http.MethodPost, "/watches"); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /watches = %d, want 405", rec.Code)
 	}
 }
 

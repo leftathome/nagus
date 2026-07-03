@@ -8,6 +8,8 @@ Endpoints (all on svc/{{ include "nagus.fullname" . }}:{{ .Values.service.port }
   /mcp     MCP server (JSON-RPC 2.0) -- the agent-facing surface. Tools:
            search_items, get_item. This is what openclaw registers for agents.
   /search  /item    plain-HTTP read-only pull (debugging / non-MCP callers).
+  /watches           per-watch candidates + strong matches for openclaw's
+                     delivery cron ({{ len .Values.watches }} watch(es) configured).
   /healthz /readyz   probes.
 
 Try it via port-forward:
