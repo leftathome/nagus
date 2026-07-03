@@ -13,9 +13,10 @@ fullnameOverride: ""
 # Which category bundle this release serves (v1 wires only "hdd").
 category: hdd
 
-# The long-running `nagus serve` process: read-only search surface plus an
-# optional in-process ingest loop (sqlite is single-writer, so one pod both
-# ingests and serves -- no cross-pod file sharing).
+# The long-running `nagus serve` process: the MCP server at /mcp (agent-facing,
+# tools search_items + get_item) plus a plain-HTTP read-only pull at /search +
+# /item, plus an optional in-process ingest loop (sqlite is single-writer, so one
+# pod both ingests and serves -- no cross-pod file sharing).
 serve:
   listen: ":8080"
   minCapacityTB: 6

@@ -9,7 +9,10 @@ restructuring.
 
 One `Deployment` running `nagus serve`:
 
-- **read-only search surface** (`/search`, `/item`) -- eyes, not hands;
+- the **MCP server** at `/mcp` (JSON-RPC 2.0) -- the agent-facing surface, tools
+  `search_items` + `get_item`, which openclaw registers for agents;
+- a **plain-HTTP read-only pull** at `/search` + `/item` for debugging / non-MCP
+  callers -- eyes, not hands;
 - an optional **in-process ingest loop** (`serve.ingestInterval`) that collects
   eBay HDD listings, extracts typed fields, and scores $/TB into the store.
 
@@ -26,6 +29,10 @@ follow-on that arrives with the Postgres backend.
 ```
 helm install nag charts/nagus --set demo.enabled=true
 kubectl port-forward svc/nag-nagus 8080:8080
+# MCP (what an agent sees):
+curl -s -X POST http://127.0.0.1:8080/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_items","arguments":{"limit":5}}}'
+# or the plain-HTTP debug pull:
 curl 'http://127.0.0.1:8080/search?limit=5'
 ```
 
