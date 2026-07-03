@@ -41,6 +41,7 @@ func (s *server) routes() *http.ServeMux {
 	})
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/item", s.handleItem)
+	mux.HandleFunc("/mcp", s.handleMCP)
 	return mux
 }
 
@@ -83,16 +84,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "search failed", http.StatusInternalServerError)
 		return
 	}
-	rows := make([]searchRow, 0, len(res.Items))
-	for i, sc := range res.Items {
-		rows = append(rows, searchRow{
-			Rank: i + 1, ID: sc.Item.ID, Verdict: sc.Signal.Verdict,
-			Score: sc.Score.Value, Rationale: sc.Score.Rationale,
-			PriceCents: sc.Item.PriceCents, Currency: sc.Item.Currency,
-			CapacityTB: sc.Item.Attributes["capacity_tb"], Condition: sc.Item.Condition,
-			Title: sc.Item.Title, SourceURL: sc.Item.SourceURL,
-		})
-	}
+	rows := scoredToRows(res)
 	writeJSON(w, map[string]any{
 		"matched":  res.Matched,
 		"filtered": res.Filtered,
