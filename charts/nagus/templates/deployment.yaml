@@ -82,6 +82,25 @@ spec:
             - name: NAGUS_WATCHES
               value: /etc/nagus/watches.json
             {{- end }}
+            {{- if eq .Values.category "land" }}
+            - name: NAGUS_LAND_BUDGET_CENTS
+              value: {{ .Values.land.budgetCents | quote }}
+            - name: NAGUS_LAND_MIN_ACREAGE
+              value: {{ .Values.land.minAcreageAcres | quote }}
+            - name: NAGUS_LAND_MAX_ACREAGE
+              value: {{ .Values.land.maxAcreageAcres | quote }}
+            - name: NAGUS_CL_CITY
+              value: {{ .Values.land.craigslistCity | quote }}
+            - name: NAGUS_CL_CATEGORY
+              value: {{ .Values.land.craigslistCategory | quote }}
+            {{- if .Values.land.rentcastSecret }}
+            - name: NAGUS_RENTCAST_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.land.rentcastSecret }}
+                  key: NAGUS_RENTCAST_KEY
+            {{- end }}
+            {{- end }}
           {{- $secret := include "nagus.ebaySecretName" . }}
           {{- if and $secret (not .Values.demo.enabled) }}
           envFrom:
