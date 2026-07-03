@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"text/tabwriter"
@@ -70,34 +71,41 @@ func usage() {
 
 usage:
   nagus version
-  nagus ingest -category hdd -db nagus.db (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query "internal hard drive"] [-limit 50]
-  nagus search -category hdd -db nagus.db [-text STR] [-min-capacity 6] [-limit 20] [-offline] [-json]
-  nagus serve  -category hdd -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-min-capacity 6] [-offline] [-ebay-fixture FILE]
+  nagus ingest -category hdd  ... (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query ...] [-limit 50]
+  nagus ingest -category land ... (-craigslist-fixture FILE | -craigslist-city sfbay) [-craigslist-category reo]
+  nagus search -category hdd|land -db nagus.db [-text STR] [-limit 20] [-min-capacity 6] [-offline] [-json]
+  nagus serve  -category hdd|land -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-offline]
 
-ingest collects listings and stores normalized items; search surfaces ranked
-$/TB deals from the store (read-only). Use -offline on search to score against a
-built-in reference instead of the live feed (for the fixture-driven proof).
+Categories: hdd ($/TB deal-watch, eBay) and land (structure-first, Craigslist +
+free gov geo enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
+NAGUS_RENTCAST_KEY env). ingest collects + stores; search/serve surface ranked
+candidates read-only (eyes, not hands).
 `)
 }
 
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	cat := fs.String("category", "hdd", "category bundle to ingest (v1: hdd)")
+	cat := fs.String("category", "hdd", "category bundle to ingest (hdd|land)")
 	sflags := registerStoreFlags(fs)
-	fixture := fs.String("ebay-fixture", "", "path to an eBay Browse JSON fixture (offline ingest; skips the network)")
-	clientID := fs.String("client-id", "", "eBay OAuth client id (live ingest; prefer env/Vault injection)")
-	clientSecret := fs.String("client-secret", "", "eBay OAuth client secret (live ingest)")
-	query := fs.String("query", "internal hard drive", "eBay search query (live ingest)")
-	marketplace := fs.String("marketplace", "EBAY_US", "eBay marketplace id (live ingest)")
-	limit := fs.Int("limit", 50, "max listings to fetch (live ingest)")
+	fixture := fs.String("ebay-fixture", "", "eBay Browse JSON fixture (offline hdd ingest)")
+	clientID := fs.String("client-id", "", "eBay OAuth client id (live hdd ingest)")
+	clientSecret := fs.String("client-secret", "", "eBay OAuth client secret (live hdd ingest)")
+	query := fs.String("query", "internal hard drive", "eBay search query (live hdd ingest)")
+	limit := fs.Int("limit", 50, "eBay max listings (live hdd ingest)")
+	clFixture := fs.String("craigslist-fixture", "", "Craigslist RSS fixture (offline land ingest)")
+	clCity := fs.String("craigslist-city", "", "Craigslist city subdomain, e.g. sfbay (live land ingest)")
+	clCategory := fs.String("craigslist-category", "reo", "Craigslist category (reo/sss/cta)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *cat != "hdd" {
-		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
+	if !supportedCategory(*cat) {
+		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
 
-	conn, err := buildEbayConnector(*fixture, *clientID, *clientSecret, *query, *marketplace, *limit)
+	conn, err := buildSourceConnector(*cat, sourceParams{
+		ebayFixture: *fixture, ebayClientID: *clientID, ebaySecret: *clientSecret, ebayQuery: *query, ebayLimit: *limit,
+		clFixture: *clFixture, clCity: *clCity, clCategory: *clCategory,
+	})
 	if err != nil {
 		return err
 	}
@@ -108,7 +116,10 @@ func runIngest(args []string) error {
 	}
 	defer closeSt()
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "  "+format+"\n", a...) }
-	p := category.NewHDDPipeline(conn, category.HDDDeps{Store: st, Logf: logf})
+	p, err := buildPipeline(*cat, conn, st, categoryOptsFromEnv(false, http.DefaultClient, logf))
+	if err != nil {
+		return err
+	}
 
 	res, err := p.Ingest(context.Background())
 	if err != nil {
@@ -149,18 +160,18 @@ var demoReference = category.StaticReference{CentsPerTB: map[string]int64{
 
 func runSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
-	cat := fs.String("category", "hdd", "category to search (v1: hdd)")
+	cat := fs.String("category", "hdd", "category to search (hdd|land)")
 	sflags := registerStoreFlags(fs)
 	text := fs.String("text", "", "case-insensitive text match over title/tokens")
-	minCap := fs.Float64("min-capacity", category.DefaultMinCapacityTB, "hard-filter capacity floor in TB")
+	minCap := fs.Float64("min-capacity", category.DefaultMinCapacityTB, "hdd hard-filter capacity floor in TB")
 	limit := fs.Int("limit", 20, "max items to surface")
-	offline := fs.Bool("offline", false, "score against the built-in demo reference instead of the live feed")
+	offline := fs.Bool("offline", false, "hdd: score against the built-in demo reference instead of the live feed")
 	asJSON := fs.Bool("json", false, "emit results as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *cat != "hdd" {
-		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
+	if !supportedCategory(*cat) {
+		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
 
 	st, closeSt, err := sflags.open(context.Background())
@@ -168,13 +179,14 @@ func runSearch(args []string) error {
 		return err
 	}
 	defer closeSt()
-	deps := category.HDDDeps{Store: st, MinCapacityTB: *minCap}
-	if *offline {
-		deps.Reference = demoReference
+	opts := categoryOptsFromEnv(*offline, http.DefaultClient, nil)
+	opts.hddMinCapacity = *minCap
+	p, err := buildPipeline(*cat, nil, st, opts)
+	if err != nil {
+		return err
 	}
-	p := category.NewHDDPipeline(nil, deps)
 
-	q := store.Query{Category: "hdd", Text: *text, Limit: *limit}
+	q := store.Query{Category: *cat, Text: *text, Limit: *limit}
 	res, err := p.Surface(context.Background(), q)
 	if err != nil {
 		return err
@@ -182,12 +194,12 @@ func runSearch(args []string) error {
 	if *asJSON {
 		return emitJSON(res)
 	}
-	emitTable(res)
+	emitTable(*cat, res)
 	return nil
 }
 
-func emitTable(res pipeline.SurfaceResult) {
-	fmt.Printf("search[hdd]: matched=%d survived-filter=%d\n", res.Matched, res.Filtered)
+func emitTable(cat string, res pipeline.SurfaceResult) {
+	fmt.Printf("search[%s]: matched=%d survived-filter=%d\n", cat, res.Matched, res.Filtered)
 	if len(res.Items) == 0 {
 		return
 	}

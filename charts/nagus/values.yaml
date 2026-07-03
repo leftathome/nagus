@@ -46,6 +46,19 @@ demo:
   enabled: false
   ingestInterval: "1h"
 
+# land-category tuning (only consumed when category: land). Scoring is
+# structure-first; these set the budget + acreage window. Craigslist is the
+# source; Rentcast (paid, optional) supplies the structure/assessed-value signals
+# -- without it, land surfaces as unassessed candidates. rentcastSecret names a
+# Secret exposing key NAGUS_RENTCAST_KEY.
+land:
+  budgetCents: 0
+  minAcreageAcres: 1
+  maxAcreageAcres: 0
+  craigslistCity: ""
+  craigslistCategory: reo
+  rentcastSecret: ""
+
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
 # strong matches -> ping; audience is routed by openclaw's household resolver).

@@ -174,8 +174,8 @@ func runServe(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *cat != "hdd" {
-		return fmt.Errorf("only -category hdd is wired in v1 (got %q)", *cat)
+	if !supportedCategory(*cat) {
+		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
 
 	var watches watch.Config
@@ -193,24 +193,25 @@ func runServe(args []string) error {
 	}
 	defer closeSt()
 
-	deps := category.HDDDeps{
-		Store:         st,
-		MinCapacityTB: *minCap,
-		Logf:          func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) },
-	}
-	if *offline {
-		deps.Reference = demoReference
-	}
+	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
+	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
+	opts.hddMinCapacity = *minCap
 
 	// A connector is only needed if scheduled ingest is enabled.
 	var conn listing.Connector
 	if *interval > 0 {
-		conn, err = buildEbayConnector(*fixture, *clientID, *clientSecret, *query, "EBAY_US", 50)
+		conn, err = buildSourceConnector(*cat, sourceParams{
+			ebayFixture: *fixture, ebayClientID: *clientID, ebaySecret: *clientSecret, ebayQuery: *query, ebayLimit: 50,
+			clFixture: envOr("NAGUS_CL_FIXTURE", ""), clCity: envOr("NAGUS_CL_CITY", ""), clCategory: envOr("NAGUS_CL_CATEGORY", "reo"),
+		})
 		if err != nil {
 			return fmt.Errorf("ingest enabled but no source: %w", err)
 		}
 	}
-	p := category.NewHDDPipeline(conn, deps)
+	p, err := buildPipeline(*cat, conn, st, opts)
+	if err != nil {
+		return err
+	}
 	srv := &server{pipe: p, store: st, category: *cat, watches: watches}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -288,6 +289,15 @@ func envFloat(key string, def float64) float64 {
 	if v, ok := os.LookupEnv(key); ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			return f
+		}
+	}
+	return def
+}
+
+func envInt64(key string, def int64) int64 {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
 		}
 	}
 	return def
