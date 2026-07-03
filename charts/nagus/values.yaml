@@ -1,7 +1,10 @@
 # Default values for the nagus chart. See charts/nagus/README-esque NOTES.txt.
 
 image:
-  repository: registry.orac.local/homelab/nagus
+  # Deployable image published to GHCR by the GitHub mirror (same convention as
+  # glovebox). The GitLab pipeline also builds to the in-cluster registry for
+  # dev/test; the HelmRelease consumes the GHCR image.
+  repository: ghcr.io/leftathome/nagus
   # tag defaults to .Chart.appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

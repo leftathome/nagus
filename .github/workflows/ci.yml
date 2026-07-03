@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/leftathome
+
 jobs:
   test:
     name: Test
@@ -50,3 +54,39 @@ jobs:
 
       - name: Build
         run: CGO_ENABLED=0 go build -o nagus ./cmd/nagus
+
+  helm:
+    name: Package and push Helm chart
+    runs-on: ubuntu-latest
+    needs: test
+    # Publish the chart on a main push (moving version) and on a v* tag (pinned).
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On a v* tag, stamp the chart version + appVersion from the tag so the
+      # published chart tracks the release; on a plain main push, fall back to
+      # Chart.yaml's version.
+      - name: Package Helm chart
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            V="${GITHUB_REF#refs/tags/v}"
+            echo "tagged release: packaging chart version ${V}"
+            helm package charts/nagus --version "${V}" --app-version "${V}"
+          else
+            helm package charts/nagus
+          fi
+
+      - name: Push Helm chart to GHCR
+        run: helm push nagus-*.tgz oci://${{ env.IMAGE_PREFIX }}/charts
