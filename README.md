@@ -58,6 +58,14 @@ go test ./... -count=1 -race
 Issue tracking is [beads](https://github.com/steveyegge/beads) (`bd ready`), not
 markdown TODOs.
 
+## Deploying & releasing
+
+nagus ships as the [`charts/nagus`](charts/nagus) Helm chart (sqlite or postgres
+backend). See [`docs/DEPLOY.md`](docs/DEPLOY.md) for install, gitops (Flux),
+storage backends, secrets, and how openclaw consumes the `/mcp` + `/watches`
+surface, and [`docs/RELEASE.md`](docs/RELEASE.md) for cutting a tagged release.
+Changes are recorded in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
