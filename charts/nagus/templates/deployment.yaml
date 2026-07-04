@@ -93,11 +93,12 @@ spec:
               value: {{ .Values.land.craigslistCity | quote }}
             - name: NAGUS_CL_CATEGORY
               value: {{ .Values.land.craigslistCategory | quote }}
-            {{- if .Values.land.rentcastSecret }}
+            {{- $rentcast := include "nagus.rentcastSecretName" . }}
+            {{- if $rentcast }}
             - name: NAGUS_RENTCAST_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.land.rentcastSecret }}
+                  name: {{ $rentcast }}
                   key: NAGUS_RENTCAST_KEY
             {{- end }}
             {{- end }}

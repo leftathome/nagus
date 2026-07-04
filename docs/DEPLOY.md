@@ -93,13 +93,19 @@ pgvector is not in the shared image; v1 postgres is FTS-only.
 
 ## Secrets
 
-Never commit credentials. All come from Vault via external-secrets:
+Never commit credentials. All come from Vault via external-secrets, split into
+two KV paths by tier: **`eso/nagus/infrastructure`** (platform/DB, also read by
+the gitops CNPG role in `databases-app`) and **`eso/nagus/sources`** (the app's
+outbound source-API creds -- one secret, one property per source).
 
-| secret | where | keys |
-|---|---|---|
-| eBay OAuth (hdd live ingest) | `ebay.existingSecret` or `externalSecret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` |
-| Postgres role | `<release>-db` (synced from Vault) | `username`, `password` |
-| Rentcast (land parcel) | `land.rentcastSecret` | `NAGUS_RENTCAST_KEY` |
+| k8s secret | Vault path -> property | keys exposed | consumed via |
+|---|---|---|---|
+| Postgres role (`<release>-db`) | `eso/nagus/infrastructure` -> `postgres_password` | `username`, `password` | `storage.postgres.externalSecret` (on by default) |
+| Rentcast (land) | `eso/nagus/sources` -> `rentcast_key` | `NAGUS_RENTCAST_KEY` | `land.rentcastExternalSecret` (or `land.rentcastSecret` override) |
+| eBay OAuth (hdd live ingest) | `eso/nagus/sources` -> `ebay_client_id`, `ebay_client_secret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` | `externalSecret` (or `ebay.existingSecret` override) |
+
+The demo path (`demo.enabled=true`) and the keyless Craigslist **land** source
+need no secrets at all.
 
 ## Categories
 
@@ -107,9 +113,10 @@ Never commit credentials. All come from Vault via external-secrets:
   `serve.ingestInterval`.
 - **land**: Craigslist source (`land.craigslistCity`, `land.craigslistCategory`)
   + structure-first scoring. Set `land.budgetCents` / `land.minAcreageAcres` /
-  `land.maxAcreageAcres`; provide `land.rentcastSecret` for structure signals
-  (without it, land surfaces as unassessed candidates). Craigslist needs
-  residential egress -- in-cluster egress qualifies.
+  `land.maxAcreageAcres`; enable `land.rentcastExternalSecret` (syncs the key
+  from `eso/nagus/sources`) or set `land.rentcastSecret` for structure signals
+  (without it, land surfaces as unassessed candidates). The Craigslist source is
+  keyless; it needs residential egress -- in-cluster egress qualifies.
 
 ## Watches (delivery)
 
