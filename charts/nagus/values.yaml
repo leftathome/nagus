@@ -48,16 +48,31 @@ demo:
 
 # land-category tuning (only consumed when category: land). Scoring is
 # structure-first; these set the budget + acreage window. Craigslist is the
-# source; Rentcast (paid, optional) supplies the structure/assessed-value signals
-# -- without it, land surfaces as unassessed candidates. rentcastSecret names a
-# Secret exposing key NAGUS_RENTCAST_KEY.
+# source (keyless RSS); Rentcast (paid, optional) supplies the structure/
+# assessed-value signals -- without it, land surfaces as unassessed candidates.
 land:
   budgetCents: 0
   minAcreageAcres: 1
   maxAcreageAcres: 0
   craigslistCity: ""
   craigslistCategory: reo
+  # rentcastSecret names a pre-made Secret exposing key NAGUS_RENTCAST_KEY. Leave
+  # empty to let rentcastExternalSecret (below) sync it from Vault instead; set it
+  # to override with a standalone Secret and skip the ExternalSecret.
   rentcastSecret: ""
+  # rentcastExternalSecret syncs the Rentcast key from the SHARED app-source Vault
+  # path (eso/nagus/sources, property rentcast_key) into a local Secret exposing
+  # NAGUS_RENTCAST_KEY. Same path the eBay creds live under (see externalSecret
+  # below) -- one "sources" secret, one per-property mapping.
+  rentcastExternalSecret:
+    enabled: false
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    refreshInterval: "1h"
+    remoteRef:
+      key: eso/nagus/sources
+      property: rentcast_key
 
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
@@ -116,7 +131,9 @@ storage:
         property: postgres_password
 
 # externalSecret renders an external-secrets.io ExternalSecret that syncs the
-# eBay credentials from Vault into a k8s Secret consumed by the Deployment.
+# eBay credentials from the shared app-source Vault path (eso/nagus/sources) into
+# a k8s Secret consumed by the Deployment. Same path Rentcast lives under (see
+# land.rentcastExternalSecret) -- properties are namespaced per source.
 externalSecret:
   enabled: false
   secretStoreRef:
@@ -129,12 +146,12 @@ externalSecret:
   data: []
   #  - secretKey: NAGUS_EBAY_CLIENT_ID
   #    remoteRef:
-  #      key: nagus/ebay
-  #      property: client_id
+  #      key: eso/nagus/sources
+  #      property: ebay_client_id
   #  - secretKey: NAGUS_EBAY_CLIENT_SECRET
   #    remoteRef:
-  #      key: nagus/ebay
-  #      property: client_secret
+  #      key: eso/nagus/sources
+  #      property: ebay_client_secret
 
 service:
   type: ClusterIP

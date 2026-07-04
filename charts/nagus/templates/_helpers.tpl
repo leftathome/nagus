@@ -57,6 +57,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
+{{/* The Secret name carrying the Rentcast key (override, synced-from-Vault, or none). */}}
+{{- define "nagus.rentcastSecretName" -}}
+{{- if .Values.land.rentcastSecret -}}
+{{- .Values.land.rentcastSecret -}}
+{{- else if .Values.land.rentcastExternalSecret.enabled -}}
+{{- printf "%s-rentcast" (include "nagus.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The local basic-auth Secret name carrying the postgres role credentials. */}}
 {{- define "nagus.dbSecretName" -}}
 {{- if .Values.storage.postgres.existingSecret -}}
