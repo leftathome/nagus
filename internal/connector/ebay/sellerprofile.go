@@ -22,13 +22,16 @@ type SellerProfile struct {
 
 // SellerProfileSource resolves the second-call seller signals for a username.
 //
-// The username is a lookup argument ONLY: implementations MUST treat it as
-// transient and MUST NOT persist or log it. found=false means "no profile
-// available" (the caller simply omits the tiers). Sourcing a fresh snapshot each
-// call is required -- nagus never accumulates per-seller history across runs,
-// which would rebuild a keyed profile and void the opt-out.
+// token is a valid eBay OAuth access token the implementation may present as the
+// API's auth (the eBay Shopping API GetUserProfile requires the token in the
+// X-EBAY-API-IAF-TOKEN header -- verified live against the sandbox 2026-07). The
+// username is a lookup argument ONLY: implementations MUST treat it as transient
+// and MUST NOT persist or log it. found=false means "no profile available" (the
+// caller simply omits the tiers). Sourcing a fresh snapshot each call is required
+// -- nagus never accumulates per-seller history across runs, which would rebuild
+// a keyed profile and void the opt-out.
 type SellerProfileSource interface {
-	Profile(ctx context.Context, username string) (p SellerProfile, found bool, err error)
+	Profile(ctx context.Context, username, token string) (p SellerProfile, found bool, err error)
 }
 
 // sellerProfileResult is one resolved (or resolved-absent) profile, cached per
@@ -44,7 +47,7 @@ type sellerProfileResult struct {
 // spent budget or a transient error simply skips enrichment -- the listing still
 // stands. Raw values are emitted as aspects for the extractor to BUCKET; the
 // raw day/count never persist on the item.
-func (c *Connector) enrichSellerProfile(ctx context.Context, username string, aspects map[string]string, cache map[string]sellerProfileResult) {
+func (c *Connector) enrichSellerProfile(ctx context.Context, username, token string, aspects map[string]string, cache map[string]sellerProfileResult) {
 	res, seen := cache[username]
 	if !seen {
 		// Account for the profile call against the daily budget; on exhaustion,
@@ -52,7 +55,7 @@ func (c *Connector) enrichSellerProfile(ctx context.Context, username string, as
 		if err := c.budget.reserve(); err != nil {
 			return
 		}
-		prof, found, err := c.cfg.SellerProfile.Profile(ctx, username)
+		prof, found, err := c.cfg.SellerProfile.Profile(ctx, username, token)
 		res = sellerProfileResult{prof: prof, found: found && err == nil}
 		// Cache success or error-as-absent to avoid re-calling for the same seller
 		// within this fetch.

@@ -49,3 +49,29 @@ func TestSandboxFetch_Live(t *testing.T) {
 	// is the signal, not a specific count.
 	t.Logf("sandbox Fetch OK: %d listings; budget=%+v", len(raws), c.BudgetStats())
 }
+
+// TestSandboxProfile_Live validates the ShoppingProfileSource auth path (the
+// GetUserProfile IAF-token header) against the real sandbox. Sandbox test sellers
+// have no profile data, so found is typically false -- the signal is that the
+// call authenticates cleanly (no error 1.33), which the appid-only auth did not.
+func TestSandboxProfile_Live(t *testing.T) {
+	id := os.Getenv("NAGUS_EBAY_SANDBOX_CLIENT_ID")
+	secret := os.Getenv("NAGUS_EBAY_SANDBOX_CLIENT_SECRET")
+	if id == "" || secret == "" {
+		t.Skip("set NAGUS_EBAY_SANDBOX_CLIENT_ID/SECRET to run the sandbox profile test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	c := NewConnector(Config{Sandbox: true, ClientID: id, ClientSecret: secret, Query: "hard drive", Limit: 5})
+	tok, err := c.token(ctx)
+	if err != nil {
+		t.Fatalf("sandbox token: %v", err)
+	}
+	src := NewShoppingProfileSource(id, true, nil)
+	_, found, err := src.Profile(ctx, "esandbox10539", tok)
+	if err != nil {
+		t.Fatalf("sandbox GetUserProfile auth path: %v", err)
+	}
+	t.Logf("sandbox GetUserProfile authenticated OK (found=%v)", found)
+}

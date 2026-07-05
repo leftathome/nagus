@@ -199,6 +199,7 @@ func (c *Connector) SourceID() string {
 // path documented at package level.
 func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	var resp browseSearchResponse
+	var browseToken string // reused as the profile-lookup auth (IAF token)
 	if c.cfg.FixturePath != "" {
 		data, err := os.ReadFile(c.cfg.FixturePath)
 		if err != nil {
@@ -212,6 +213,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ebay: get token: %w", err)
 		}
+		browseToken = token
 		resp, err = c.search(ctx, token)
 		if err != nil {
 			return nil, fmt.Errorf("ebay: search: %w", err)
@@ -234,7 +236,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			continue
 		}
 		if enrich && is.Seller != nil && is.Seller.Username != "" {
-			c.enrichSellerProfile(ctx, is.Seller.Username, r.Aspects, profileCache)
+			c.enrichSellerProfile(ctx, is.Seller.Username, browseToken, r.Aspects, profileCache)
 		}
 		raws = append(raws, r)
 	}
