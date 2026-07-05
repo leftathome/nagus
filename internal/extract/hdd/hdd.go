@@ -87,6 +87,15 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	if v, ok := shipsFromUS(s.Aspects["item_location_country"]); ok {
 		it.Attributes["ships_from_us"] = v
 	}
+	// Second-call seller signals (account age, recent sales), surfaced by the
+	// connector from a per-seller profile lookup keyed by a TRANSIENT username.
+	// Only the coarse tier persists; the raw day/count and the username do not.
+	if tier, ok := sellerAccountAgeTier(s.Aspects["seller_account_age_days"]); ok {
+		it.Attributes["seller_account_age_tier"] = tier
+	}
+	if tier, ok := sellerRecentSalesTier(s.Aspects["seller_recent_sales"]); ok {
+		it.Attributes["seller_recent_sales_tier"] = tier
+	}
 
 	if err := it.Validate(); err != nil {
 		return item.Item{}, fmt.Errorf("hdd: extract: %w", err)
@@ -176,6 +185,43 @@ func sellerVolumeTier(score string) (string, bool) {
 		return "mid", true
 	default:
 		return "new", true
+	}
+}
+
+// sellerAccountAgeTier maps a seller's account age in days to a coarse bucket:
+// established >= 365 (>=1yr), seasoned >= 90 (>=3mo), new otherwise. ok=false
+// when absent or unparseable. Only the bucket is stored, never the raw day count.
+func sellerAccountAgeTier(days string) (string, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(days))
+	if err != nil {
+		return "", false
+	}
+	switch {
+	case n >= 365:
+		return "established", true
+	case n >= 90:
+		return "seasoned", true
+	default:
+		return "new", true
+	}
+}
+
+// sellerRecentSalesTier maps a seller's recent-sales proxy (recent feedback
+// count) to a coarse bucket: active >= 100, moderate >= 10, quiet otherwise.
+// ok=false when absent or unparseable. Only the bucket is stored, never the raw
+// count. This is a point-in-time snapshot; nagus never accumulates it over runs.
+func sellerRecentSalesTier(count string) (string, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(count))
+	if err != nil {
+		return "", false
+	}
+	switch {
+	case n >= 100:
+		return "active", true
+	case n >= 10:
+		return "moderate", true
+	default:
+		return "quiet", true
 	}
 }
 

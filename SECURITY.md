@@ -26,11 +26,17 @@ nagus stores **no eBay user personal data**, which is why it qualifies for the
 opt-out from eBay's Marketplace Account Deletion/Closure notification rather than
 implementing the deletion endpoint. The guarantees behind that attestation:
 
-- **No seller identifier is ingested or stored.** The eBay connector does not
-  decode or emit the seller username; nothing keyed to a seller (username, id, or
-  any hash/HMAC of one) is ever persisted. A hash of an enumerable username is
-  pseudonymous, not anonymous, and a per-seller keyed record would itself be the
-  profile the policy protects -- so we don't create one.
+- **No seller identifier is stored.** Nothing keyed to a seller (username, id, or
+  any hash/HMAC of one) is ever persisted or logged. A hash of an enumerable
+  username is pseudonymous, not anonymous, and a per-seller keyed record would
+  itself be the profile the policy protects -- so we don't create one. The
+  username is decoded only as a **transient argument** to the optional per-seller
+  profile lookup (account-age / recent-sales tiers), held at most in an ephemeral
+  per-fetch cache that is discarded when the fetch returns, and never written to
+  an aspect, item, or log.
+- **Snapshot-only.** The profile lookup takes a fresh point-in-time reading each
+  fetch; nagus never accumulates per-seller history across runs (that would
+  rebuild a keyed profile). The feature is OFF by default.
 - **Only coarse, non-identifying buckets are stored, on the item.** Seller-quality
   signals are derived from eBay's PUBLIC data into tiers written to the *listing's*
   `item.Attributes` (`seller_feedback_tier`, `seller_volume_tier`, `ships_from_us`),
