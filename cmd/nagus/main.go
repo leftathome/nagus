@@ -140,7 +140,8 @@ func buildEbayConnector(fixture, clientID, clientSecret, query, marketplace stri
 	if clientID == "" || clientSecret == "" {
 		return nil, fmt.Errorf("live ingest needs -client-id and -client-secret (or use -ebay-fixture for offline)")
 	}
-	return ebay.NewConnector(ebay.Config{
+	sandbox := envBool("NAGUS_EBAY_SANDBOX")
+	cfg := ebay.Config{
 		ClientID:      clientID,
 		ClientSecret:  clientSecret,
 		MarketplaceID: marketplace,
@@ -150,8 +151,15 @@ func buildEbayConnector(fixture, clientID, clientSecret, query, marketplace stri
 		DailyBudget: int(envInt64("NAGUS_EBAY_DAILY_BUDGET", 0)),
 		// NAGUS_EBAY_SANDBOX routes to the eBay Sandbox (License 8.4 test env) with
 		// sandbox Application Keys, so validation runs don't spend the prod budget.
-		Sandbox: envBool("NAGUS_EBAY_SANDBOX"),
-	}), nil
+		Sandbox: sandbox,
+	}
+	// NAGUS_EBAY_SELLER_PROFILE opts into the per-seller second-call enrichment
+	// (account-age + recent-sales tiers). OFF by default: each distinct seller
+	// costs one budgeted call. The username is passed transiently and never stored.
+	if envBool("NAGUS_EBAY_SELLER_PROFILE") {
+		cfg.SellerProfile = ebay.NewShoppingProfileSource(clientID, sandbox, nil)
+	}
+	return ebay.NewConnector(cfg), nil
 }
 
 // demoReference is the built-in offline reference (cents/TB by condition) used

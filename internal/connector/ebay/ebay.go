@@ -130,6 +130,13 @@ type Config struct {
 	// are not explicitly set. Use with sandbox Application Keys to validate
 	// against the real eBay APIs without spending the production call budget.
 	Sandbox bool
+
+	// SellerProfile, when non-nil, enables a per-seller second-call enrichment
+	// (account age, recent-sales proxy) during network fetches. The seller
+	// username is passed to it transiently and is never persisted. Nil disables
+	// the feature (and its extra API calls); it is off by default because each
+	// distinct seller costs one budgeted call.
+	SellerProfile SellerProfileSource
 }
 
 // Connector implements listing.Connector over the eBay Browse API.
@@ -212,6 +219,12 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	}
 
 	now := c.cfg.Now()
+	// Second-call seller enrichment runs only on the network path (never in the
+	// offline fixture path) and only when a source is configured. The cache is
+	// per-fetch: it dedupes repeat sellers and is discarded when Fetch returns,
+	// so no per-seller state accumulates across runs (snapshot-only).
+	enrich := c.cfg.FixturePath == "" && c.cfg.SellerProfile != nil
+	profileCache := map[string]sellerProfileResult{}
 	raws := make([]listing.Raw, 0, len(resp.ItemSummaries))
 	for _, is := range resp.ItemSummaries {
 		r, ok := mapItemSummary(is, now)
@@ -219,6 +232,9 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			// No itemId: cannot form provenance (SourceKey), so this item
 			// cannot become a valid Raw. Skip rather than emit a broken record.
 			continue
+		}
+		if enrich && is.Seller != nil && is.Seller.Username != "" {
+			c.enrichSellerProfile(ctx, is.Seller.Username, r.Aspects, profileCache)
 		}
 		raws = append(raws, r)
 	}
@@ -316,10 +332,13 @@ type itemPrice struct {
 	Currency string `json:"currency"`
 }
 
-// itemSeller carries only eBay's PUBLIC seller-quality signals. It intentionally
-// does NOT decode the seller username: nagus never ingests eBay user PII, so we
-// don't even parse it off the wire (data minimization).
+// itemSeller carries eBay's PUBLIC seller-quality signals. FeedbackPercentage
+// and FeedbackScore are bucketed and persisted (coarse tiers). Username is
+// decoded ONLY to serve as a transient argument to the optional second-call
+// profile lookup (Config.SellerProfile); it is never emitted as an aspect and
+// never persisted -- nagus stores no eBay user PII (see SECURITY.md).
 type itemSeller struct {
+	Username           string `json:"username"`
 	FeedbackPercentage string `json:"feedbackPercentage"`
 	FeedbackScore      *int   `json:"feedbackScore"` // pointer: distinguish absent from a real 0 (new seller)
 }

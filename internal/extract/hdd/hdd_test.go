@@ -335,6 +335,81 @@ func TestShipsFromUS(t *testing.T) {
 	}
 }
 
+func TestSellerAccountAgeTier(t *testing.T) {
+	cases := []struct {
+		days    string
+		want    string
+		wantSet bool
+	}{
+		{"3650", "established", true},
+		{"365", "established", true}, // lower boundary (>= 1yr)
+		{"364", "seasoned", true},
+		{"90", "seasoned", true}, // lower boundary (>= 3mo)
+		{"89", "new", true},
+		{"0", "new", true},
+		{"", "", false},        // absent
+		{"garbage", "", false}, // unparseable
+	}
+	for _, tc := range cases {
+		t.Run(tc.days, func(t *testing.T) {
+			got, ok := sellerAccountAgeTier(tc.days)
+			if ok != tc.wantSet || got != tc.want {
+				t.Fatalf("sellerAccountAgeTier(%q) = (%q,%v), want (%q,%v)", tc.days, got, ok, tc.want, tc.wantSet)
+			}
+		})
+	}
+}
+
+func TestSellerRecentSalesTier(t *testing.T) {
+	cases := []struct {
+		count   string
+		want    string
+		wantSet bool
+	}{
+		{"500", "active", true},
+		{"100", "active", true}, // lower boundary
+		{"99", "moderate", true},
+		{"10", "moderate", true}, // lower boundary
+		{"9", "quiet", true},
+		{"0", "quiet", true},
+		{"", "", false},
+		{"x", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.count, func(t *testing.T) {
+			got, ok := sellerRecentSalesTier(tc.count)
+			if ok != tc.wantSet || got != tc.want {
+				t.Fatalf("sellerRecentSalesTier(%q) = (%q,%v), want (%q,%v)", tc.count, got, ok, tc.want, tc.wantSet)
+			}
+		})
+	}
+}
+
+func TestExtract_SellerProfileAttributes(t *testing.T) {
+	e := New()
+	s := baseSanitized()
+	s.Aspects = map[string]string{
+		"seller_account_age_days": "800",
+		"seller_recent_sales":     "42",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got := it.Attributes["seller_account_age_tier"]; got != "established" {
+		t.Fatalf("seller_account_age_tier = %q, want established", got)
+	}
+	if got := it.Attributes["seller_recent_sales_tier"]; got != "moderate" {
+		t.Fatalf("seller_recent_sales_tier = %q, want moderate", got)
+	}
+	// Raw profile values must never persist -- only the coarse tiers.
+	for k, v := range it.Attributes {
+		if v == "800" || v == "42" {
+			t.Fatalf("raw profile value stored in Attributes[%q] = %q (must be a tier)", k, v)
+		}
+	}
+}
+
 func TestExtract_SellerAttributes(t *testing.T) {
 	e := New()
 	s := baseSanitized()

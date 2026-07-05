@@ -140,8 +140,20 @@ NAGUS_EBAY_SANDBOX_CLIENT_ID=... NAGUS_EBAY_SANDBOX_CLIENT_SECRET=... \
   go test -tags ebayintegration ./internal/connector/ebay/
 ```
 
-Sandbox Application Keys live in Vault at `eso/nagus/testing`. Never publish PII
+Sandbox Application Keys live in Vault at `eso/nagus/testing`, under the **same
+keys** as production `sources` (`ebay_client_id`, `ebay_client_secret`) -- export
+them to `NAGUS_EBAY_SANDBOX_CLIENT_ID` / `_SECRET` for the test. Never publish PII
 or restricted data to the sandbox.
+
+### Seller profile enrichment (optional, off by default)
+
+`NAGUS_EBAY_SELLER_PROFILE=true` enables a per-seller second API call (eBay
+Shopping `GetUserProfile`) that adds `seller_account_age_tier` and
+`seller_recent_sales_tier` to items. It is **off by default** because each
+distinct seller costs one budgeted call. The seller username is used only as a
+transient lookup argument (never stored); results are cached per fetch and taken
+as a fresh snapshot each run. **Validate the `GetUserProfile` field mapping
+against the sandbox / live keyset (nagus-hm0) before enabling in production.**
 
 ## Categories
 
