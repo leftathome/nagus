@@ -263,6 +263,40 @@ func TestSearchTextEscapesLikeMetacharacters(t *testing.T) {
 
 // TestAttributesAndTokensRoundTrip proves the JSONB-backed columns survive a
 // Put/Get round trip intact, including multiple attributes and tokens.
+func TestDeleteStaleRemovesOldItemsOfOneSource(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	ebayOld := mkItem("eo", "hdd", 10000, time.Unix(100, 0), "old ebay drive")
+	ebayOld.SourceID = "ebay"
+	ebayFresh := mkItem("ef", "hdd", 10000, time.Unix(1000, 0), "fresh ebay drive")
+	ebayFresh.SourceID = "ebay"
+	clOld := mkItem("co", "land", 50000, time.Unix(100, 0), "old craigslist parcel")
+	clOld.SourceID = "craigslist"
+	for _, it := range []item.Item{ebayOld, ebayFresh, clOld} {
+		if err := s.Put(ctx, it); err != nil {
+			t.Fatalf("put %s: %v", it.ID, err)
+		}
+	}
+
+	n, err := s.DeleteStale(ctx, "ebay", time.Unix(500, 0))
+	if err != nil {
+		t.Fatalf("DeleteStale: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("DeleteStale deleted %d, want 1", n)
+	}
+	if _, ok, _ := s.Get(ctx, "eo"); ok {
+		t.Fatalf("stale ebay item eo should be deleted")
+	}
+	if _, ok, _ := s.Get(ctx, "ef"); !ok {
+		t.Fatalf("fresh ebay item ef must survive")
+	}
+	if _, ok, _ := s.Get(ctx, "co"); !ok {
+		t.Fatalf("craigslist item co must be untouched by an ebay purge")
+	}
+}
+
 func TestAttributesAndTokensRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

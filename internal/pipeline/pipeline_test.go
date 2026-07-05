@@ -101,6 +101,54 @@ func TestIngestConnectorErrorAborts(t *testing.T) {
 	}
 }
 
+func TestIngestPurgesStaleSourceItems(t *testing.T) {
+	freshRaw := listing.Raw{
+		SourceID: "fake", SourceKey: "fresh", Title: "Seagate 16TB",
+		PriceCents: 12000, Currency: "USD", ConditionRaw: "refurb",
+		Aspects: map[string]string{"capacity_tb": "16"}, SeenAt: time.Unix(100000, 0),
+	}
+	p, st := newPipeline(t, []listing.Raw{freshRaw})
+	p.StaleAfter = 1000 * time.Second
+	p.Now = func() time.Time { return time.Unix(100000, 0) }
+
+	ctx := context.Background()
+	// Pre-seed a stale item from the SAME source and a stale item from ANOTHER
+	// source. Only the same-source stale one is eBay-style content past its window.
+	staleSame := item.Item{
+		ID: "stale", Category: "hdd", Class: item.ClassDurable, Title: "old drive",
+		PriceCents: 5000, Currency: "USD", SourceID: "fake", SourceKey: "stale",
+		SeenAt: time.Unix(1000, 0),
+	}
+	staleOther := item.Item{
+		ID: "other", Category: "hdd", Class: item.ClassDurable, Title: "old thing",
+		PriceCents: 5000, Currency: "USD", SourceID: "craigslist", SourceKey: "other",
+		SeenAt: time.Unix(1000, 0),
+	}
+	if err := st.Put(ctx, staleSame); err != nil {
+		t.Fatalf("seed staleSame: %v", err)
+	}
+	if err := st.Put(ctx, staleOther); err != nil {
+		t.Fatalf("seed staleOther: %v", err)
+	}
+
+	res, err := p.Ingest(ctx)
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Purged != 1 {
+		t.Fatalf("Purged=%d, want 1 (the same-source stale item)", res.Purged)
+	}
+	if _, ok, _ := st.Get(ctx, "stale"); ok {
+		t.Fatal("stale same-source item should be purged")
+	}
+	if _, ok, _ := st.Get(ctx, "fresh"); !ok {
+		t.Fatal("freshly-ingested item must survive")
+	}
+	if _, ok, _ := st.Get(ctx, "other"); !ok {
+		t.Fatal("other-source stale item must be untouched by a scoped purge")
+	}
+}
+
 func TestSurfaceFilterBeforeEnrichAndRank(t *testing.T) {
 	raws := []listing.Raw{
 		raw("big", "Seagate Exos 16TB", 12000, "16"), // passes filter (cap>=8)

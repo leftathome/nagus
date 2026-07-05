@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -141,6 +142,22 @@ func (s *Store) Put(ctx context.Context, it item.Item) error {
 		return fmt.Errorf("postgresstore: put: %w", err)
 	}
 	return nil
+}
+
+// DeleteStale removes every item from the given source whose SeenAt is strictly
+// before olderThan, returning the count deleted. The generated search_tsv column
+// is maintained automatically, so no separate index sync is needed. Scoped by
+// source so a retention window (e.g. eBay's 6h content-age obligation) applies
+// to one source without touching others.
+func (s *Store) DeleteStale(ctx context.Context, sourceID string, olderThan time.Time) (int, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM items WHERE source_id = $1 AND seen_at < $2`,
+		sourceID, olderThan.UTC(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("postgresstore: delete stale: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 const selectColumns = `

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/leftathome/nagus/internal/item"
 )
@@ -65,6 +66,23 @@ func (m *MemoryStore) Search(_ context.Context, q Query) ([]item.Item, error) {
 		out = out[:q.Limit]
 	}
 	return out, nil
+}
+
+// DeleteStale removes every item from the given source whose SeenAt is strictly
+// before olderThan, returning the count deleted. It is scoped by source so a
+// freshness/retention window applies to one source (e.g. eBay's 6h content-age
+// obligation) without touching others (e.g. keyless Craigslist).
+func (m *MemoryStore) DeleteStale(_ context.Context, sourceID string, olderThan time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, it := range m.items {
+		if it.SourceID == sourceID && it.SeenAt.Before(olderThan) {
+			delete(m.items, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func matches(it item.Item, q Query) bool {

@@ -174,6 +174,40 @@ func (s *Store) Put(ctx context.Context, it item.Item) error {
 	return nil
 }
 
+// DeleteStale removes every item from the given source whose SeenAt is strictly
+// before olderThan, keeping the FTS mirror in sync, and returns the count
+// deleted. Scoped by source so a retention window (e.g. eBay's 6h content-age
+// obligation) applies to one source without touching others.
+func (s *Store) DeleteStale(ctx context.Context, sourceID string, olderThan time.Time) (int, error) {
+	cutoff := olderThan.UTC().UnixNano()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("sqlitestore: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM items_fts WHERE id IN (
+			SELECT id FROM items WHERE source_id = ? AND seen_at_ns < ?
+		)`, sourceID, cutoff); err != nil {
+		return 0, fmt.Errorf("sqlitestore: delete stale fts: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM items WHERE source_id = ? AND seen_at_ns < ?`, sourceID, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("sqlitestore: delete stale: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("sqlitestore: delete stale rows affected: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("sqlitestore: commit: %w", err)
+	}
+	return int(n), nil
+}
+
 // Get returns the item by ID.
 func (s *Store) Get(ctx context.Context, id string) (item.Item, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
