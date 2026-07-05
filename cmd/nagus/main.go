@@ -148,6 +148,9 @@ func buildEbayConnector(fixture, clientID, clientSecret, query, marketplace stri
 		Limit:         limit,
 		// 0 -> ebay.DefaultDailyBudget (~5k/day prod cap, License 2.4).
 		DailyBudget: int(envInt64("NAGUS_EBAY_DAILY_BUDGET", 0)),
+		// NAGUS_EBAY_SANDBOX routes to the eBay Sandbox (License 8.4 test env) with
+		// sandbox Application Keys, so validation runs don't spend the prod budget.
+		Sandbox: envBool("NAGUS_EBAY_SANDBOX"),
 	}), nil
 }
 

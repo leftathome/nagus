@@ -127,6 +127,22 @@ items not re-seen within `EbayContentMaxAge` (6h): live listings are re-ingested
 refreshed before the window closes. The Craigslist **land** source is not eBay
 Content and is not purged.
 
+### Sandbox testing
+
+To validate against the real eBay APIs without spending the production budget,
+use the eBay **Sandbox** (License 8.4, a separate test environment):
+`NAGUS_EBAY_SANDBOX=true` routes the connector to `api.sandbox.ebay.com`. The
+opt-in integration test is build-tagged so the default `go test ./...` stays
+offline:
+
+```
+NAGUS_EBAY_SANDBOX_CLIENT_ID=... NAGUS_EBAY_SANDBOX_CLIENT_SECRET=... \
+  go test -tags ebayintegration ./internal/connector/ebay/
+```
+
+Sandbox Application Keys live in Vault at `eso/nagus/testing`. Never publish PII
+or restricted data to the sandbox.
+
 ## Categories
 
 - **hdd**: eBay source + `$/TB` valuation. Live ingest needs eBay credentials +
