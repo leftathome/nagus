@@ -75,8 +75,11 @@ func (s *ShoppingProfileSource) now() time.Time {
 }
 
 // Profile calls GetUserProfile for username and returns coarse inputs. The
-// username is used only to build the request and is never retained.
-func (s *ShoppingProfileSource) Profile(ctx context.Context, username string) (SellerProfile, bool, error) {
+// username is used only to build the request and is never retained. token is a
+// valid eBay OAuth access token, presented in the X-EBAY-API-IAF-TOKEN header --
+// GetUserProfile rejects appid-only auth with error 1.33 (verified live against
+// the sandbox 2026-07).
+func (s *ShoppingProfileSource) Profile(ctx context.Context, username, token string) (SellerProfile, bool, error) {
 	base := s.BaseURL
 	if base == "" {
 		base = DefaultShoppingBaseURL
@@ -88,7 +91,6 @@ func (s *ShoppingProfileSource) Profile(ctx context.Context, username string) (S
 	q := url.Values{}
 	q.Set("callname", "GetUserProfile")
 	q.Set("responseencoding", "JSON")
-	q.Set("appid", s.AppID)
 	q.Set("siteid", site)
 	q.Set("version", shoppingAPIVersion)
 	q.Set("UserID", username)
@@ -100,6 +102,8 @@ func (s *ShoppingProfileSource) Profile(ctx context.Context, username string) (S
 		return SellerProfile{}, false, fmt.Errorf("build profile request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-EBAY-API-IAF-TOKEN", token)
+	req.Header.Set("X-EBAY-API-APP-ID", s.AppID)
 
 	hc := s.HTTPClient
 	if hc == nil {

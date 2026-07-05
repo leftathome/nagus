@@ -17,6 +17,10 @@ func newShoppingServer(t *testing.T, status int, body string) *httptest.Server {
 		if got := r.URL.Query().Get("UserID"); got == "" {
 			t.Errorf("UserID query param missing")
 		}
+		// GetUserProfile authenticates by the OAuth token in this header, not appid.
+		if got := r.Header.Get("X-EBAY-API-IAF-TOKEN"); got == "" {
+			t.Errorf("X-EBAY-API-IAF-TOKEN header missing (required auth)")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -36,7 +40,7 @@ func TestShoppingProfileSource_ParsesAgeAndRecentSales(t *testing.T) {
 		AppID: "id", BaseURL: srv.URL, HTTPClient: srv.Client(),
 		Now: func() time.Time { return time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
-	p, found, err := src.Profile(context.Background(), "acme")
+	p, found, err := src.Profile(context.Background(), "acme", "tok-abc")
 	if err != nil {
 		t.Fatalf("Profile: %v", err)
 	}
@@ -54,7 +58,7 @@ func TestShoppingProfileSource_ParsesAgeAndRecentSales(t *testing.T) {
 func TestShoppingProfileSource_FailureAckNotFound(t *testing.T) {
 	srv := newShoppingServer(t, http.StatusOK, `{"Ack":"Failure","Errors":[{"ShortMessage":"nope"}]}`)
 	src := &ShoppingProfileSource{AppID: "id", BaseURL: srv.URL, HTTPClient: srv.Client()}
-	_, found, err := src.Profile(context.Background(), "ghost")
+	_, found, err := src.Profile(context.Background(), "ghost", "tok-abc")
 	if err != nil {
 		t.Fatalf("Profile: %v", err)
 	}
@@ -70,7 +74,7 @@ func TestShoppingProfileSource_PartialProfileOmitsMissingField(t *testing.T) {
 		AppID: "id", BaseURL: srv.URL, HTTPClient: srv.Client(),
 		Now: func() time.Time { return time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
-	p, found, err := src.Profile(context.Background(), "acme")
+	p, found, err := src.Profile(context.Background(), "acme", "tok-abc")
 	if err != nil {
 		t.Fatalf("Profile: %v", err)
 	}

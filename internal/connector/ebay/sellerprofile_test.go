@@ -12,16 +12,18 @@ import (
 // profile, so tests can assert the username is used transiently (passed here)
 // and never persisted, and that per-fetch caching dedupes calls.
 type fakeProfileSource struct {
-	mu    sync.Mutex
-	calls []string
-	prof  SellerProfile
-	found bool
+	mu        sync.Mutex
+	calls     []string
+	lastToken string
+	prof      SellerProfile
+	found     bool
 }
 
-func (f *fakeProfileSource) Profile(_ context.Context, username string) (SellerProfile, bool, error) {
+func (f *fakeProfileSource) Profile(_ context.Context, username, token string) (SellerProfile, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, username)
+	f.lastToken = token
 	return f.prof, f.found, nil
 }
 
@@ -81,6 +83,10 @@ func TestFetch_EnrichesSellerProfile_UsernameTransient(t *testing.T) {
 	// The source WAS asked about the real username (transiently).
 	if src.callCount() == 0 || src.calls[0] != "acme" {
 		t.Fatalf("profile source calls = %v, want it queried for \"acme\"", src.calls)
+	}
+	// It also received the connector's Browse OAuth token to auth the lookup.
+	if src.lastToken != testAccessToken {
+		t.Fatalf("profile source got token %q, want the Browse token %q", src.lastToken, testAccessToken)
 	}
 }
 
