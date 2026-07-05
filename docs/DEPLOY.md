@@ -107,6 +107,16 @@ outbound source-API creds -- one secret, one property per source).
 The demo path (`demo.enabled=true`) and the keyless Craigslist **land** source
 need no secrets at all.
 
+## eBay API call budget
+
+eBay production access is capped at ~5,000 calls/day (License 2.4). The connector
+counts every OAuth + search call against a per-UTC-day budget
+(`NAGUS_EBAY_DAILY_BUDGET`, default 5000) and, when present, honors a
+rate-remaining response header. On exhaustion it backs off until the next UTC day
+(logged, not errored) and **never rotates keys or otherwise circumvents the cap**.
+`GET /metrics` exposes `nagus_ebay_api_calls_{budget,used,remaining}`
+(Prometheus text). Size `serve.ingestInterval` so daily ingests stay under budget.
+
 ## Categories
 
 - **hdd**: eBay source + `$/TB` valuation. Live ingest needs eBay credentials +
