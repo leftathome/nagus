@@ -73,6 +73,21 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["capacity_tb"] = tb
 	}
 
+	// Seller trust signals: coarse, non-identifying buckets derived from eBay's
+	// PUBLIC seller data (surfaced by the connector as aspects). Only the bucket
+	// is stored, never the raw percentage/count or the seller username -- so the
+	// persisted item carries no eBay user PII and nagus qualifies for the
+	// Marketplace Account Deletion opt-out. See SECURITY.md.
+	if tier, ok := sellerFeedbackTier(s.Aspects["seller_feedback_pct"]); ok {
+		it.Attributes["seller_feedback_tier"] = tier
+	}
+	if tier, ok := sellerVolumeTier(s.Aspects["seller_feedback_score"]); ok {
+		it.Attributes["seller_volume_tier"] = tier
+	}
+	if v, ok := shipsFromUS(s.Aspects["item_location_country"]); ok {
+		it.Attributes["ships_from_us"] = v
+	}
+
 	if err := it.Validate(); err != nil {
 		return item.Item{}, fmt.Errorf("hdd: extract: %w", err)
 	}
@@ -120,6 +135,64 @@ func extractCapacityTB(title string) (string, bool) {
 	// strconv's shortest ('f', -1) representation drops trailing zeros, e.g.
 	// 16.0 -> "16", 14.0 -> "14", 8000/1000=8.0 -> "8".
 	return strconv.FormatFloat(v, 'f', -1, 64), true
+}
+
+// sellerFeedbackTier maps eBay's public seller.feedbackPercentage (a 0-100
+// string, e.g. "99.4") to a COARSE trust bucket. It returns ok=false (and no
+// attribute is written) when the value is absent or unparseable. Only the
+// bucket is ever stored -- never the raw percentage -- so the persisted item
+// carries no seller-identifying granularity. Buckets: high >=99.0, good >=97.0,
+// mixed >=90.0, low <90.0.
+func sellerFeedbackTier(pct string) (string, bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(pct), 64)
+	if err != nil {
+		return "", false
+	}
+	switch {
+	case v >= 99.0:
+		return "high", true
+	case v >= 97.0:
+		return "good", true
+	case v >= 90.0:
+		return "mixed", true
+	default:
+		return "low", true
+	}
+}
+
+// sellerVolumeTier maps eBay's public seller.feedbackScore (a lifetime feedback
+// count, a proxy for sales volume) to a coarse bucket. ok=false when absent or
+// unparseable. Only the bucket is stored, never the raw count. Buckets:
+// established >=1000, mid >=100, new otherwise.
+func sellerVolumeTier(score string) (string, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(score))
+	if err != nil {
+		return "", false
+	}
+	switch {
+	case n >= 1000:
+		return "established", true
+	case n >= 100:
+		return "mid", true
+	default:
+		return "new", true
+	}
+}
+
+// shipsFromUS reports whether the listing's item-location country is the US, as
+// a boolean-string attribute. This is the LISTING's ship-from location (from
+// itemLocation.country), not the seller's registration country, and is coarse
+// by construction. ok=false when the country is absent, so absence stays
+// distinct from a known non-US origin.
+func shipsFromUS(country string) (string, bool) {
+	c := strings.TrimSpace(country)
+	if c == "" {
+		return "", false
+	}
+	if c == "US" {
+		return "true", true
+	}
+	return "false", true
 }
 
 // modelRes holds best-effort manufacturer model-number patterns, tried in

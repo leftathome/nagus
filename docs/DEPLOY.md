@@ -110,7 +110,9 @@ need no secrets at all.
 ## Categories
 
 - **hdd**: eBay source + `$/TB` valuation. Live ingest needs eBay credentials +
-  `serve.ingestInterval`.
+  `serve.ingestInterval`. nagus stores NO eBay user PII (no seller username or
+  per-seller key); only coarse, per-listing seller-trust tiers land on the item,
+  which is why we take the Marketplace Account Deletion opt-out. See SECURITY.md.
 - **land**: Craigslist source (`land.craigslistCity`, `land.craigslistCategory`)
   + structure-first scoring. Set `land.budgetCents` / `land.minAcreageAcres` /
   `land.maxAcreageAcres`; enable `land.rentcastExternalSecret` (syncs the key

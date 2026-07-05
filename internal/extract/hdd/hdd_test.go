@@ -252,6 +252,165 @@ func TestExtract_CanonicalIDBestEffort(t *testing.T) {
 	}
 }
 
+func TestSellerFeedbackTier(t *testing.T) {
+	cases := []struct {
+		pct     string
+		want    string
+		wantSet bool
+	}{
+		{"100.0", "high", true},
+		{"99.4", "high", true},
+		{"99.0", "high", true},   // lower boundary of high
+		{"98.99", "good", true},  // just under high
+		{"97.0", "good", true},   // lower boundary of good
+		{"96.99", "mixed", true}, // just under good
+		{"90.0", "mixed", true},  // lower boundary of mixed
+		{"89.9", "low", true},
+		{"0.0", "low", true},
+		{"", "", false},        // absent -> no attribute
+		{"garbage", "", false}, // unparseable -> no attribute
+	}
+	for _, tc := range cases {
+		t.Run(tc.pct, func(t *testing.T) {
+			got, ok := sellerFeedbackTier(tc.pct)
+			if ok != tc.wantSet {
+				t.Fatalf("sellerFeedbackTier(%q) ok = %v, want %v", tc.pct, ok, tc.wantSet)
+			}
+			if got != tc.want {
+				t.Fatalf("sellerFeedbackTier(%q) = %q, want %q", tc.pct, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSellerVolumeTier(t *testing.T) {
+	cases := []struct {
+		score   string
+		want    string
+		wantSet bool
+	}{
+		{"5000", "established", true},
+		{"1000", "established", true}, // lower boundary
+		{"999", "mid", true},
+		{"100", "mid", true}, // lower boundary
+		{"99", "new", true},
+		{"0", "new", true}, // brand-new seller, score present
+		{"", "", false},    // absent
+		{"abc", "", false}, // unparseable
+	}
+	for _, tc := range cases {
+		t.Run(tc.score, func(t *testing.T) {
+			got, ok := sellerVolumeTier(tc.score)
+			if ok != tc.wantSet {
+				t.Fatalf("sellerVolumeTier(%q) ok = %v, want %v", tc.score, ok, tc.wantSet)
+			}
+			if got != tc.want {
+				t.Fatalf("sellerVolumeTier(%q) = %q, want %q", tc.score, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShipsFromUS(t *testing.T) {
+	cases := []struct {
+		country string
+		want    string
+		wantSet bool
+	}{
+		{"US", "true", true},
+		{"CA", "false", true},
+		{"GB", "false", true},
+		{"", "", false}, // absent -> no attribute (not "false")
+	}
+	for _, tc := range cases {
+		t.Run(tc.country, func(t *testing.T) {
+			got, ok := shipsFromUS(tc.country)
+			if ok != tc.wantSet {
+				t.Fatalf("shipsFromUS(%q) ok = %v, want %v", tc.country, ok, tc.wantSet)
+			}
+			if got != tc.want {
+				t.Fatalf("shipsFromUS(%q) = %q, want %q", tc.country, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtract_SellerAttributes(t *testing.T) {
+	e := New()
+	s := baseSanitized()
+	s.Aspects = map[string]string{
+		"seller_feedback_pct":   "99.4",
+		"seller_feedback_score": "1500",
+		"item_location_country": "US",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	want := map[string]string{
+		"seller_feedback_tier": "high",
+		"seller_volume_tier":   "established",
+		"ships_from_us":        "true",
+	}
+	for k, v := range want {
+		if got := it.Attributes[k]; got != v {
+			t.Fatalf("Attributes[%q] = %q, want %q", k, got, v)
+		}
+	}
+
+	// Absent seller aspects -> the seller attributes are omitted entirely, not
+	// stored as "unknown"/"false" (absence is a distinct, non-identifying fact).
+	s2 := baseSanitized()
+	it2, err := e.Extract(context.Background(), s2)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	for _, k := range []string{"seller_feedback_tier", "seller_volume_tier", "ships_from_us"} {
+		if _, ok := it2.Attributes[k]; ok {
+			t.Fatalf("Attributes[%q] present = %q, want absent", k, it2.Attributes[k])
+		}
+	}
+}
+
+// TestExtract_NeverStoresSellerIdentity is the compliance guard behind the eBay
+// account-deletion OPT-OUT: even if a connector leaks a seller username (or a
+// raw feedback value) into Aspects, the extracted item -- the only thing that is
+// persisted -- must carry NO seller identifier and NO raw seller number, only
+// coarse buckets. If this test ever fails, the "we store no eBay user PII"
+// attestation is no longer truthful.
+func TestExtract_NeverStoresSellerIdentity(t *testing.T) {
+	e := New()
+	s := baseSanitized()
+	const username = "secretSeller99"
+	s.Aspects = map[string]string{
+		"seller_username":       username,
+		"seller_feedback_pct":   "99.4",
+		"seller_feedback_score": "1500",
+		"item_location_country": "US",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	// The username must not survive into any persisted field.
+	for k, v := range it.Attributes {
+		if v == username || k == "seller_username" {
+			t.Fatalf("username leaked into Attributes[%q] = %q", k, v)
+		}
+	}
+	for _, tok := range it.Tokens {
+		if tok == username {
+			t.Fatalf("username leaked into Tokens")
+		}
+	}
+	// Raw feedback numbers must be bucketed, never stored verbatim.
+	for k, v := range it.Attributes {
+		if v == "99.4" || v == "1500" {
+			t.Fatalf("raw seller value stored in Attributes[%q] = %q (must be a coarse tier)", k, v)
+		}
+	}
+}
+
 // baseSanitized returns a minimal, well-formed listing.Sanitized suitable as
 // a starting point for test cases that only need to vary one field.
 func baseSanitized() listing.Sanitized {
