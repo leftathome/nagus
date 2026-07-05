@@ -47,7 +47,10 @@ const (
 	// changed before -- re-verify against
 	// https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer
 	// before relying on this in production.
-	DefaultFEMANFHLURL = "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query"
+	// Verified live 2026-07: the old /gis/nfhl/ path now returns an IBM WebSEAL
+	// auth-gateway error; the public NFHL service is served under /arcgis/.
+	// Layer 28 ("Flood Hazard Zones", fields FLD_ZONE/ZONE_SUBTY) is unchanged.
+	DefaultFEMANFHLURL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
 
 	// DefaultUSGSElevationURL is the USGS 3DEP Elevation Point Query
 	// Service (EPQS) v1 JSON endpoint. Docs:
@@ -66,7 +69,10 @@ const (
 	// moved more than once historically -- re-verify against
 	// https://www.fws.gov/program/national-wetlands-inventory/data-download
 	// before relying on this in production.
-	DefaultNWIURL = "https://www.fws.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query"
+	// Verified live 2026-07: the www.fws.gov wetlandsmapservice host no longer
+	// serves this ArcGIS service; it now lives on fwspublicservices.wim.usgs.gov.
+	// The layer's attribute names are also table-qualified now (see fetchWetlands).
+	DefaultNWIURL = "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query"
 )
 
 // defaultTimeout bounds a single upstream call so one slow/hung gov service
@@ -450,7 +456,11 @@ ORDER BY c.comppct_r DESC`, point)
 // layer via the ArcGIS REST query (point-in-polygon identify) operation.
 // See DefaultNWIURL.
 func (e *Enricher) fetchWetlands(ctx context.Context, lat, lon float64) (*WetlandsInfo, error) {
-	reqURL := arcgisPointQueryURL(e.NWIURL, lat, lon, "WETLAND_TYPE,ATTRIBUTE")
+	// The NWI wetlands layer joins two tables, so its attribute names are
+	// table-qualified (verified live 2026-07): "Wetlands.WETLAND_TYPE", not the
+	// bare "WETLAND_TYPE". Both the outFields request and the attribute reads
+	// must use the qualified names or the query returns HTTP 400.
+	reqURL := arcgisPointQueryURL(e.NWIURL, lat, lon, "Wetlands.WETLAND_TYPE,Wetlands.ATTRIBUTE")
 	var parsed arcgisQueryResponse
 	if err := e.getJSON(ctx, reqURL, &parsed); err != nil {
 		return nil, fmt.Errorf("nwi: %w", err)
@@ -462,11 +472,11 @@ func (e *Enricher) fetchWetlands(ctx context.Context, lat, lon float64) (*Wetlan
 		return nil, nil // not mapped as wetland -- not a failure
 	}
 	attrs := parsed.Features[0].Attributes
-	wtype, _ := attrs["WETLAND_TYPE"].(string)
+	wtype, _ := attrs["Wetlands.WETLAND_TYPE"].(string)
 	if wtype == "" {
 		return nil, nil
 	}
-	code, _ := attrs["ATTRIBUTE"].(string)
+	code, _ := attrs["Wetlands.ATTRIBUTE"].(string)
 	return &WetlandsInfo{Type: wtype, Code: code}, nil
 }
 

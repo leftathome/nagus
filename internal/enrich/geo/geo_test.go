@@ -81,7 +81,8 @@ func allSourcesOKMux(t *testing.T, skip ...string) *http.ServeMux {
 				Features: []struct {
 					Attributes map[string]any `json:"attributes"`
 				}{
-					{Attributes: map[string]any{"WETLAND_TYPE": "Freshwater Forested/Shrub Wetland", "ATTRIBUTE": "PFO1A"}},
+					// Live NWI (2026-07) returns table-qualified attribute keys.
+					{Attributes: map[string]any{"Wetlands.WETLAND_TYPE": "Freshwater Forested/Shrub Wetland", "Wetlands.ATTRIBUTE": "PFO1A"}},
 				},
 			})
 		})
