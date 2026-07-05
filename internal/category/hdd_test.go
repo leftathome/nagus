@@ -3,6 +3,7 @@ package category
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/store"
@@ -12,6 +13,16 @@ import (
 // drives the real eBay fixture connector -> sanitize -> HDD extractor -> store
 // -> hard-filter -> $/TB valuation (against an offline StaticReference) -> score
 // -> rank, and asserts the ranked verdicts. This is the same path the CLI runs.
+func TestNewHDDPipelineSetsFreshnessWindow(t *testing.T) {
+	p := NewHDDPipeline(nil, HDDDeps{Store: store.NewMemoryStore()})
+	if p.StaleAfter != EbayContentMaxAge {
+		t.Fatalf("HDD pipeline StaleAfter = %v, want %v (eBay 8.1(b) 6h window)", p.StaleAfter, EbayContentMaxAge)
+	}
+	if EbayContentMaxAge > 6*time.Hour {
+		t.Fatalf("EbayContentMaxAge = %v, must be <= 6h per eBay License 8.1(b)", EbayContentMaxAge)
+	}
+}
+
 func TestHDDSliceEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemoryStore()

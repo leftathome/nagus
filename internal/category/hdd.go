@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	exthdd "github.com/leftathome/nagus/internal/extract/hdd"
 	"github.com/leftathome/nagus/internal/item"
@@ -58,6 +59,14 @@ func HDDFilter(minCapacityTB float64) score.Filter {
 	}
 }
 
+// EbayContentMaxAge is the freshness/retention window for eBay-sourced items.
+// eBay License 8.1(b) requires displayed item listings to be no more than 6h
+// older than the eBay Site and stored eBay Content to be deleted once no longer
+// public; the post-ingest purge drops hdd items not re-seen within this window.
+// Operators must set the ingest interval well below this so live listings are
+// refreshed before they are purged.
+const EbayContentMaxAge = 6 * time.Hour
+
 // NewHDDPipeline wires the HDD bundle over the generic spine. conn may be nil
 // for a surface-only pipeline (search): Ingest needs it, Surface does not.
 func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
@@ -92,7 +101,9 @@ func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
 		Store:     deps.Store,
 		Filter:    HDDFilter(deps.MinCapacityTB),
 		Valuate:   valuate,
-		Logf:      deps.Logf,
+		// eBay Content must not linger past its public life / 6h freshness bound.
+		StaleAfter: EbayContentMaxAge,
+		Logf:       deps.Logf,
 	}
 }
 

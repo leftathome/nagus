@@ -17,6 +17,7 @@ package pipeline
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
@@ -37,8 +38,25 @@ type Pipeline struct {
 	Filter  score.Filter
 	Valuate func(ctx context.Context, it item.Item) (score.DealSignal, error)
 
+	// StaleAfter, when > 0, enables a post-ingest freshness purge: items from
+	// this pipeline's source whose SeenAt is older than StaleAfter are deleted
+	// after each ingest. This satisfies eBay License 8.1(b) (delete content no
+	// longer public; keep displayed data < 6h stale) for the eBay source; set 0
+	// to disable (e.g. keyless Craigslist, which is not eBay Content).
+	StaleAfter time.Duration
+	// Now returns the current time for the freshness purge; nil defaults to
+	// time.Now. Injected in tests for a deterministic cutoff.
+	Now func() time.Time
+
 	// Logf is an optional structured-ish log sink; nil disables logging.
 	Logf func(format string, args ...any)
+}
+
+func (p *Pipeline) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
 }
 
 func (p *Pipeline) logf(format string, args ...any) {
@@ -59,6 +77,7 @@ type Skip struct {
 type IngestResult struct {
 	Fetched int
 	Stored  int
+	Purged  int // items removed by the post-ingest freshness purge (StaleAfter)
 	Skips   []Skip
 }
 
@@ -92,6 +111,23 @@ func (p *Pipeline) Ingest(ctx context.Context) (IngestResult, error) {
 			continue
 		}
 		res.Stored++
+	}
+
+	// Freshness purge: drop this source's content that is older than the window
+	// (eBay License 8.1(b): delete content no longer public / keep it < 6h fresh).
+	// Live listings are re-seen each ingest and their SeenAt refreshed by Put, so
+	// only genuinely stale/gone items fall past the cutoff.
+	if p.StaleAfter > 0 && p.Connector != nil {
+		cutoff := p.now().Add(-p.StaleAfter)
+		purged, derr := p.Store.DeleteStale(ctx, p.Connector.SourceID(), cutoff)
+		if derr != nil {
+			p.logf("ingest: purge stale %s failed: %v", p.Connector.SourceID(), derr)
+		} else {
+			res.Purged = purged
+			if purged > 0 {
+				p.logf("ingest: purged %d stale %s items older than %s", purged, p.Connector.SourceID(), p.StaleAfter)
+			}
+		}
 	}
 	return res, nil
 }

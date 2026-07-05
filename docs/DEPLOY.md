@@ -117,6 +117,16 @@ rate-remaining response header. On exhaustion it backs off until the next UTC da
 `GET /metrics` exposes `nagus_ebay_api_calls_{budget,used,remaining}`
 (Prometheus text). Size `serve.ingestInterval` so daily ingests stay under budget.
 
+## eBay content freshness (License 8.1(b))
+
+Stored eBay listings must be deleted once no longer public and displayed data
+must be < 6h older than eBay. After each ingest the hdd pipeline purges eBay
+items not re-seen within `EbayContentMaxAge` (6h): live listings are re-ingested
+(their `SeenAt` refreshed), stale/ended ones fall past the cutoff and are removed.
+**Set `serve.ingestInterval` well under 6h** (e.g. 30m-1h) so live listings are
+refreshed before the window closes. The Craigslist **land** source is not eBay
+Content and is not purged.
+
 ## Categories
 
 - **hdd**: eBay source + `$/TB` valuation. Live ingest needs eBay credentials +
