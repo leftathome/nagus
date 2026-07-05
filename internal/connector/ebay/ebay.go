@@ -62,6 +62,11 @@ const (
 	DefaultBaseURL = "https://api.ebay.com"
 	// DefaultOAuthURL is eBay's OAuth2 client-credentials token endpoint.
 	DefaultOAuthURL = "https://api.ebay.com/identity/v1/oauth2/token"
+	// DefaultSandboxBaseURL / DefaultSandboxOAuthURL are the eBay Sandbox hosts.
+	// The Sandbox is a separate test environment (License 8.4): exercising it does
+	// NOT consume the production daily call budget and is not circumvention.
+	DefaultSandboxBaseURL  = "https://api.sandbox.ebay.com"
+	DefaultSandboxOAuthURL = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
 	// DefaultMarketplaceID is used when Config.MarketplaceID is empty.
 	DefaultMarketplaceID = "EBAY_US"
 	// DefaultLimit is used when Config.Limit is <= 0.
@@ -120,6 +125,11 @@ type Config struct {
 	// making any network call -- the offline proving path required while
 	// live production access is gated (see package doc).
 	FixturePath string
+
+	// Sandbox routes calls to eBay's Sandbox environment when BaseURL/OAuthURL
+	// are not explicitly set. Use with sandbox Application Keys to validate
+	// against the real eBay APIs without spending the production call budget.
+	Sandbox bool
 }
 
 // Connector implements listing.Connector over the eBay Browse API.
@@ -145,11 +155,18 @@ func NewConnector(cfg Config) *Connector {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
+	// An explicit URL always wins; otherwise pick the production or sandbox host.
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
+		if cfg.Sandbox {
+			cfg.BaseURL = DefaultSandboxBaseURL
+		}
 	}
 	if cfg.OAuthURL == "" {
 		cfg.OAuthURL = DefaultOAuthURL
+		if cfg.Sandbox {
+			cfg.OAuthURL = DefaultSandboxOAuthURL
+		}
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

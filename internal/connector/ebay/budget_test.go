@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+func TestNewConnector_SandboxSelectsSandboxURLs(t *testing.T) {
+	c := NewConnector(Config{Sandbox: true, ClientID: "id", ClientSecret: "s"})
+	if c.cfg.BaseURL != DefaultSandboxBaseURL {
+		t.Fatalf("BaseURL = %q, want sandbox %q", c.cfg.BaseURL, DefaultSandboxBaseURL)
+	}
+	if c.cfg.OAuthURL != DefaultSandboxOAuthURL {
+		t.Fatalf("OAuthURL = %q, want sandbox %q", c.cfg.OAuthURL, DefaultSandboxOAuthURL)
+	}
+}
+
+func TestNewConnector_SandboxRespectsExplicitURLs(t *testing.T) {
+	// An explicit BaseURL/OAuthURL (e.g. an httptest server) must still win, so
+	// tests and any future wrapper can point the sandbox profile anywhere.
+	c := NewConnector(Config{Sandbox: true, BaseURL: "http://x", OAuthURL: "http://y"})
+	if c.cfg.BaseURL != "http://x" || c.cfg.OAuthURL != "http://y" {
+		t.Fatalf("explicit URLs must override sandbox defaults, got base=%q oauth=%q", c.cfg.BaseURL, c.cfg.OAuthURL)
+	}
+}
+
+func TestNewConnector_ProductionByDefault(t *testing.T) {
+	c := NewConnector(Config{ClientID: "id", ClientSecret: "s"})
+	if c.cfg.BaseURL != DefaultBaseURL {
+		t.Fatalf("default BaseURL = %q, want production %q", c.cfg.BaseURL, DefaultBaseURL)
+	}
+}
+
 func TestCallBudget_ReserveUntilExhausted(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC) }
 	b := newCallBudget(3, now)
