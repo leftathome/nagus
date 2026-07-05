@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/leftathome/nagus/internal/category"
+	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
@@ -45,7 +46,31 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("/item", s.handleItem)
 	mux.HandleFunc("/watches", s.handleWatches)
 	mux.HandleFunc("/mcp", s.handleMCP)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	return mux
+}
+
+// handleMetrics emits Prometheus-text metrics. Currently it reports the eBay API
+// call budget (License 2.4: we track usage against the ~5k/day production cap and
+// never circumvent it). When the source is not the eBay connector (e.g. land /
+// Craigslist), there is no budget to report and the body is empty.
+func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	ec, ok := s.pipe.Connector.(*ebay.Connector)
+	if !ok {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	st := ec.BudgetStats()
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_budget Configured daily eBay API call budget.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_budget gauge\n")
+	fmt.Fprintf(w, "nagus_ebay_api_calls_budget %d\n", st.Budget)
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_used eBay API calls made in the current UTC day.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_used counter\n")
+	fmt.Fprintf(w, "nagus_ebay_api_calls_used %d\n", st.Used)
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_remaining Estimated remaining eBay API calls today.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_remaining gauge\n")
+	fmt.Fprintf(w, "nagus_ebay_api_calls_remaining %d\n", st.Remaining)
 }
 
 // searchRow is the typed JSON shape returned by /search (search_items). It is
@@ -265,6 +290,12 @@ func runIngestLoop(ctx context.Context, p *pipeline.Pipeline, interval time.Dura
 func ingestOnce(ctx context.Context, p *pipeline.Pipeline) {
 	res, err := p.Ingest(ctx)
 	if err != nil {
+		if errors.Is(err, ebay.ErrBudgetExhausted) {
+			// Not a failure: the daily eBay API budget is spent. Back off and
+			// wait for the next window rather than alarming or circumventing.
+			fmt.Fprintf(os.Stderr, "nagus serve: eBay API budget exhausted; backing off until next window\n")
+			return
+		}
 		fmt.Fprintf(os.Stderr, "nagus serve: ingest error: %v\n", err)
 		return
 	}

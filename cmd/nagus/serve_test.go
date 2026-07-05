@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/leftathome/nagus/internal/category"
@@ -23,6 +24,25 @@ func newTestServer(t *testing.T) *server {
 		t.Fatalf("seed ingest: %v", err)
 	}
 	return &server{pipe: p, store: st, category: "hdd"}
+}
+
+func TestServeMetrics(t *testing.T) {
+	srv := newTestServer(t)
+	rec := do(t, srv, http.MethodGet, "/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /metrics = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	// Fixture-mode ingest makes no API calls, so the whole budget is unspent.
+	for _, want := range []string{
+		"nagus_ebay_api_calls_budget 5000",
+		"nagus_ebay_api_calls_used 0",
+		"nagus_ebay_api_calls_remaining 5000",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("/metrics body missing %q; got:\n%s", want, body)
+		}
+	}
 }
 
 func do(t *testing.T, srv *server, method, target string) *httptest.ResponseRecorder {

@@ -146,6 +146,8 @@ func buildEbayConnector(fixture, clientID, clientSecret, query, marketplace stri
 		MarketplaceID: marketplace,
 		Query:         query,
 		Limit:         limit,
+		// 0 -> ebay.DefaultDailyBudget (~5k/day prod cap, License 2.4).
+		DailyBudget: int(envInt64("NAGUS_EBAY_DAILY_BUDGET", 0)),
 	}), nil
 }
 

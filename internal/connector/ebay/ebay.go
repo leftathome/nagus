@@ -109,6 +109,12 @@ type Config struct {
 	// stamped onto every emitted Raw.SeenAt. Defaults to time.Now.
 	Now func() time.Time
 
+	// DailyBudget caps the number of eBay API calls (OAuth + search) this
+	// connector makes per UTC day. Defaults to DefaultDailyBudget. When the
+	// budget (or an eBay-reported remaining count) is spent, Fetch returns
+	// ErrBudgetExhausted and makes no further calls until the next window.
+	DailyBudget int
+
 	// FixturePath, when non-empty, makes Fetch read a local JSON file (the
 	// same item_summary/search response shape eBay returns) instead of
 	// making any network call -- the offline proving path required while
@@ -118,7 +124,8 @@ type Config struct {
 
 // Connector implements listing.Connector over the eBay Browse API.
 type Connector struct {
-	cfg Config
+	cfg    Config
+	budget *callBudget
 
 	mu          sync.Mutex
 	accessToken string
@@ -147,7 +154,13 @@ func NewConnector(cfg Config) *Connector {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Connector{cfg: cfg}
+	return &Connector{cfg: cfg, budget: newCallBudget(cfg.DailyBudget, cfg.Now)}
+}
+
+// BudgetStats returns a snapshot of this connector's eBay API-call budget usage,
+// for metrics.
+func (c *Connector) BudgetStats() BudgetStats {
+	return c.budget.stats()
 }
 
 // SourceID returns the stable connector identity stamped onto every Raw
@@ -229,11 +242,17 @@ func (c *Connector) token(ctx context.Context) (string, error) {
 	creds := base64.StdEncoding.EncodeToString([]byte(c.cfg.ClientID + ":" + c.cfg.ClientSecret))
 	req.Header.Set("Authorization", "Basic "+creds)
 
+	// Account for this call against the daily budget BEFORE making it; refuse
+	// (rather than circumvent) once the budget or eBay-reported remaining is spent.
+	if err := c.budget.reserve(); err != nil {
+		return "", err
+	}
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token request: %w", err)
 	}
 	defer resp.Body.Close()
+	c.budget.observeRateHeaders(resp.Header)
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -311,11 +330,15 @@ func (c *Connector) search(ctx context.Context, token string) (browseSearchRespo
 	req.Header.Set("X-EBAY-C-MARKETPLACE-ID", c.cfg.MarketplaceID)
 	req.Header.Set("Accept", "application/json")
 
+	if err := c.budget.reserve(); err != nil {
+		return browseSearchResponse{}, err
+	}
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
 		return browseSearchResponse{}, fmt.Errorf("search request: %w", err)
 	}
 	defer resp.Body.Close()
+	c.budget.observeRateHeaders(resp.Header)
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
