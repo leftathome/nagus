@@ -162,6 +162,49 @@ func TestFetch_OAuthAndSearch_HappyPath(t *testing.T) {
 	}
 }
 
+// TestFetch_SellerAspects_NoUsername asserts the connector surfaces eBay's
+// PUBLIC seller-quality fields (feedback percentage + score) and the item's
+// ship-from country as aspects for downstream bucketing -- and, critically for
+// the eBay account-deletion OPT-OUT, that it NEVER emits the seller username.
+// The username is PII; nagus stores no eBay user data (see SECURITY.md).
+func TestFetch_SellerAspects_NoUsername(t *testing.T) {
+	var tokenCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth-token", tokenOKHandler(t, &tokenCalls))
+	mux.HandleFunc("/buy/browse/v1/item_summary/search", searchOKHandler(t, testdataBytes(t), DefaultMarketplaceID))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewConnector(Config{
+		ClientID:     "id",
+		ClientSecret: "secret",
+		Query:        "internal hard drive",
+		BaseURL:      srv.URL,
+		OAuthURL:     srv.URL + "/oauth-token",
+		HTTPClient:   srv.Client(),
+		Now:          fixedNow,
+	})
+
+	raws, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	first := raws[0]
+
+	if got := first.Aspects["seller_feedback_pct"]; got != "99.5" {
+		t.Errorf(`Aspects["seller_feedback_pct"] = %q, want "99.5"`, got)
+	}
+	if got := first.Aspects["seller_feedback_score"]; got != "15234" {
+		t.Errorf(`Aspects["seller_feedback_score"] = %q, want "15234"`, got)
+	}
+	if got := first.Aspects["item_location_country"]; got != "US" {
+		t.Errorf(`Aspects["item_location_country"] = %q, want "US"`, got)
+	}
+	if _, ok := first.Aspects["seller_username"]; ok {
+		t.Errorf(`Aspects["seller_username"] present = %q; the connector must never emit the username (PII)`, first.Aspects["seller_username"])
+	}
+}
+
 func TestFetch_TokenIsCachedAcrossFetches(t *testing.T) {
 	var tokenCalls int32
 	mux := http.NewServeMux()

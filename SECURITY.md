@@ -19,3 +19,31 @@ Core invariants:
   seller contact; such actions are out of scope and human-gated elsewhere.
 - Third-party API credentials are provided at runtime from Vault and never
   committed to the repository.
+
+## eBay user data: no-PII posture (Marketplace Account Deletion opt-out)
+
+nagus stores **no eBay user personal data**, which is why it qualifies for the
+opt-out from eBay's Marketplace Account Deletion/Closure notification rather than
+implementing the deletion endpoint. The guarantees behind that attestation:
+
+- **No seller identifier is ingested or stored.** The eBay connector does not
+  decode or emit the seller username; nothing keyed to a seller (username, id, or
+  any hash/HMAC of one) is ever persisted. A hash of an enumerable username is
+  pseudonymous, not anonymous, and a per-seller keyed record would itself be the
+  profile the policy protects -- so we don't create one.
+- **Only coarse, non-identifying buckets are stored, on the item.** Seller-quality
+  signals are derived from eBay's PUBLIC data into tiers written to the *listing's*
+  `item.Attributes` (`seller_feedback_tier`, `seller_volume_tier`, `ships_from_us`),
+  never keyed to the seller. Raw values (exact feedback %, exact counts) are never
+  persisted -- a fine-grained tuple would be a quasi-identifier.
+- **Snapshot-only.** Every seller signal is derived from a single point-in-time API
+  read. nagus never accumulates per-seller observations across runs; doing so would
+  rebuild a keyed profile and void the opt-out.
+- When a seller deletes their eBay account, eBay removes the listing (the stored
+  `SourceURL` 404s) and the coarse tiers point at no live identity -- there is
+  nothing about a specific user to erase, by construction.
+
+Enforcement: `internal/extract/hdd` (bucketing) and `internal/connector/ebay`
+(no-username decode) carry tests, including `TestExtract_NeverStoresSellerIdentity`
+and `TestFetch_SellerAspects_NoUsername`, that fail if a username or raw seller
+value could reach a persisted field.

@@ -280,8 +280,12 @@ type itemPrice struct {
 	Currency string `json:"currency"`
 }
 
+// itemSeller carries only eBay's PUBLIC seller-quality signals. It intentionally
+// does NOT decode the seller username: nagus never ingests eBay user PII, so we
+// don't even parse it off the wire (data minimization).
 type itemSeller struct {
-	Username string `json:"username"`
+	FeedbackPercentage string `json:"feedbackPercentage"`
+	FeedbackScore      *int   `json:"feedbackScore"` // pointer: distinguish absent from a real 0 (new seller)
 }
 
 type itemLocation struct {
@@ -370,8 +374,18 @@ func mapItemSummary(is itemSummary, now time.Time) (listing.Raw, bool) {
 	if is.ConditionID != "" {
 		aspects["conditionId"] = is.ConditionID
 	}
-	if is.Seller != nil && is.Seller.Username != "" {
-		aspects["seller_username"] = is.Seller.Username
+	// Surface eBay's PUBLIC seller-quality fields for downstream bucketing. We
+	// deliberately do NOT surface the seller username: it is eBay user PII, and
+	// nagus stores none (Marketplace Account Deletion opt-out, see SECURITY.md).
+	// The extract stage maps these raw values to coarse, non-identifying tiers;
+	// the raw values themselves are never persisted.
+	if is.Seller != nil {
+		if is.Seller.FeedbackPercentage != "" {
+			aspects["seller_feedback_pct"] = is.Seller.FeedbackPercentage
+		}
+		if is.Seller.FeedbackScore != nil {
+			aspects["seller_feedback_score"] = strconv.Itoa(*is.Seller.FeedbackScore)
+		}
 	}
 	if is.ItemLocation != nil && is.ItemLocation.Country != "" {
 		aspects["item_location_country"] = is.ItemLocation.Country
