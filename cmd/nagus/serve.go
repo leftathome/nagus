@@ -275,12 +275,14 @@ func runServe(args []string) error {
 		surfaces[name] = sf
 	}
 	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
+	intervals := make([]time.Duration, 0, len(cfg.Sources))
 	for _, src := range cfg.Sources {
 		ing, ierr := buildIngester(src, st, opts)
 		if ierr != nil {
 			return ierr
 		}
 		ingesters = append(ingesters, ing)
+		intervals = append(intervals, time.Duration(src.IntervalMinutes)*time.Minute)
 	}
 	def := cfg.DefaultCategory
 	if def == "" && len(cfg.Categories) == 1 {
@@ -292,6 +294,11 @@ func runServe(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// One ingest goroutine per source, each on its own configured interval;
+	// per-source failure isolation (a bad source never blocks another's loop
+	// or the HTTP surface). Cancelled by the same ctx as the HTTP shutdown.
+	srv.startIngest(ctx, intervals)
 
 	httpServer := &http.Server{
 		Addr:              *listen,
@@ -376,11 +383,24 @@ func resolveRunConfig(configPath, cat string, o categoryOpts, legacy legacySourc
 	return rc, nil
 }
 
-// runIngestLoop runs Ingest immediately, then on every tick, until ctx is done.
-// An ingest error is logged and the loop continues (a transient source failure
-// must not take down the surface).
-func runIngestLoop(ctx context.Context, p *pipeline.Pipeline, interval time.Duration) {
-	ingestOnce(ctx, p)
+// startIngest launches one goroutine per source, each on its own interval.
+// intervals[i] pairs with s.ingesters[i]; a non-positive interval disables that
+// source's scheduled ingest. Per-source isolation: one source's error is logged
+// and its loop continues, never affecting another source.
+func (s *server) startIngest(ctx context.Context, intervals []time.Duration) {
+	for i, ing := range s.ingesters {
+		if i >= len(intervals) || intervals[i] <= 0 {
+			continue
+		}
+		go runSourceIngestLoop(ctx, ing, intervals[i])
+	}
+}
+
+// runSourceIngestLoop runs Ingest immediately, then on every tick, until ctx is
+// done. It operates on exactly one source's Ingester; an error there is logged
+// and the loop continues, never affecting any other source's loop.
+func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration) {
+	ingestOnceSource(ctx, ing)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -388,24 +408,27 @@ func runIngestLoop(ctx context.Context, p *pipeline.Pipeline, interval time.Dura
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			ingestOnce(ctx, p)
+			ingestOnceSource(ctx, ing)
 		}
 	}
 }
 
-func ingestOnce(ctx context.Context, p *pipeline.Pipeline) {
-	res, err := p.Ingest(ctx)
+// ingestOnceSource runs a single ingest pass for one source, logging the
+// outcome. It never panics or propagates an error -- a per-source failure
+// (including eBay API budget exhaustion) is reported and swallowed so it
+// cannot affect any other source's ingest loop.
+func ingestOnceSource(ctx context.Context, ing *pipeline.Ingester) {
+	res, err := ing.Ingest(ctx)
 	if err != nil {
 		if errors.Is(err, ebay.ErrBudgetExhausted) {
-			// Not a failure: the daily eBay API budget is spent. Back off and
-			// wait for the next window rather than alarming or circumventing.
-			fmt.Fprintf(os.Stderr, "nagus serve: eBay API budget exhausted; backing off until next window\n")
+			fmt.Fprintf(os.Stderr, "nagus serve: source %s eBay budget exhausted; backing off\n", ing.SourceID())
 			return
 		}
-		fmt.Fprintf(os.Stderr, "nagus serve: ingest error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "nagus serve: source %s ingest error: %v\n", ing.SourceID(), err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "nagus serve: ingest fetched=%d stored=%d skipped=%d\n", res.Fetched, res.Stored, len(res.Skips))
+	fmt.Fprintf(os.Stderr, "nagus serve: source %s fetched=%d stored=%d purged=%d skipped=%d\n",
+		ing.SourceID(), res.Fetched, res.Stored, res.Purged, len(res.Skips))
 }
 
 // --- env helpers (flag defaults seed from env; explicit flags override) ---
