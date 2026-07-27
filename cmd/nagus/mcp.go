@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
@@ -269,10 +270,11 @@ func (s *server) mcpSearchItems(ctx context.Context, args json.RawMessage) (any,
 			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: " + err.Error()}
 		}
 	}
-	q := store.Query{Category: s.category, Text: a.Text}
-	if a.Category != "" {
-		q.Category = a.Category
+	cat, ok := s.resolveCategory(a.Category)
+	if !ok {
+		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: category required (configured: " + strings.Join(s.categoryNames(), ",") + ")"}
 	}
+	q := store.Query{Category: cat, Text: a.Text}
 	if a.Limit != nil {
 		if *a.Limit < 0 {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: limit must be >= 0"}
@@ -280,7 +282,7 @@ func (s *server) mcpSearchItems(ctx context.Context, args json.RawMessage) (any,
 		q.Limit = *a.Limit
 	}
 
-	res, err := s.pipe.Surface(ctx, q)
+	res, err := s.surfaces[cat].Surface(ctx, q)
 	if err != nil {
 		return nil, &rpcError{Code: rpcInternalError, Message: "search failed: " + err.Error()}
 	}

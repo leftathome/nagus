@@ -106,13 +106,19 @@ func Evaluate(ctx context.Context, s Surfacer, w Watch) (Result, error) {
 	return res, nil
 }
 
-// EvaluateAll evaluates every watch in the config. A single watch's evaluation
+// EvaluateAll evaluates every watch in the config, dispatching each to the
+// surface for its category. A watch naming an unconfigured category is an error
+// (a saved query must resolve to a real surface). A single watch's evaluation
 // error aborts (the query is deterministic; a Surface error is a store fault,
 // not per-watch noise).
-func EvaluateAll(ctx context.Context, p *pipeline.Pipeline, cfg Config) ([]Result, error) {
+func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg Config) ([]Result, error) {
 	out := make([]Result, 0, len(cfg.Watches))
 	for _, w := range cfg.Watches {
-		r, err := Evaluate(ctx, p, w)
+		sf, ok := surfaces[w.Category]
+		if !ok {
+			return nil, fmt.Errorf("watch %q: unknown category %q", w.Name, w.Category)
+		}
+		r, err := Evaluate(ctx, sf, w)
 		if err != nil {
 			return nil, fmt.Errorf("watch %q: %w", w.Name, err)
 		}
