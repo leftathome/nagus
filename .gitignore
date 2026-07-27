@@ -20,3 +20,6 @@ docs/design/private-*.md
 # Editor / OS cruft.
 *.log
 .DS_Store
+
+# git worktrees (isolated workspaces)
+.worktrees/
