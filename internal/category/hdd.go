@@ -67,15 +67,13 @@ func HDDFilter(minCapacityTB float64) score.Filter {
 // refreshed before they are purged.
 const EbayContentMaxAge = 6 * time.Hour
 
-// NewHDDPipeline wires the HDD bundle over the generic spine. conn may be nil
-// for a surface-only pipeline (search): Ingest needs it, Surface does not.
-func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
+// NewHDDSurface builds the HDD surface (read half): hard-filter + $/TB valuation.
+func NewHDDSurface(deps HDDDeps) *pipeline.Surface {
 	ref := deps.Reference
 	if ref == nil {
 		ref = &valhdd.ShopifySource{ProductsURL: DefaultReferenceProductsURL, HTTPClient: deps.HTTPClient}
 	}
 	valuer := valhdd.Valuer{Source: ref}
-
 	valuate := func(ctx context.Context, it item.Item) (score.DealSignal, error) {
 		capTB, ok := parseCapacityTB(it)
 		if !ok {
@@ -93,16 +91,41 @@ func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
 			HasReference: val.ReferenceAvailable,
 		}, nil
 	}
+	return &pipeline.Surface{
+		Store:   deps.Store,
+		Filter:  HDDFilter(deps.MinCapacityTB),
+		Valuate: valuate,
+		Logf:    deps.Logf,
+	}
+}
 
-	return &pipeline.Pipeline{
+// NewHDDIngester builds the HDD ingest half for one source connector. The eBay
+// freshness window (License 8.1(b)) is applied here.
+func NewHDDIngester(conn listing.Connector, deps HDDDeps) *pipeline.Ingester {
+	return &pipeline.Ingester{
 		Connector: conn,
 		Sanitizer: sanitize.Passthrough{Name: "sanitize.passthrough(hdd)"},
 		Extractor: exthdd.New(),
 		Store:     deps.Store,
-		Filter:    HDDFilter(deps.MinCapacityTB),
-		Valuate:   valuate,
 		// eBay Content must not linger past its public life / 6h freshness bound.
 		StaleAfter: EbayContentMaxAge,
+		Logf:       deps.Logf,
+	}
+}
+
+// NewHDDPipeline wires the HDD bundle over the generic spine. conn may be nil
+// for a surface-only pipeline (search): Ingest needs it, Surface does not.
+func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
+	ing := NewHDDIngester(conn, deps)
+	sf := NewHDDSurface(deps)
+	return &pipeline.Pipeline{
+		Connector:  ing.Connector,
+		Sanitizer:  ing.Sanitizer,
+		Extractor:  ing.Extractor,
+		Store:      deps.Store,
+		Filter:     sf.Filter,
+		Valuate:    sf.Valuate,
+		StaleAfter: ing.StaleAfter,
 		Logf:       deps.Logf,
 	}
 }
