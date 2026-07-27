@@ -86,50 +86,11 @@ type IngestResult struct {
 // (sanitize refusal, unextractable, store rejection) is recorded as a Skip and
 // does not abort the batch; only a connector-level Fetch error aborts.
 func (p *Pipeline) Ingest(ctx context.Context) (IngestResult, error) {
-	raws, err := p.Connector.Fetch(ctx)
-	if err != nil {
-		return IngestResult{}, err
+	ing := &Ingester{
+		Connector: p.Connector, Sanitizer: p.Sanitizer, Extractor: p.Extractor,
+		Store: p.Store, StaleAfter: p.StaleAfter, Now: p.Now, Logf: p.Logf,
 	}
-	res := IngestResult{Fetched: len(raws)}
-	for _, r := range raws {
-		san, err := p.Sanitizer.Sanitize(ctx, r)
-		if err != nil {
-			// A sanitize error is a quarantine/reject verdict: drop, do not pass.
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: err.Error()})
-			p.logf("ingest: sanitize dropped %s: %v", r.SourceKey, err)
-			continue
-		}
-		it, err := p.Extractor.Extract(ctx, san)
-		if err != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "extract", Reason: err.Error()})
-			p.logf("ingest: extract dropped %s: %v", r.SourceKey, err)
-			continue
-		}
-		if err := p.Store.Put(ctx, it); err != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "store", Reason: err.Error()})
-			p.logf("ingest: store dropped %s: %v", r.SourceKey, err)
-			continue
-		}
-		res.Stored++
-	}
-
-	// Freshness purge: drop this source's content that is older than the window
-	// (eBay License 8.1(b): delete content no longer public / keep it < 6h fresh).
-	// Live listings are re-seen each ingest and their SeenAt refreshed by Put, so
-	// only genuinely stale/gone items fall past the cutoff.
-	if p.StaleAfter > 0 && p.Connector != nil {
-		cutoff := p.now().Add(-p.StaleAfter)
-		purged, derr := p.Store.DeleteStale(ctx, p.Connector.SourceID(), cutoff)
-		if derr != nil {
-			p.logf("ingest: purge stale %s failed: %v", p.Connector.SourceID(), derr)
-		} else {
-			res.Purged = purged
-			if purged > 0 {
-				p.logf("ingest: purged %d stale %s items older than %s", purged, p.Connector.SourceID(), p.StaleAfter)
-			}
-		}
-	}
-	return res, nil
+	return ing.Ingest(ctx)
 }
 
 // Scored is one surfaced item with its deal signal and score.
