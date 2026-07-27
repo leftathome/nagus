@@ -17,7 +17,9 @@ func supportedCategory(cat string) bool { return cat == "hdd" || cat == "land" }
 
 // categoryOpts is the per-category runtime config. hdd fields come from the
 // -offline flag; land scoring/enrichment config comes from env (NAGUS_LAND_*,
-// NAGUS_RENTCAST_KEY), which is how the Helm chart configures it.
+// NAGUS_RENTCAST_KEY); ebayClientID/ebaySecret come from env
+// (NAGUS_EBAY_CLIENT_ID/NAGUS_EBAY_CLIENT_SECRET) -- this is how the Helm
+// chart configures it.
 type categoryOpts struct {
 	logf func(string, ...any)
 	http *http.Client
@@ -97,7 +99,12 @@ func buildPipeline(cat string, conn listing.Connector, st store.Store, o categor
 func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector, error) {
 	switch s.Type {
 	case "ebay":
-		return buildEbayConnector(s.Fixture, o.ebayClientID, o.ebaySecret, orDefault(s.Query, "internal hard drive"), "EBAY_US", orInt(s.Limit, 50))
+		// Default query is HDD-specific; eBay currently only feeds the hdd category.
+		conn, err := buildEbayConnector(s.Fixture, o.ebayClientID, o.ebaySecret, orDefault(s.Query, "internal hard drive"), "EBAY_US", orInt(s.Limit, 50))
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
+		}
+		return conn, nil
 	case "craigslist":
 		clCat := orDefault(s.ClCategory, "reo")
 		if s.Fixture != "" {
