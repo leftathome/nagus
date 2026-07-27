@@ -67,34 +67,6 @@ func orInt(n, def int) int {
 	return n
 }
 
-// buildPipeline constructs the pipeline for a category. conn may be nil for a
-// surface-only pipeline (search/watches).
-func buildPipeline(cat string, conn listing.Connector, st store.Store, o categoryOpts) (*pipeline.Pipeline, error) {
-	switch cat {
-	case "hdd":
-		deps := category.HDDDeps{Store: st, HTTPClient: o.http, MinCapacityTB: o.hddMinCapacity, Logf: o.logf}
-		if o.hddOffline {
-			deps.Reference = demoReference
-		}
-		return category.NewHDDPipeline(conn, deps), nil
-	case "land":
-		deps := category.LandDeps{
-			Store: st, HTTPClient: o.http, Logf: o.logf,
-			Score: category.LandScoreConfig{
-				BudgetCents:     o.landBudgetCents,
-				MinAcreageAcres: o.landMinAcreage,
-				MaxAcreageAcres: o.landMaxAcreage,
-			},
-		}
-		if o.rentcastKey != "" {
-			deps.Parcel = parcel.NewRentcastProvider(o.http, o.rentcastKey)
-		}
-		return category.NewLandPipeline(conn, deps), nil
-	default:
-		return nil, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
-	}
-}
-
 // buildConnectorForSource builds the collection connector for one source by type.
 func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector, error) {
 	switch s.Type {
@@ -155,37 +127,5 @@ func buildSurface(cat string, cc CategoryConfig, st store.Store, o categoryOpts)
 		return category.NewLandSurface(deps), nil
 	default:
 		return nil, fmt.Errorf("unsupported category %q", cat)
-	}
-}
-
-// sourceParams carries the connector config for ingest (from flags) or serve
-// (from env). Only the fields for the chosen category are consulted.
-type sourceParams struct {
-	// hdd (eBay)
-	ebayFixture, ebayClientID, ebaySecret, ebayQuery string
-	ebayLimit                                        int
-	// land (Craigslist)
-	clFixture, clCity, clCategory string
-}
-
-// buildSourceConnector returns the collection connector for a category.
-func buildSourceConnector(cat string, p sourceParams) (listing.Connector, error) {
-	switch cat {
-	case "hdd":
-		return buildEbayConnector(p.ebayFixture, p.ebayClientID, p.ebaySecret, p.ebayQuery, "EBAY_US", p.ebayLimit)
-	case "land":
-		cat := p.clCategory
-		if cat == "" {
-			cat = "reo"
-		}
-		if p.clFixture != "" {
-			return craigslist.NewConnector(craigslist.Config{FixturePath: p.clFixture, Category: cat}), nil
-		}
-		if p.clCity == "" {
-			return nil, fmt.Errorf("land ingest needs -craigslist-city or -craigslist-fixture")
-		}
-		return craigslist.NewConnector(craigslist.Config{City: p.clCity, Category: cat}), nil
-	default:
-		return nil, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
 	}
 }

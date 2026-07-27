@@ -78,46 +78,6 @@ func TestHDDSliceEndToEnd(t *testing.T) {
 	}
 }
 
-// TestNewHDDSurfaceMatchesPipelineSurface asserts the split NewHDDSurface
-// constructor ranks identically to the composed NewHDDPipeline's Surface half,
-// over the same seeded store -- the split must be behavior-preserving.
-func TestNewHDDSurfaceMatchesPipelineSurface(t *testing.T) {
-	ctx := context.Background()
-	st := store.NewMemoryStore()
-
-	conn := ebay.NewConnector(ebay.Config{FixturePath: "../connector/ebay/testdata/browse_search.json"})
-	ref := StaticReference{CentsPerTB: map[string]int64{"new": 1900, "refurb": 1400, "used": 1150}}
-	deps := HDDDeps{Store: st, Reference: ref}
-
-	if _, err := NewHDDIngester(conn, deps).Ingest(ctx); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-
-	q := store.Query{Category: "hdd"}
-	got, err := NewHDDSurface(deps).Surface(ctx, q)
-	if err != nil {
-		t.Fatalf("NewHDDSurface.Surface: %v", err)
-	}
-	want, err := NewHDDPipeline(nil, deps).Surface(ctx, q)
-	if err != nil {
-		t.Fatalf("NewHDDPipeline.Surface: %v", err)
-	}
-
-	if got.Matched != want.Matched || got.Filtered != want.Filtered {
-		t.Fatalf("got matched=%d filtered=%d, want matched=%d filtered=%d", got.Matched, got.Filtered, want.Matched, want.Filtered)
-	}
-	if len(got.Items) != len(want.Items) {
-		t.Fatalf("got %d ranked items, want %d", len(got.Items), len(want.Items))
-	}
-	for i := range want.Items {
-		g, w := got.Items[i], want.Items[i]
-		if g.Item.ID != w.Item.ID || g.Signal.Verdict != w.Signal.Verdict || g.Score.Value != w.Score.Value {
-			t.Errorf("rank %d = {id=%s verdict=%s score=%v}, want {id=%s verdict=%s score=%v}",
-				i+1, g.Item.ID, g.Signal.Verdict, g.Score.Value, w.Item.ID, w.Signal.Verdict, w.Score.Value)
-		}
-	}
-}
-
 func TestHDDFilterDefaults(t *testing.T) {
 	f := HDDFilter(0) // zero -> default floor
 	if f.MinAttr["capacity_tb"] != DefaultMinCapacityTB {

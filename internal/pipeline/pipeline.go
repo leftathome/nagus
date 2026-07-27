@@ -6,8 +6,10 @@
 //
 // It is category-agnostic: every stage is an interface (listing.Connector,
 // listing.Sanitizer, listing.Extractor, store.Store, score.Filter) plus a
-// Valuate hook that a category bundle fills with its valuation adapter. The HDD
-// slice is one fill of this struct; land and other categories reuse it.
+// Valuate hook that a category bundle fills with its valuation adapter. The
+// front half (Ingester) and back half (Surface) are separate units that share
+// a Store; the HDD slice is one fill of them, and land and other categories
+// reuse the same units.
 //
 // Ordering invariant (a first-class design constraint, not an optimization):
 // the HARD-FILTER runs BEFORE ENRICH so paid/enrichment work touches only
@@ -15,54 +17,9 @@
 package pipeline
 
 import (
-	"context"
-	"time"
-
 	"github.com/leftathome/nagus/internal/item"
-	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/score"
-	"github.com/leftathome/nagus/internal/store"
 )
-
-// Pipeline holds the wired stages. The ingest half (Connector, Sanitizer,
-// Extractor, Store) and the surface half (Store, Filter, Valuate) share the
-// Store. Valuate may be nil, in which case items surface with an
-// unknown-no-reference signal.
-type Pipeline struct {
-	Connector listing.Connector
-	Sanitizer listing.Sanitizer
-	Extractor listing.Extractor
-	Store     store.Store
-
-	Filter  score.Filter
-	Valuate func(ctx context.Context, it item.Item) (score.DealSignal, error)
-
-	// StaleAfter, when > 0, enables a post-ingest freshness purge: items from
-	// this pipeline's source whose SeenAt is older than StaleAfter are deleted
-	// after each ingest. This satisfies eBay License 8.1(b) (delete content no
-	// longer public; keep displayed data < 6h stale) for the eBay source; set 0
-	// to disable (e.g. keyless Craigslist, which is not eBay Content).
-	StaleAfter time.Duration
-	// Now returns the current time for the freshness purge; nil defaults to
-	// time.Now. Injected in tests for a deterministic cutoff.
-	Now func() time.Time
-
-	// Logf is an optional structured-ish log sink; nil disables logging.
-	Logf func(format string, args ...any)
-}
-
-func (p *Pipeline) now() time.Time {
-	if p.Now != nil {
-		return p.Now()
-	}
-	return time.Now()
-}
-
-func (p *Pipeline) logf(format string, args ...any) {
-	if p.Logf != nil {
-		p.Logf(format, args...)
-	}
-}
 
 // Skip records one listing dropped during ingest, with the stage and reason, so
 // an operator can see why a listing did not become a stored item.
@@ -80,18 +37,6 @@ type IngestResult struct {
 	Skips   []Skip
 }
 
-// Ingest runs the front half of the spine: fetch listings, cross the sanitize
-// boundary, extract into typed items, and store them. A failure of one listing
-// (sanitize refusal, unextractable, store rejection) is recorded as a Skip and
-// does not abort the batch; only a connector-level Fetch error aborts.
-func (p *Pipeline) Ingest(ctx context.Context) (IngestResult, error) {
-	ing := &Ingester{
-		Connector: p.Connector, Sanitizer: p.Sanitizer, Extractor: p.Extractor,
-		Store: p.Store, StaleAfter: p.StaleAfter, Now: p.Now, Logf: p.Logf,
-	}
-	return ing.Ingest(ctx)
-}
-
 // Scored is one surfaced item with its deal signal and score.
 type Scored struct {
 	Item   item.Item
@@ -104,14 +49,4 @@ type SurfaceResult struct {
 	Matched  int // items returned by the store query
 	Filtered int // survivors of the hard-filter (== len(Items))
 	Items    []Scored
-}
-
-// Surface runs the back half of the spine over the stored corpus: query, then
-// HARD-FILTER (cheap, deterministic), then ENRICH (valuation) only on
-// survivors, then SCORE, then rank best-first. This is the same read path a
-// watch (saved query) and an ad-hoc search_items call use (design section 11);
-// it is read-only (eyes, not hands).
-func (p *Pipeline) Surface(ctx context.Context, q store.Query) (SurfaceResult, error) {
-	s := &Surface{Store: p.Store, Filter: p.Filter, Valuate: p.Valuate, Logf: p.Logf}
-	return s.Surface(ctx, q)
 }
