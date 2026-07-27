@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
+	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -201,6 +203,37 @@ func TestServeWatches(t *testing.T) {
 func TestServeWatchesReadOnly(t *testing.T) {
 	if rec := do(t, newTestServer(t), http.MethodPost, "/watches"); rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /watches = %d, want 405", rec.Code)
+	}
+}
+
+// fakeErrConnector is a listing.Connector whose Fetch always fails, used to
+// prove ingest failure isolation: one source erroring must not affect another.
+type fakeErrConnector struct{ id string }
+
+func (f fakeErrConnector) SourceID() string { return f.id }
+func (f fakeErrConnector) Fetch(context.Context) ([]listing.Raw, error) {
+	return nil, errors.New("fake connector: fetch failed")
+}
+
+func TestIngestOnceSourceIsolatesFailures(t *testing.T) {
+	st := store.NewMemoryStore()
+	ref := category.StaticReference{CentsPerTB: map[string]int64{"new": 1900, "refurb": 1400, "used": 1150}}
+	deps := category.HDDDeps{Store: st, Reference: ref}
+
+	goodConn := ebay.NewConnector(ebay.Config{FixturePath: "../../internal/connector/ebay/testdata/browse_search.json"})
+	good := category.NewHDDIngester(goodConn, deps)
+	bad := category.NewHDDIngester(fakeErrConnector{id: "bad-source"}, deps)
+
+	ctx := context.Background()
+	ingestOnceSource(ctx, good)
+	ingestOnceSource(ctx, bad) // must not panic or prevent the good source's items
+
+	items, err := st.Search(ctx, store.Query{Category: "hdd"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("good source did not store despite bad source failing")
 	}
 }
 
