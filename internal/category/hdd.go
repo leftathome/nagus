@@ -113,23 +113,6 @@ func NewHDDIngester(conn listing.Connector, deps HDDDeps) *pipeline.Ingester {
 	}
 }
 
-// NewHDDPipeline wires the HDD bundle over the generic spine. conn may be nil
-// for a surface-only pipeline (search): Ingest needs it, Surface does not.
-func NewHDDPipeline(conn listing.Connector, deps HDDDeps) *pipeline.Pipeline {
-	ing := NewHDDIngester(conn, deps)
-	sf := NewHDDSurface(deps)
-	return &pipeline.Pipeline{
-		Connector:  ing.Connector,
-		Sanitizer:  ing.Sanitizer,
-		Extractor:  ing.Extractor,
-		Store:      deps.Store,
-		Filter:     sf.Filter,
-		Valuate:    sf.Valuate,
-		StaleAfter: ing.StaleAfter,
-		Logf:       deps.Logf,
-	}
-}
-
 func parseCapacityTB(it item.Item) (float64, bool) {
 	s, ok := it.Attributes["capacity_tb"]
 	if !ok {

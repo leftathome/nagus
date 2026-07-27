@@ -109,22 +109,6 @@ func NewLandIngester(conn listing.Connector, deps LandDeps) *pipeline.Ingester {
 	}
 }
 
-// NewLandPipeline wires the land bundle over the generic spine. conn may be nil
-// for a surface-only pipeline (search/watches).
-func NewLandPipeline(conn listing.Connector, deps LandDeps) *pipeline.Pipeline {
-	ing := NewLandIngester(conn, deps)
-	sf := NewLandSurface(deps)
-	return &pipeline.Pipeline{
-		Connector: ing.Connector,
-		Sanitizer: ing.Sanitizer,
-		Extractor: ing.Extractor,
-		Store:     deps.Store,
-		Filter:    sf.Filter,
-		Valuate:   sf.Valuate,
-		Logf:      deps.Logf,
-	}
-}
-
 // landSignals is the typed input to the structure-first rubric.
 type landSignals struct {
 	StructurePresent  bool
