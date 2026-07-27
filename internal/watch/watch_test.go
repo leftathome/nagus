@@ -25,7 +25,7 @@ func putItem(t *testing.T, st store.Store, id, capTB string, cents int64) {
 	}
 }
 
-// seedHDDItems seeds the same four-drive hdd corpus shared by mkPipeline and
+// seedHDDItems seeds the same four-drive hdd corpus shared by
 // mkHDDSurface (used10/new16/refurb8 survive the capacity floor; small4 does
 // not).
 func seedHDDItems(t *testing.T, st store.Store) {
@@ -44,22 +44,9 @@ var verdictByID = map[string]string{
 	"small4":  "great", // would be strong, but is filtered out by capacity floor
 }
 
-func mkPipeline(t *testing.T) *pipeline.Pipeline {
-	t.Helper()
-	st := store.NewMemoryStore()
-	seedHDDItems(t, st)
-	return &pipeline.Pipeline{
-		Store:  st,
-		Filter: score.Filter{Category: "hdd", RequirePriced: true, MinAttr: map[string]float64{"capacity_tb": 8}},
-		Valuate: func(_ context.Context, it item.Item) (score.DealSignal, error) {
-			v := verdictByID[it.ID]
-			return score.DealSignal{Verdict: v, HasReference: true, Ratio: 1}, nil
-		},
-	}
-}
-
-// mkHDDSurface builds a *pipeline.Surface over the same seeded corpus as
-// mkPipeline: the read half that EvaluateAll now dispatches to per category.
+// mkHDDSurface builds a *pipeline.Surface over the seeded hdd corpus (see
+// seedHDDItems): the read half that both single-watch Evaluate and
+// EvaluateAll dispatch to.
 func mkHDDSurface(t *testing.T) *pipeline.Surface {
 	t.Helper()
 	st := store.NewMemoryStore()
@@ -112,7 +99,7 @@ func ids(scored []pipeline.Scored) []string {
 }
 
 func TestEvaluateDefaultThresholdIsGreat(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, err := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd"})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
@@ -129,7 +116,7 @@ func TestEvaluateDefaultThresholdIsGreat(t *testing.T) {
 }
 
 func TestEvaluateStrongVerdictsList(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, err := Evaluate(context.Background(), p, Watch{
 		Name: "w", Category: "hdd", StrongVerdicts: []string{"great", "good"},
 	})
@@ -143,7 +130,7 @@ func TestEvaluateStrongVerdictsList(t *testing.T) {
 }
 
 func TestEvaluateMinScore(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	// great ~100, good ~75, poor ~25. MinScore 80 -> only great.
 	res, err := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd", MinScore: 80})
 	if err != nil {
@@ -155,7 +142,7 @@ func TestEvaluateMinScore(t *testing.T) {
 }
 
 func TestEvaluateStrongIsSubsetOfCandidates(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, _ := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd", StrongVerdicts: []string{"great", "good", "poor"}})
 	cand := map[string]bool{}
 	for _, c := range res.Candidates {
