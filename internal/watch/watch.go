@@ -83,11 +83,17 @@ type Result struct {
 	Strong     []pipeline.Scored
 }
 
-// Evaluate runs one watch over the pipeline's surface (query -> hard-filter ->
-// enrich -> score -> rank) and partitions the ranked results into candidates and
-// strong matches.
-func Evaluate(ctx context.Context, p *pipeline.Pipeline, w Watch) (Result, error) {
-	sr, err := p.Surface(ctx, store.Query{Category: w.Category, Text: w.Text, Limit: w.Limit})
+// Surfacer is the read half a watch needs: query -> ranked scored results.
+// Both *pipeline.Surface and (transitionally) *pipeline.Pipeline satisfy it.
+type Surfacer interface {
+	Surface(ctx context.Context, q store.Query) (pipeline.SurfaceResult, error)
+}
+
+// Evaluate runs one watch over the surface (query -> hard-filter -> enrich ->
+// score -> rank) and partitions the ranked results into candidates and strong
+// matches.
+func Evaluate(ctx context.Context, s Surfacer, w Watch) (Result, error) {
+	sr, err := s.Surface(ctx, store.Query{Category: w.Category, Text: w.Text, Limit: w.Limit})
 	if err != nil {
 		return Result{}, err
 	}
