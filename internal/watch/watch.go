@@ -84,7 +84,7 @@ type Result struct {
 }
 
 // Surfacer is the read half a watch needs: query -> ranked scored results.
-// Both *pipeline.Surface and (transitionally) *pipeline.Pipeline satisfy it.
+// *pipeline.Surface satisfies it.
 type Surfacer interface {
 	Surface(ctx context.Context, q store.Query) (pipeline.SurfaceResult, error)
 }
