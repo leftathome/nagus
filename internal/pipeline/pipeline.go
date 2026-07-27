@@ -16,7 +16,6 @@ package pipeline
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/leftathome/nagus/internal/item"
@@ -113,35 +112,6 @@ type SurfaceResult struct {
 // watch (saved query) and an ad-hoc search_items call use (design section 11);
 // it is read-only (eyes, not hands).
 func (p *Pipeline) Surface(ctx context.Context, q store.Query) (SurfaceResult, error) {
-	items, err := p.Store.Search(ctx, q)
-	if err != nil {
-		return SurfaceResult{}, err
-	}
-	out := SurfaceResult{Matched: len(items)}
-	for _, it := range items {
-		if ok, reason := p.Filter.Pass(it); !ok {
-			p.logf("surface: filtered %s: %s", it.ID, reason)
-			continue
-		}
-		sig := score.DealSignal{Verdict: "unknown-no-reference"}
-		if p.Valuate != nil {
-			s, verr := p.Valuate(ctx, it)
-			if verr != nil {
-				// Enrichment failure degrades to an unscored signal; the item
-				// still surfaces (a valuation outage must not hide candidates).
-				p.logf("surface: valuate failed %s: %v", it.ID, verr)
-			} else {
-				sig = s
-			}
-		}
-		out.Items = append(out.Items, Scored{Item: it, Signal: sig, Score: score.ScoreItem(it, sig)})
-	}
-	out.Filtered = len(out.Items)
-	sort.SliceStable(out.Items, func(a, b int) bool {
-		if out.Items[a].Score.Value != out.Items[b].Score.Value {
-			return out.Items[a].Score.Value > out.Items[b].Score.Value
-		}
-		return out.Items[a].Item.ID < out.Items[b].Item.ID
-	})
-	return out, nil
+	s := &Surface{Store: p.Store, Filter: p.Filter, Valuate: p.Valuate, Logf: p.Logf}
+	return s.Surface(ctx, q)
 }
