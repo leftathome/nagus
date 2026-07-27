@@ -2,7 +2,9 @@
 
 Status: DESIGN (approved to build the dgq slice first)
 Date: 2026-07-26
-Beads: nagus-dgq (slice 3, built first), nagus-5n5 (slice 4), plus new slice beads
+Beads: nagus-dgq (slice 1, built first), nagus-q6u (slice 2, offer store),
+nagus-7yq (slice 3, inquiries/eval), nagus-5n5 (slice 4, shopify),
+nagus-d3v (status dashboard, cross-cutting)
 Related: docs/design/2026-07-01-nagus-design.md (the spine this evolves),
 docs/design/2026-07-26-shopify-connector.md (nagus-5n5 detail)
 
@@ -32,12 +34,20 @@ to the manufacturer, not the seller.
 
 - **Product** -- the actual good/service (e.g. "Samsung 990 PRO 1TB SSD").
   Identity from manufacturer brand + MPN/GTIN/model, independent of any seller.
-  Specs live here.
+  Specs live here. A product has its OWN lifecycle that precedes and outlives any
+  offer: **development** (in the manufacturer's lab, not yet public) ->
+  **announcement** (specs and approximate price made public, still unavailable)
+  -> **available** (manufactured, boxed, shipped; offers appear) -> **EOL/retired**.
+  An offer can reference an announced-but-not-yet-available product (a pre-order),
+  so the offer lifecycle is NOT the same axis as the product lifecycle. The
+  product lifecycle is quark's domain; nagus only references product state.
 - **Offer** -- a specific listing at a specific source selling that product
   (eBay, Newegg, shopify:serverpartdeals each have their own offer for the same
-  Samsung 990). Carries source, key, url, price, condition, seller, and
-  lifecycle (appears -> discount -> clearance -> retires). MANY offers -> ONE
-  product (N:1).
+  Samsung 990). Carries source, key, url, price, condition, seller, and its own
+  lifecycle (appears -> discount -> clearance -> sold/retires), distinct from the
+  product lifecycle above. MANY offers -> ONE product (N:1). A manufacturer that
+  is also a vendor (Samsung sells the 990 direct) is just another source of
+  offers; it does not collapse the offer/product distinction.
 - **Inventory item** -- a product actually purchased and held.
 
 ## Service boundary (multi-repo)
@@ -57,13 +67,16 @@ ones; it never owns product truth and never buys.
 
 ### Product identity in nagus, before quark exists
 
-quark does not exist yet. Decision: **provisional local grouping**. Each offer
+quark does not exist yet. Decision: **provisional local grouping -- a limited
+best-effort dedup of similar listings, not authoritative resolution.** Each offer
 carries the raw product identifiers the source exposes
 (`productHint{brand, mpn, gtin, model}`) AND a `provisionalKey` nagus computes by
 normalizing (mpn, else brand+model). nagus groups offers across sellers by
-`provisionalKey` so "cheapest Samsung 990 across N sellers" works now. When quark
-ships it supersedes `provisionalKey` with an authoritative `productID`; the
-matching logic in nagus is deliberately throwaway.
+`provisionalKey` so "cheapest Samsung 990 across N sellers" works now. We expect
+it to be imperfect against real, messy, cross-source data and will tune it
+empirically as sources come online -- it is NOT trying to be correct entity
+resolution. When quark ships it supersedes `provisionalKey` with an authoritative
+`productID`; the matching logic in nagus is deliberately throwaway.
 
 ## Target architecture (nagus)
 
@@ -77,9 +90,11 @@ shopify:spd  +-->    seller,condition,             +       extract->filter->    
 craigslist  /        lifecycle{first/last_seen,    |       enrich->score}        attrs+score),
                      price history,status},        \ land {...}                  grouped by
                      provisionalKey,                  (t-shirts: dormant,         provisionalKey
-                     productHint{brand,mpn,gtin}       zero eval cost)            at query time
+                     productHint{brand,mpn,gtin,model}  zero eval cost)           at query time
                      -- per-source retention:
-                        eBay purge 6h (8.1b);
+                        eBay purge 6h (8.1b)
+                          (summarize-decay pending
+                           compliance validation);
                         others retain lifecycle
 ```
 
@@ -94,10 +109,27 @@ craigslist  /        lifecycle{first/last_seen,    |       enrich->score}       
    glovebox calls, no extraction on goods we do not evaluate. Trust stays
    positional (design sections 4, 7, 13); the gate just moves to the point of
    use.
-3. **Per-source retention.** Retention is a property of the source, because
-   eBay License 8.1(b) forces purge of eBay Content older than ~6h, while
-   Shopify/Craigslist are not eBay Content and may retain price/status history
-   for lifecycle. The offer store cannot apply one global retention.
+3. **Per-source retention, with summarize-and-decay.** Retention is a property of
+   the source. It is not a binary purge-vs-retain; a source declares one of three
+   policies:
+   - `retain-full` -- keep the offer and its lifecycle indefinitely (Shopify,
+     Craigslist; not eBay Content).
+   - `purge` -- hard-delete after a window (the conservative fallback).
+   - `summarize-decay` -- at the policy window, DROP the live listing detail but
+     keep a coarse historical data-point: "this product WAS offered on <source>
+     for X and sold for Y on <date>", where the date/price resolution COARSENS as
+     it recedes into the past -- an RRD-style (round-robin) downsampling. Recent =
+     precise; old = fuzzy aggregate.
+   This is the INTENDED eBay policy, pending validation; **until validated, eBay
+   uses `purge` at 6h** (the safe default). eBay License 8.1(b) forbids retaining
+   eBay Content (the live listing) past ~6h; the intent is that a coarse "was
+   offered / sold for / on" data point with decaying resolution is a summary, not
+   retained Content -- but the exact summary schema and window are a COMPLIANCE
+   JUDGMENT that must be validated against eBay's current policy before the eBay
+   source is allowed to switch from `purge` to `summarize-decay`. The
+   architecture must carry the policy per source and support summarize-decay for
+   all sources; whether a given source is allowed to use it is a per-source
+   policy decision, not an architecture one.
 4. **Materialized evaluation.** Active profiles lift offers -> typed items into
    the EXISTING `store.Store`; surface/`search_items`/watch read typed items
    exactly as today. The offer store is a NEW layer IN FRONT; the existing item
@@ -108,6 +140,92 @@ craigslist  /        lifecycle{first/last_seen,    |       enrich->score}       
    bundling stops matching reality. Split into `Ingester` (per source) and
    `Surface` (per category).
 
+### Inquiries drive category activation
+
+What earlier drafts called an "activatable profile" is really an **Inquiry** -- a
+standing want held by a principal. An Inquiry is:
+
+- **criteria** -- a specific product or a set of products in a category matching
+  constraints. Examples span categories: "SSDs from Samsung, 1TB, M.2 connector";
+  "size-L t-shirts with Frieren artwork"; "a 1-acre parcel within radius R of
+  (lat, long)"; "a 1970-1974 Lotus Elan in running condition, continental US";
+  "all issues of The Unbeatable Squirrel Girl, good-or-better"; "this specific
+  Tag Heuer watch"; "men's size-12 Air Jordan 1 in reverse-bred colorway".
+- **duration** -- how long to keep looking (an expiry), so a want does not search
+  forever.
+- **principal** -- who requested it, so we know whom to notify and on whose
+  behalf we are looking.
+
+An Inquiry's criteria imply a **category** (the extraction/scoring machinery for
+that KIND of good: hdd, land, apparel, watches, comics, cars, sneakers...). A
+category is DORMANT until at least one active (unexpired) Inquiry references it;
+then it becomes ACTIVE and its machinery evaluates offers. This is the loose
+coupling: **Inquiries (time-boxed principal wants) drive which categories are
+active; categories provide the machinery; sources feed offers regardless.** No
+active Inquiry for t-shirts -> the apparel category stays dormant (offers still
+cached, zero evaluation cost) until someone asks.
+
+The existing `watch.Watch` (saved query + notify threshold + audience) is a
+PRIMITIVE Inquiry. Generalizing it means adding an explicit `duration`/expiry and
+a `principal` (today's `Audience` is a routing tag, adjacent but not the same as
+"who requested + for how long"). This generalization lands in slice 3; slice 1
+(dgq) keeps categories active-by-config and the watch DATA MODEL unchanged (no
+duration/principal) -- only category *dispatch* changes in slice 1 (see the
+slice-1 detail, where `Watch.Category` becomes load-bearing).
+
+## Interaction model
+
+glovebox is the INBOUND ingest trust gate (it sanitizes untrusted listing
+content on the source side); it is NOT the user/agent interaction surface. Those
+are separate. A principal interacts with nagus two ways:
+
+- **Look now (synchronous pull)** -- `search_items`: an agent asks "what matches
+  X right now?" and gets ranked, read-only results. Already implemented as an MCP
+  tool on `/mcp`.
+- **Standing want (asynchronous)** -- register an Inquiry (criteria + duration +
+  principal); nagus evaluates on its ingest cadence and reports matches. Today
+  this is the static `watches.json` + `/watches`; slice 3 makes it dynamically
+  registrable.
+
+**MCP is the primary interface** (already the transport for `search_items`).
+Standing-inquiry management (`create_inquiry` / `list_inquiries` /
+`cancel_inquiry`) arrives as MCP tools in slice 3. Per the repo boundary, those
+tools are REGISTERED and access-controlled in openclaw (openclaw owns the agent
+runtime, per-agent/audience access, and delivery); they call nagus. **Working
+assumption: nagus owns the inquiry store** (an Inquiry is a generalized
+`watch.Watch`, and `watch.go` already lives here); the principal is an OPAQUE tag
+to nagus. openclaw resolves the principal/audience and performs the actual
+notify/ping -- nagus reports, it never delivers (eyes, not hands). This ownership
+boundary is finalized in the slice-3 design.
+
+- **No product-browsing website in nagus.** A human UI to browse offers/specifics
+  would consume nagus's MCP/HTTP through a frontend/openclaw, not live here.
+- **A2A/ACP deferred** -- MCP covers agent-to-nagus today (YAGNI until a concrete
+  interop need).
+
+### Lightweight status dashboard (human-facing, token-free)
+
+Separate from the product surfaces: a tiny human-facing STATUS page served by
+nagus, consultable without burning tokens (plain server-rendered HTML, no LLM in
+the loop) -- the thing someone glances at to confirm nagus is running properly
+without logging into Grafana. It shows only AGGREGATE operational signal, the
+same family of data already exposed at `/metrics`:
+
+- count of inquiries being tracked;
+- count of products being watched (provisional product groups / stored items);
+- basic per-connector info (source name, last fetch time, ok/error, eBay budget
+  remaining).
+
+Constraints: **no PII, no specifics** (no listing detail, no principal identity,
+no criteria text) -- aggregate counts and liveness only. It is an operational
+health view of nagus ITSELF, which is why it belongs here and not in a frontend.
+A minimal version is feasible early (watch count + item count + per-source
+connector status from the slice-1 multi-source loop) and gets richer as slices 2
+and 3 add offers and inquiries. Filed as its own small cross-cutting bead
+(nagus-d3v). **Slice 1 has no dependency on the dashboard and never delivers it:**
+the dashboard bead may CONSUME slice-1 data, but it is never a slice-1
+deliverable -- do not pull it into the dgq plan.
+
 ## Slices (build order)
 
 Approved order: build the deployment merge (dgq) FIRST against the materialized
@@ -117,7 +235,7 @@ model, then add the offer store layer. Each slice keeps prod working.
 |-------|------|------|
 | **1. dgq -- multi-source/multi-category deployment** (BUILT FIRST) | Split ingest/surface; N sources x M categories in one deployment; mounted config; merge the two HelmReleases. Materialized typed items as today; NO offer store yet. | nagus-dgq |
 | **2. Offer store + lifecycle + provisional key** | New `offer.Store` adapter (Memory+SQLite), `Offer` entity, ingest writes offers, per-source retention, provisional grouping. Additive. | (new) |
-| **3. Activatable evaluation profiles (gate-at-eval)** | Evaluation reads offers -> sanitize -> extract -> item; profiles selectable by predicate; dormant = free. Extraction moves from ingest-time to eval-time. | (new) |
+| **3. Inquiries + activatable evaluation (gate-at-eval)** | Generalize Watch -> Inquiry (criteria + duration + principal); active Inquiries activate their category; evaluation reads offers -> sanitize -> extract -> item; dormant categories = free. Extraction moves from ingest-time to eval-time. | (new) |
 | **4. Shopify connector** | Generic products.json source, per-store, as one of N sources. | nagus-5n5 |
 | *(sibling repos)* | **quark** (product catalog), **rom** (inventory) | separate specs |
 
