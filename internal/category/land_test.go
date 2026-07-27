@@ -101,9 +101,9 @@ func TestLandPipelineStructureFirstEndToEnd(t *testing.T) {
 		}},
 		Score: LandScoreConfig{BudgetCents: 5000000, MinAcreageAcres: 1},
 	}
-	p := NewLandPipeline(nil, deps)
+	sf := NewLandSurface(deps)
 
-	res, err := p.Surface(context.Background(), store.Query{Category: "land"})
+	res, err := sf.Surface(context.Background(), store.Query{Category: "land"})
 	if err != nil {
 		t.Fatalf("Surface: %v", err)
 	}

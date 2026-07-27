@@ -29,6 +29,9 @@ type categoryOpts struct {
 	landMinAcreage  float64
 	landMaxAcreage  float64
 	rentcastKey     string
+
+	ebayClientID string
+	ebaySecret   string
 }
 
 // landOptsFromEnv fills the land scoring/enrichment config from env.
@@ -41,7 +44,25 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		landMinAcreage:  envFloat("NAGUS_LAND_MIN_ACREAGE", category.DefaultMinAcreageAcres),
 		landMaxAcreage:  envFloat("NAGUS_LAND_MAX_ACREAGE", 0),
 		rentcastKey:     envOr("NAGUS_RENTCAST_KEY", ""),
+		ebayClientID:    envOr("NAGUS_EBAY_CLIENT_ID", ""),
+		ebaySecret:      envOr("NAGUS_EBAY_CLIENT_SECRET", ""),
 	}
+}
+
+// orDefault returns def when s is empty, else s.
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// orInt returns def when n is zero, else n.
+func orInt(n, def int) int {
+	if n == 0 {
+		return def
+	}
+	return n
 }
 
 // buildPipeline constructs the pipeline for a category. conn may be nil for a
@@ -69,6 +90,64 @@ func buildPipeline(cat string, conn listing.Connector, st store.Store, o categor
 		return category.NewLandPipeline(conn, deps), nil
 	default:
 		return nil, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
+	}
+}
+
+// buildConnectorForSource builds the collection connector for one source by type.
+func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector, error) {
+	switch s.Type {
+	case "ebay":
+		return buildEbayConnector(s.Fixture, o.ebayClientID, o.ebaySecret, orDefault(s.Query, "internal hard drive"), "EBAY_US", orInt(s.Limit, 50))
+	case "craigslist":
+		clCat := orDefault(s.ClCategory, "reo")
+		if s.Fixture != "" {
+			return craigslist.NewConnector(craigslist.Config{FixturePath: s.Fixture, Category: clCat}), nil
+		}
+		if s.City == "" {
+			return nil, fmt.Errorf("source %q: craigslist needs city or fixture", s.Name)
+		}
+		return craigslist.NewConnector(craigslist.Config{City: s.City, Category: clCat}), nil
+	default:
+		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
+	}
+}
+
+// buildIngester builds the ingest unit for one source (connector by type, bundle by category).
+func buildIngester(s SourceConfig, st store.Store, o categoryOpts) (*pipeline.Ingester, error) {
+	conn, err := buildConnectorForSource(s, o)
+	if err != nil {
+		return nil, err
+	}
+	switch s.Category {
+	case "hdd":
+		return category.NewHDDIngester(conn, category.HDDDeps{Store: st, HTTPClient: o.http, Logf: o.logf}), nil
+	case "land":
+		return category.NewLandIngester(conn, category.LandDeps{Store: st, Logf: o.logf}), nil
+	default:
+		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
+	}
+}
+
+// buildSurface builds the surface unit for one category from its config.
+func buildSurface(cat string, cc CategoryConfig, st store.Store, o categoryOpts) (*pipeline.Surface, error) {
+	switch cat {
+	case "hdd":
+		deps := category.HDDDeps{Store: st, HTTPClient: o.http, MinCapacityTB: cc.MinCapacityTB, Logf: o.logf}
+		if o.hddOffline {
+			deps.Reference = demoReference
+		}
+		return category.NewHDDSurface(deps), nil
+	case "land":
+		deps := category.LandDeps{
+			Store: st, HTTPClient: o.http, Logf: o.logf,
+			Score: category.LandScoreConfig{BudgetCents: cc.BudgetCents, MinAcreageAcres: cc.MinAcreageAcres, MaxAcreageAcres: cc.MaxAcreageAcres},
+		}
+		if o.rentcastKey != "" {
+			deps.Parcel = parcel.NewRentcastProvider(o.http, o.rentcastKey)
+		}
+		return category.NewLandSurface(deps), nil
+	default:
+		return nil, fmt.Errorf("unsupported category %q", cat)
 	}
 }
 
