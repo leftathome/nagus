@@ -42,7 +42,9 @@ func (s *server) resolveCategory(req string) (string, bool) {
 		return req, ok
 	}
 	if s.defaultCategory != "" {
-		return s.defaultCategory, true
+		if _, ok := s.surfaces[s.defaultCategory]; ok {
+			return s.defaultCategory, true
+		}
 	}
 	if len(s.surfaces) == 1 {
 		for k := range s.surfaces {

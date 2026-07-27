@@ -25,6 +25,17 @@ func putItem(t *testing.T, st store.Store, id, capTB string, cents int64) {
 	}
 }
 
+// seedHDDItems seeds the same four-drive hdd corpus shared by mkPipeline and
+// mkHDDSurface (used10/new16/refurb8 survive the capacity floor; small4 does
+// not).
+func seedHDDItems(t *testing.T, st store.Store) {
+	t.Helper()
+	putItem(t, st, "used10", "10", 8950)
+	putItem(t, st, "new16", "16", 27999)
+	putItem(t, st, "refurb8", "8", 12999)
+	putItem(t, st, "small4", "4", 4000)
+}
+
 // verdictByID drives deterministic scoring in tests.
 var verdictByID = map[string]string{
 	"used10":  "great",
@@ -36,10 +47,7 @@ var verdictByID = map[string]string{
 func mkPipeline(t *testing.T) *pipeline.Pipeline {
 	t.Helper()
 	st := store.NewMemoryStore()
-	putItem(t, st, "used10", "10", 8950)
-	putItem(t, st, "new16", "16", 27999)
-	putItem(t, st, "refurb8", "8", 12999)
-	putItem(t, st, "small4", "4", 4000)
+	seedHDDItems(t, st)
 	return &pipeline.Pipeline{
 		Store:  st,
 		Filter: score.Filter{Category: "hdd", RequirePriced: true, MinAttr: map[string]float64{"capacity_tb": 8}},
@@ -55,10 +63,7 @@ func mkPipeline(t *testing.T) *pipeline.Pipeline {
 func mkHDDSurface(t *testing.T) *pipeline.Surface {
 	t.Helper()
 	st := store.NewMemoryStore()
-	putItem(t, st, "used10", "10", 8950)
-	putItem(t, st, "new16", "16", 27999)
-	putItem(t, st, "refurb8", "8", 12999)
-	putItem(t, st, "small4", "4", 4000)
+	seedHDDItems(t, st)
 	return &pipeline.Surface{
 		Store:  st,
 		Filter: score.Filter{Category: "hdd", RequirePriced: true, MinAttr: map[string]float64{"capacity_tb": 8}},
