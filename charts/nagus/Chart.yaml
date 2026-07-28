@@ -7,7 +7,10 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
-version: 0.1.0
+# 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
+# (sources[]+categories{}) when .Values.sources is set; legacy single-category
+# render unchanged. Bumped so Flux pulls the new templates (no digest reuse).
+version: 0.2.0
 appVersion: "0.1.0"
 kubeVersion: ">=1.27.0-0"
 keywords:
