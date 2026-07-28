@@ -102,12 +102,23 @@ func runIngest(args []string) error {
 		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
 
-	conn, err := buildSourceConnector(*cat, sourceParams{
-		ebayFixture: *fixture, ebayClientID: *clientID, ebaySecret: *clientSecret, ebayQuery: *query, ebayLimit: *limit,
-		clFixture: *clFixture, clCity: *clCity, clCategory: *clCategory,
-	})
-	if err != nil {
-		return err
+	sourceType := "ebay"
+	if *cat == "land" {
+		sourceType = "craigslist"
+	}
+	sc := SourceConfig{
+		Name:       *cat,
+		Category:   *cat,
+		Type:       sourceType,
+		Query:      *query,
+		Limit:      *limit,
+		City:       *clCity,
+		ClCategory: *clCategory,
+	}
+	if *cat == "hdd" {
+		sc.Fixture = *fixture
+	} else {
+		sc.Fixture = *clFixture
 	}
 
 	st, closeSt, err := sflags.open(context.Background())
@@ -116,12 +127,20 @@ func runIngest(args []string) error {
 	}
 	defer closeSt()
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "  "+format+"\n", a...) }
-	p, err := buildPipeline(*cat, conn, st, categoryOptsFromEnv(false, http.DefaultClient, logf))
+	opts := categoryOptsFromEnv(false, http.DefaultClient, logf)
+	// runIngest's -client-id/-client-secret flags are this subcommand's own
+	// credential source (unlike serve, which only reads NAGUS_EBAY_CLIENT_ID/
+	// SECRET env); preserve that by taking the flags outright, matching the old
+	// buildSourceConnector(sourceParams{...}) behavior exactly.
+	opts.ebayClientID = *clientID
+	opts.ebaySecret = *clientSecret
+
+	ing, err := buildIngester(sc, st, opts)
 	if err != nil {
 		return err
 	}
 
-	res, err := p.Ingest(context.Background())
+	res, err := ing.Ingest(context.Background())
 	if err != nil {
 		return err
 	}
@@ -194,13 +213,19 @@ func runSearch(args []string) error {
 	defer closeSt()
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, nil)
 	opts.hddMinCapacity = *minCap
-	p, err := buildPipeline(*cat, nil, st, opts)
+	cc := CategoryConfig{
+		MinCapacityTB:   *minCap,
+		MinAcreageAcres: opts.landMinAcreage,
+		MaxAcreageAcres: opts.landMaxAcreage,
+		BudgetCents:     opts.landBudgetCents,
+	}
+	sf, err := buildSurface(*cat, cc, st, opts)
 	if err != nil {
 		return err
 	}
 
 	q := store.Query{Category: *cat, Text: *text, Limit: *limit}
-	res, err := p.Surface(context.Background(), q)
+	res, err := sf.Surface(context.Background(), q)
 	if err != nil {
 		return err
 	}

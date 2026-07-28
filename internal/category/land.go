@@ -76,28 +76,35 @@ func LandFilter(cfg LandScoreConfig) score.Filter {
 	}
 }
 
-// NewLandPipeline wires the land bundle over the generic spine. conn may be nil
-// for a surface-only pipeline (search/watches).
-func NewLandPipeline(conn listing.Connector, deps LandDeps) *pipeline.Pipeline {
+// NewLandSurface builds the land surface (read half): acreage hard-filter +
+// structure-first enrichment/scoring.
+func NewLandSurface(deps LandDeps) *pipeline.Surface {
 	geoE := deps.Geo
 	if geoE == nil {
 		geoE = geo.NewEnricher(deps.HTTPClient)
 	}
 	cfg := deps.Score
-
 	valuate := func(ctx context.Context, it item.Item) (score.DealSignal, error) {
 		sig, enriched := buildLandSignals(ctx, it, geoE, deps.Parcel, cfg)
 		verdict := scoreLand(sig, it.PriceCents > 0, enriched)
 		return score.DealSignal{Verdict: string(verdict), HasReference: enriched}, nil
 	}
+	return &pipeline.Surface{
+		Store:   deps.Store,
+		Filter:  LandFilter(cfg),
+		Valuate: valuate,
+		Logf:    deps.Logf,
+	}
+}
 
-	return &pipeline.Pipeline{
+// NewLandIngester builds the land ingest half for one source connector. Land is
+// not eBay Content, so no freshness purge (StaleAfter stays 0).
+func NewLandIngester(conn listing.Connector, deps LandDeps) *pipeline.Ingester {
+	return &pipeline.Ingester{
 		Connector: conn,
 		Sanitizer: sanitize.Passthrough{Name: "sanitize.passthrough(land)"},
 		Extractor: extland.New(),
 		Store:     deps.Store,
-		Filter:    LandFilter(cfg),
-		Valuate:   valuate,
 		Logf:      deps.Logf,
 	}
 }

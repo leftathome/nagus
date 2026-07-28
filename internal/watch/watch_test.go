@@ -25,6 +25,17 @@ func putItem(t *testing.T, st store.Store, id, capTB string, cents int64) {
 	}
 }
 
+// seedHDDItems seeds the same four-drive hdd corpus shared by
+// mkHDDSurface (used10/new16/refurb8 survive the capacity floor; small4 does
+// not).
+func seedHDDItems(t *testing.T, st store.Store) {
+	t.Helper()
+	putItem(t, st, "used10", "10", 8950)
+	putItem(t, st, "new16", "16", 27999)
+	putItem(t, st, "refurb8", "8", 12999)
+	putItem(t, st, "small4", "4", 4000)
+}
+
 // verdictByID drives deterministic scoring in tests.
 var verdictByID = map[string]string{
 	"used10":  "great",
@@ -33,19 +44,48 @@ var verdictByID = map[string]string{
 	"small4":  "great", // would be strong, but is filtered out by capacity floor
 }
 
-func mkPipeline(t *testing.T) *pipeline.Pipeline {
+// mkHDDSurface builds a *pipeline.Surface over the seeded hdd corpus (see
+// seedHDDItems): the read half that both single-watch Evaluate and
+// EvaluateAll dispatch to.
+func mkHDDSurface(t *testing.T) *pipeline.Surface {
 	t.Helper()
 	st := store.NewMemoryStore()
-	putItem(t, st, "used10", "10", 8950)
-	putItem(t, st, "new16", "16", 27999)
-	putItem(t, st, "refurb8", "8", 12999)
-	putItem(t, st, "small4", "4", 4000)
-	return &pipeline.Pipeline{
+	seedHDDItems(t, st)
+	return &pipeline.Surface{
 		Store:  st,
 		Filter: score.Filter{Category: "hdd", RequirePriced: true, MinAttr: map[string]float64{"capacity_tb": 8}},
 		Valuate: func(_ context.Context, it item.Item) (score.DealSignal, error) {
 			v := verdictByID[it.ID]
 			return score.DealSignal{Verdict: v, HasReference: true, Ratio: 1}, nil
+		},
+	}
+}
+
+// putLandItem seeds one land parcel (distinct category from putItem's hdd).
+func putLandItem(t *testing.T, st store.Store, id, acres string, cents int64) {
+	t.Helper()
+	it := item.Item{
+		ID: id, Category: "land", Class: item.ClassDurable, Title: id,
+		PriceCents: cents, Currency: "USD", SourceID: "test", SourceKey: id,
+		SeenAt: time.Unix(1000, 0), Attributes: map[string]string{"acreage": acres},
+	}
+	if err := st.Put(context.Background(), it); err != nil {
+		t.Fatalf("put %s: %v", id, err)
+	}
+}
+
+// landSurfaceReturningOne is a land surface over a store seeded with exactly one
+// land item and a pass-all (category-only) filter; used to prove EvaluateAll
+// dispatches a land watch here, not to the hdd surface.
+func landSurfaceReturningOne(t *testing.T) *pipeline.Surface {
+	t.Helper()
+	st := store.NewMemoryStore()
+	putLandItem(t, st, "parcel5", "5", 500000)
+	return &pipeline.Surface{
+		Store:  st,
+		Filter: score.Filter{Category: "land"},
+		Valuate: func(_ context.Context, _ item.Item) (score.DealSignal, error) {
+			return score.DealSignal{Verdict: "great", HasReference: true, Ratio: 1}, nil
 		},
 	}
 }
@@ -59,7 +99,7 @@ func ids(scored []pipeline.Scored) []string {
 }
 
 func TestEvaluateDefaultThresholdIsGreat(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, err := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd"})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
@@ -76,7 +116,7 @@ func TestEvaluateDefaultThresholdIsGreat(t *testing.T) {
 }
 
 func TestEvaluateStrongVerdictsList(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, err := Evaluate(context.Background(), p, Watch{
 		Name: "w", Category: "hdd", StrongVerdicts: []string{"great", "good"},
 	})
@@ -90,7 +130,7 @@ func TestEvaluateStrongVerdictsList(t *testing.T) {
 }
 
 func TestEvaluateMinScore(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	// great ~100, good ~75, poor ~25. MinScore 80 -> only great.
 	res, err := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd", MinScore: 80})
 	if err != nil {
@@ -102,7 +142,7 @@ func TestEvaluateMinScore(t *testing.T) {
 }
 
 func TestEvaluateStrongIsSubsetOfCandidates(t *testing.T) {
-	p := mkPipeline(t)
+	p := mkHDDSurface(t)
 	res, _ := Evaluate(context.Background(), p, Watch{Name: "w", Category: "hdd", StrongVerdicts: []string{"great", "good", "poor"}})
 	cand := map[string]bool{}
 	for _, c := range res.Candidates {
@@ -116,12 +156,12 @@ func TestEvaluateStrongIsSubsetOfCandidates(t *testing.T) {
 }
 
 func TestEvaluateAll(t *testing.T) {
-	p := mkPipeline(t)
+	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
 	cfg := Config{Watches: []Watch{
 		{Name: "big-deals", Category: "hdd"},
 		{Name: "any-good", Category: "hdd", StrongVerdicts: []string{"great", "good"}},
 	}}
-	rs, err := EvaluateAll(context.Background(), p, cfg)
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -130,6 +170,46 @@ func TestEvaluateAll(t *testing.T) {
 	}
 	if len(rs[0].Strong) != 1 || len(rs[1].Strong) != 2 {
 		t.Fatalf("strong counts: %d, %d; want 1, 2", len(rs[0].Strong), len(rs[1].Strong))
+	}
+}
+
+// TestEvaluateAllDispatchesByCategory proves each watch is evaluated by the
+// surface for ITS category: the land watch resolves to the land surface (its one
+// land parcel), never the hdd surface's drives.
+func TestEvaluateAllDispatchesByCategory(t *testing.T) {
+	surfaces := map[string]*pipeline.Surface{
+		"hdd":  mkHDDSurface(t),
+		"land": landSurfaceReturningOne(t),
+	}
+	cfg := Config{Watches: []Watch{
+		{Name: "land-watch", Category: "land"},
+		{Name: "hdd-watch", Category: "hdd"},
+	}}
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(rs) != 2 {
+		t.Fatalf("want 2 results, got %d", len(rs))
+	}
+	land := rs[0]
+	if land.Watch.Name != "land-watch" || len(land.Candidates) != 1 || land.Candidates[0].Item.Category != "land" {
+		t.Fatalf("land watch = %v, want exactly one land candidate", ids(land.Candidates))
+	}
+	hdd := rs[1]
+	// hdd surface: 3 survivors (small4 is under the capacity floor).
+	if len(hdd.Candidates) != 3 {
+		t.Fatalf("hdd watch candidates=%v, want 3", ids(hdd.Candidates))
+	}
+}
+
+// TestEvaluateAllUnknownCategoryErrors: a watch naming a category with no
+// configured surface is a per-watch error (it cannot silently surface nothing).
+func TestEvaluateAllUnknownCategoryErrors(t *testing.T) {
+	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
+	cfg := Config{Watches: []Watch{{Name: "ghost", Category: "nope"}}}
+	if _, err := EvaluateAll(context.Background(), surfaces, cfg); err == nil {
+		t.Fatal("expected error for a watch naming an unconfigured category")
 	}
 }
 
