@@ -88,18 +88,34 @@ func (s *server) routes() *http.ServeMux {
 // Craigslist), there is no budget to report and the body is empty.
 func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	// Collect the eBay ingesters first so each metric family's HELP/TYPE lines
+	// are emitted at most once (Prometheus text format forbids repeating them
+	// per label series), while the per-source sample lines still loop below.
+	type ebaySource struct {
+		src string
+		st  ebay.BudgetStats
+	}
+	var ebaySources []ebaySource
 	for _, ing := range s.ingesters {
 		ec, ok := ing.Connector.(*ebay.Connector)
 		if !ok {
 			continue
 		}
-		st := ec.BudgetStats()
-		src := ing.SourceID()
-		fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_budget Configured daily eBay API call budget.\n")
-		fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_budget gauge\n")
-		fmt.Fprintf(w, "nagus_ebay_api_calls_budget{source=%q} %d\n", src, st.Budget)
-		fmt.Fprintf(w, "nagus_ebay_api_calls_used{source=%q} %d\n", src, st.Used)
-		fmt.Fprintf(w, "nagus_ebay_api_calls_remaining{source=%q} %d\n", src, st.Remaining)
+		ebaySources = append(ebaySources, ebaySource{src: ing.SourceID(), st: ec.BudgetStats()})
+	}
+	if len(ebaySources) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_budget Configured daily eBay API call budget.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_budget gauge\n")
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_used eBay API calls used today.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_used gauge\n")
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_remaining eBay API calls remaining today.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_remaining gauge\n")
+	for _, es := range ebaySources {
+		fmt.Fprintf(w, "nagus_ebay_api_calls_budget{source=%q} %d\n", es.src, es.st.Budget)
+		fmt.Fprintf(w, "nagus_ebay_api_calls_used{source=%q} %d\n", es.src, es.st.Used)
+		fmt.Fprintf(w, "nagus_ebay_api_calls_remaining{source=%q} %d\n", es.src, es.st.Remaining)
 	}
 }
 
