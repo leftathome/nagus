@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
-	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -26,10 +27,41 @@ import (
 // and serves search_items / get_item. It is READ-ONLY over the store -- it
 // surfaces candidates, it never acts (eyes, not hands; design section 11).
 type server struct {
-	pipe     *pipeline.Pipeline
-	store    store.Store
-	category string
-	watches  watch.Config
+	ingesters       []*pipeline.Ingester
+	surfaces        map[string]*pipeline.Surface
+	store           store.Store
+	defaultCategory string // "" when >1 category and no explicit default
+	watches         watch.Config
+}
+
+// resolveCategory applies the absent-category rule: empty -> the single
+// configured category if exactly one, else defaultCategory, else ("",false).
+func (s *server) resolveCategory(req string) (string, bool) {
+	if req != "" {
+		_, ok := s.surfaces[req]
+		return req, ok
+	}
+	if s.defaultCategory != "" {
+		if _, ok := s.surfaces[s.defaultCategory]; ok {
+			return s.defaultCategory, true
+		}
+	}
+	if len(s.surfaces) == 1 {
+		for k := range s.surfaces {
+			return k, true
+		}
+	}
+	return "", false
+}
+
+// categoryNames returns the configured category names, sorted (for error text).
+func (s *server) categoryNames() []string {
+	names := make([]string, 0, len(s.surfaces))
+	for k := range s.surfaces {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (s *server) routes() *http.ServeMux {
@@ -56,21 +88,35 @@ func (s *server) routes() *http.ServeMux {
 // Craigslist), there is no budget to report and the body is empty.
 func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	ec, ok := s.pipe.Connector.(*ebay.Connector)
-	if !ok {
-		w.WriteHeader(http.StatusOK)
+	// Collect the eBay ingesters first so each metric family's HELP/TYPE lines
+	// are emitted at most once (Prometheus text format forbids repeating them
+	// per label series), while the per-source sample lines still loop below.
+	type ebaySource struct {
+		src string
+		st  ebay.BudgetStats
+	}
+	var ebaySources []ebaySource
+	for _, ing := range s.ingesters {
+		ec, ok := ing.Connector.(*ebay.Connector)
+		if !ok {
+			continue
+		}
+		ebaySources = append(ebaySources, ebaySource{src: ing.SourceID(), st: ec.BudgetStats()})
+	}
+	if len(ebaySources) == 0 {
 		return
 	}
-	st := ec.BudgetStats()
 	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_budget Configured daily eBay API call budget.\n")
 	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_budget gauge\n")
-	fmt.Fprintf(w, "nagus_ebay_api_calls_budget %d\n", st.Budget)
-	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_used eBay API calls made in the current UTC day.\n")
-	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_used counter\n")
-	fmt.Fprintf(w, "nagus_ebay_api_calls_used %d\n", st.Used)
-	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_remaining Estimated remaining eBay API calls today.\n")
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_used eBay API calls used today.\n")
+	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_used gauge\n")
+	fmt.Fprintf(w, "# HELP nagus_ebay_api_calls_remaining eBay API calls remaining today.\n")
 	fmt.Fprintf(w, "# TYPE nagus_ebay_api_calls_remaining gauge\n")
-	fmt.Fprintf(w, "nagus_ebay_api_calls_remaining %d\n", st.Remaining)
+	for _, es := range ebaySources {
+		fmt.Fprintf(w, "nagus_ebay_api_calls_budget{source=%q} %d\n", es.src, es.st.Budget)
+		fmt.Fprintf(w, "nagus_ebay_api_calls_used{source=%q} %d\n", es.src, es.st.Used)
+		fmt.Fprintf(w, "nagus_ebay_api_calls_remaining{source=%q} %d\n", es.src, es.st.Remaining)
+	}
 }
 
 // searchRow is the typed JSON shape returned by /search (search_items). It is
@@ -94,11 +140,12 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	q := store.Query{Category: s.category}
-	if c := r.URL.Query().Get("category"); c != "" {
-		q.Category = c
+	cat, ok := s.resolveCategory(r.URL.Query().Get("category"))
+	if !ok {
+		http.Error(w, "category required (configured: "+strings.Join(s.categoryNames(), ",")+")", http.StatusBadRequest)
+		return
 	}
-	q.Text = r.URL.Query().Get("text")
+	q := store.Query{Category: cat, Text: r.URL.Query().Get("text")}
 	if l := r.URL.Query().Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
 		if err != nil || n < 0 {
@@ -107,16 +154,15 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		q.Limit = n
 	}
-	res, err := s.pipe.Surface(r.Context(), q)
+	res, err := s.surfaces[cat].Surface(r.Context(), q)
 	if err != nil {
 		http.Error(w, "search failed", http.StatusInternalServerError)
 		return
 	}
-	rows := scoredToRows(res)
 	writeJSON(w, map[string]any{
 		"matched":  res.Matched,
 		"filtered": res.Filtered,
-		"items":    rows,
+		"items":    scoredToRows(res),
 	})
 }
 
@@ -151,7 +197,7 @@ func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	results, err := watch.EvaluateAll(r.Context(), s.pipe, s.watches)
+	results, err := watch.EvaluateAll(r.Context(), s.surfaces, s.watches)
 	if err != nil {
 		http.Error(w, "watch evaluation failed", http.StatusInternalServerError)
 		return
@@ -186,6 +232,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	cat := fs.String("category", envOr("NAGUS_CATEGORY", "hdd"), "category bundle to serve (v1: hdd)")
+	configPath := fs.String("config", envOr("NAGUS_CONFIG", ""), "path to a multi-source run config (config.json); overrides the legacy single-source flags")
 	sflags := registerStoreFlags(fs)
 	listen := fs.String("listen", envOr("NAGUS_LISTEN", ":8080"), "HTTP listen address")
 	interval := fs.Duration("ingest-interval", envDuration("NAGUS_INGEST_INTERVAL", 0), "in-process ingest interval (0 disables scheduled ingest)")
@@ -198,9 +245,6 @@ func runServe(args []string) error {
 	watchesPath := fs.String("watches", envOr("NAGUS_WATCHES", ""), "path to a JSON watches config (enables /watches for the delivery cron)")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if !supportedCategory(*cat) {
-		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
 
 	var watches watch.Config
@@ -221,30 +265,56 @@ func runServe(args []string) error {
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
 	opts.hddMinCapacity = *minCap
+	// Explicit connector flags override the env-seeded defaults (legacy path).
+	opts.ebayClientID = orDefault(*clientID, opts.ebayClientID)
+	opts.ebaySecret = orDefault(*clientSecret, opts.ebaySecret)
 
-	// A connector is only needed if scheduled ingest is enabled.
-	var conn listing.Connector
-	if *interval > 0 {
-		conn, err = buildSourceConnector(*cat, sourceParams{
-			ebayFixture: *fixture, ebayClientID: *clientID, ebaySecret: *clientSecret, ebayQuery: *query, ebayLimit: 50,
-			clFixture: envOr("NAGUS_CL_FIXTURE", ""), clCity: envOr("NAGUS_CL_CITY", ""), clCategory: envOr("NAGUS_CL_CATEGORY", "reo"),
-		})
-		if err != nil {
-			return fmt.Errorf("ingest enabled but no source: %w", err)
-		}
+	legacy := legacySource{
+		interval:    *interval,
+		ebayQuery:   *query,
+		ebayFixture: *fixture,
+		clCity:      envOr("NAGUS_CL_CITY", ""),
+		clCategory:  envOr("NAGUS_CL_CATEGORY", "reo"),
+		clFixture:   envOr("NAGUS_CL_FIXTURE", ""),
 	}
-	p, err := buildPipeline(*cat, conn, st, opts)
+	cfg, err := resolveRunConfig(*configPath, *cat, opts, legacy)
 	if err != nil {
 		return err
 	}
-	srv := &server{pipe: p, store: st, category: *cat, watches: watches}
+
+	surfaces := make(map[string]*pipeline.Surface, len(cfg.Categories))
+	for name, cc := range cfg.Categories {
+		sf, serr := buildSurface(name, cc, st, opts)
+		if serr != nil {
+			return serr
+		}
+		surfaces[name] = sf
+	}
+	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
+	intervals := make([]time.Duration, 0, len(cfg.Sources))
+	for _, src := range cfg.Sources {
+		ing, ierr := buildIngester(src, st, opts)
+		if ierr != nil {
+			return ierr
+		}
+		ingesters = append(ingesters, ing)
+		intervals = append(intervals, time.Duration(src.IntervalMinutes)*time.Minute)
+	}
+	def := cfg.DefaultCategory
+	if def == "" && len(cfg.Categories) == 1 {
+		for name := range cfg.Categories {
+			def = name
+		}
+	}
+	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if *interval > 0 {
-		go runIngestLoop(ctx, p, *interval)
-	}
+	// One ingest goroutine per source, each on its own configured interval;
+	// per-source failure isolation (a bad source never blocks another's loop
+	// or the HTTP surface). Cancelled by the same ctx as the HTTP shutdown.
+	srv.startIngest(ctx, intervals)
 
 	httpServer := &http.Server{
 		Addr:              *listen,
@@ -253,7 +323,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "nagus serve: category=%s backend=%s listen=%s ingest-interval=%s\n", *cat, *sflags.backend, *listen, interval.String())
+		fmt.Fprintf(os.Stderr, "nagus serve: categories=%d sources=%d backend=%s listen=%s\n", len(surfaces), len(ingesters), *sflags.backend, *listen)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
@@ -270,11 +340,83 @@ func runServe(args []string) error {
 	}
 }
 
-// runIngestLoop runs Ingest immediately, then on every tick, until ctx is done.
-// An ingest error is logged and the loop continues (a transient source failure
-// must not take down the surface).
-func runIngestLoop(ctx context.Context, p *pipeline.Pipeline, interval time.Duration) {
-	ingestOnce(ctx, p)
+// legacySource carries the pre-config CLI's single-source connector settings, so
+// resolveRunConfig can synthesize a one-category/one-source RunConfig when no
+// config.json is supplied (back-compat with the old flags).
+type legacySource struct {
+	interval    time.Duration
+	ebayQuery   string
+	ebayFixture string
+	clCity      string
+	clCategory  string
+	clFixture   string
+}
+
+// resolveRunConfig loads config.json when configPath != "", else synthesizes a
+// single-source RunConfig from the legacy flags (back-compat with the old CLI).
+// The synthesized config has exactly one category (cat, configured from o) and,
+// only when scheduled ingest is enabled (legacy.interval > 0), one source of the
+// type matching that category. With interval == 0 it is surface-only (no source).
+func resolveRunConfig(configPath, cat string, o categoryOpts, legacy legacySource) (RunConfig, error) {
+	if configPath != "" {
+		return LoadRunConfig(configPath)
+	}
+	if !supportedCategory(cat) {
+		return RunConfig{}, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
+	}
+	cc := CategoryConfig{}
+	switch cat {
+	case "hdd":
+		cc.MinCapacityTB = o.hddMinCapacity
+	case "land":
+		cc.MinAcreageAcres = o.landMinAcreage
+		cc.MaxAcreageAcres = o.landMaxAcreage
+		cc.BudgetCents = o.landBudgetCents
+	}
+	rc := RunConfig{
+		Categories:      map[string]CategoryConfig{cat: cc},
+		DefaultCategory: cat,
+	}
+	if legacy.interval > 0 {
+		src := SourceConfig{
+			Name:            cat + "-legacy",
+			Category:        cat,
+			IntervalMinutes: int(legacy.interval / time.Minute),
+		}
+		switch cat {
+		case "hdd":
+			src.Type = "ebay"
+			src.Query = legacy.ebayQuery
+			src.Fixture = legacy.ebayFixture
+		case "land":
+			src.Type = "craigslist"
+			src.City = legacy.clCity
+			src.ClCategory = legacy.clCategory
+			src.Fixture = legacy.clFixture
+		}
+		rc.Sources = []SourceConfig{src}
+	}
+	return rc, nil
+}
+
+// startIngest launches one goroutine per source, each on its own interval.
+// intervals[i] pairs with s.ingesters[i]; a non-positive interval disables that
+// source's scheduled ingest. Per-source isolation: one source's error is logged
+// and its loop continues, never affecting another source.
+func (s *server) startIngest(ctx context.Context, intervals []time.Duration) {
+	for i, ing := range s.ingesters {
+		if i >= len(intervals) || intervals[i] <= 0 {
+			continue
+		}
+		go runSourceIngestLoop(ctx, ing, intervals[i])
+	}
+}
+
+// runSourceIngestLoop runs Ingest immediately, then on every tick, until ctx is
+// done. It operates on exactly one source's Ingester; an error there is logged
+// and the loop continues, never affecting any other source's loop.
+func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration) {
+	ingestOnceSource(ctx, ing)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -282,24 +424,27 @@ func runIngestLoop(ctx context.Context, p *pipeline.Pipeline, interval time.Dura
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			ingestOnce(ctx, p)
+			ingestOnceSource(ctx, ing)
 		}
 	}
 }
 
-func ingestOnce(ctx context.Context, p *pipeline.Pipeline) {
-	res, err := p.Ingest(ctx)
+// ingestOnceSource runs a single ingest pass for one source, logging the
+// outcome. It never panics or propagates an error -- a per-source failure
+// (including eBay API budget exhaustion) is reported and swallowed so it
+// cannot affect any other source's ingest loop.
+func ingestOnceSource(ctx context.Context, ing *pipeline.Ingester) {
+	res, err := ing.Ingest(ctx)
 	if err != nil {
 		if errors.Is(err, ebay.ErrBudgetExhausted) {
-			// Not a failure: the daily eBay API budget is spent. Back off and
-			// wait for the next window rather than alarming or circumventing.
-			fmt.Fprintf(os.Stderr, "nagus serve: eBay API budget exhausted; backing off until next window\n")
+			fmt.Fprintf(os.Stderr, "nagus serve: source %s eBay budget exhausted; backing off\n", ing.SourceID())
 			return
 		}
-		fmt.Fprintf(os.Stderr, "nagus serve: ingest error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "nagus serve: source %s ingest error: %v\n", ing.SourceID(), err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "nagus serve: ingest fetched=%d stored=%d skipped=%d\n", res.Fetched, res.Stored, len(res.Skips))
+	fmt.Fprintf(os.Stderr, "nagus serve: source %s fetched=%d stored=%d purged=%d skipped=%d\n",
+		ing.SourceID(), res.Fetched, res.Stored, res.Purged, len(res.Skips))
 }
 
 // --- env helpers (flag defaults seed from env; explicit flags override) ---

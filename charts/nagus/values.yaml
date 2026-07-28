@@ -16,6 +16,20 @@ fullnameOverride: ""
 # Which category bundle this release serves (v1 wires only "hdd").
 category: hdd
 
+# Multi-source mode: when `sources` is non-empty, the chart renders a config.json
+# (mounted at /etc/nagus-config/config.json, NAGUS_CONFIG) describing N ingest
+# sources and M category surfaces served by ONE deployment, and the legacy
+# single-category env vars (category/serve.minCapacityTB/ingestInterval/ebay.query
+# /land.*) are NOT emitted. Leave empty to keep the legacy single-category path.
+sources: []
+  # - {name: ebay, category: hdd, type: ebay, query: "internal hard drive", intervalMinutes: 30}
+  # - {name: cl-seattle, category: land, type: craigslist, city: seattle, clCategory: rea, intervalMinutes: 60}
+categories: {}
+  # hdd:  {minCapacityTB: 8}
+  # land: {minAcreageAcres: 1, budgetCents: 0}
+# defaultCategory pins the read default when >1 category and a request omits ?category=.
+defaultCategory: ""
+
 # The long-running `nagus serve` process: the MCP server at /mcp (agent-facing,
 # tools search_items + get_item) plus a plain-HTTP read-only pull at /search +
 # /item, plus an optional in-process ingest loop (sqlite is single-writer, so one

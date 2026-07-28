@@ -9,29 +9,30 @@ import (
 	"github.com/leftathome/nagus/internal/store"
 )
 
-// TestHDDSliceEndToEnd is the automatable form of the vertical-slice proof: it
-// drives the real eBay fixture connector -> sanitize -> HDD extractor -> store
-// -> hard-filter -> $/TB valuation (against an offline StaticReference) -> score
-// -> rank, and asserts the ranked verdicts. This is the same path the CLI runs.
-func TestNewHDDPipelineSetsFreshnessWindow(t *testing.T) {
-	p := NewHDDPipeline(nil, HDDDeps{Store: store.NewMemoryStore()})
-	if p.StaleAfter != EbayContentMaxAge {
-		t.Fatalf("HDD pipeline StaleAfter = %v, want %v (eBay 8.1(b) 6h window)", p.StaleAfter, EbayContentMaxAge)
+func TestNewHDDIngesterSetsFreshnessWindow(t *testing.T) {
+	ing := NewHDDIngester(nil, HDDDeps{Store: store.NewMemoryStore()})
+	if ing.StaleAfter != EbayContentMaxAge {
+		t.Fatalf("HDD ingester StaleAfter = %v, want %v (eBay 8.1(b) 6h window)", ing.StaleAfter, EbayContentMaxAge)
 	}
 	if EbayContentMaxAge > 6*time.Hour {
 		t.Fatalf("EbayContentMaxAge = %v, must be <= 6h per eBay License 8.1(b)", EbayContentMaxAge)
 	}
 }
 
+// TestHDDSliceEndToEnd is the automatable form of the vertical-slice proof: it
+// drives the real eBay fixture connector -> sanitize -> HDD extractor -> store
+// -> hard-filter -> $/TB valuation (against an offline StaticReference) -> score
+// -> rank, and asserts the ranked verdicts. This is the same path the CLI runs
+// (now split as NewHDDIngester.Ingest + NewHDDSurface.Surface).
 func TestHDDSliceEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemoryStore()
 
 	conn := ebay.NewConnector(ebay.Config{FixturePath: "../connector/ebay/testdata/browse_search.json"})
 	ref := StaticReference{CentsPerTB: map[string]int64{"new": 1900, "refurb": 1400, "used": 1150}}
-	p := NewHDDPipeline(conn, HDDDeps{Store: st, Reference: ref})
+	deps := HDDDeps{Store: st, Reference: ref}
 
-	ing, err := p.Ingest(ctx)
+	ing, err := NewHDDIngester(conn, deps).Ingest(ctx)
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestHDDSliceEndToEnd(t *testing.T) {
 		t.Fatalf("ingest: fetched=%d stored=%d skips=%d, want 3/3/0", ing.Fetched, ing.Stored, len(ing.Skips))
 	}
 
-	res, err := p.Surface(ctx, store.Query{Category: "hdd"})
+	res, err := NewHDDSurface(deps).Surface(ctx, store.Query{Category: "hdd"})
 	if err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
