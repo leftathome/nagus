@@ -1,0 +1,12 @@
+{{- if .Values.sources -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nagus.fullname" . }}-config
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+data:
+  # Multi-source runtime config consumed via NAGUS_CONFIG. sources[] = what to
+  # ingest, categories{} = what to surface (design: dgq multi-source deployment).
+  config.json: {{ dict "sources" .Values.sources "categories" .Values.categories "defaultCategory" .Values.defaultCategory | toJson | quote }}
+{{- end }}

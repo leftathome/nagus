@@ -38,8 +38,13 @@ spec:
           args:
             - serve
           env:
+            {{- if .Values.sources }}
+            - name: NAGUS_CONFIG
+              value: /etc/nagus-config/config.json
+            {{- else }}
             - name: NAGUS_CATEGORY
               value: {{ .Values.category | quote }}
+            {{- end }}
             - name: NAGUS_STORE_BACKEND
               value: {{ .Values.storage.backend | quote }}
             - name: NAGUS_DB
@@ -66,22 +71,27 @@ spec:
             {{- end }}
             - name: NAGUS_LISTEN
               value: {{ .Values.serve.listen | quote }}
+            {{- if not .Values.sources }}
             - name: NAGUS_MIN_CAPACITY
               value: {{ .Values.serve.minCapacityTB | quote }}
             - name: NAGUS_INGEST_INTERVAL
               value: {{ include "nagus.ingestInterval" . | quote }}
+            {{- end }}
             - name: NAGUS_OFFLINE
               value: {{ or .Values.demo.enabled .Values.serve.offline | quote }}
+            {{- if not .Values.sources }}
             - name: NAGUS_EBAY_QUERY
               value: {{ .Values.ebay.query | quote }}
             {{- if .Values.demo.enabled }}
             - name: NAGUS_EBAY_FIXTURE
               value: /demo/browse_search.json
             {{- end }}
+            {{- end }}
             {{- if .Values.watches }}
             - name: NAGUS_WATCHES
               value: /etc/nagus/watches.json
             {{- end }}
+            {{- if not .Values.sources }}
             {{- if eq .Values.category "land" }}
             - name: NAGUS_LAND_BUDGET_CENTS
               value: {{ .Values.land.budgetCents | quote }}
@@ -93,6 +103,8 @@ spec:
               value: {{ .Values.land.craigslistCity | quote }}
             - name: NAGUS_CL_CATEGORY
               value: {{ .Values.land.craigslistCategory | quote }}
+            {{- end }}
+            {{- end }}
             {{- $rentcast := include "nagus.rentcastSecretName" . }}
             {{- if $rentcast }}
             - name: NAGUS_RENTCAST_KEY
@@ -100,7 +112,6 @@ spec:
                 secretKeyRef:
                   name: {{ $rentcast }}
                   key: NAGUS_RENTCAST_KEY
-            {{- end }}
             {{- end }}
           {{- $secret := include "nagus.ebaySecretName" . }}
           {{- if and $secret (not .Values.demo.enabled) }}
@@ -141,6 +152,11 @@ spec:
               mountPath: /etc/nagus
               readOnly: true
             {{- end }}
+            {{- if .Values.sources }}
+            - name: config
+              mountPath: /etc/nagus-config
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           {{- if and (eq .Values.storage.backend "sqlite") .Values.storage.sqlite.persistence.enabled }}
@@ -160,6 +176,11 @@ spec:
         - name: watches
           configMap:
             name: {{ include "nagus.fullname" . }}-watches
+        {{- end }}
+        {{- if .Values.sources }}
+        - name: config
+          configMap:
+            name: {{ include "nagus.fullname" . }}-config
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
