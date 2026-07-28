@@ -108,6 +108,9 @@ func NewHDDIngester(conn listing.Connector, deps HDDDeps) *pipeline.Ingester {
 		Extractor: exthdd.New(),
 		Store:     deps.Store,
 		// eBay Content must not linger past its public life / 6h freshness bound.
+		// Coupled to the hdd category bundle for now; this retention window is
+		// really a per-source (eBay) decision per the offer/product spec, and
+		// should move onto the source config in slice 2 (bead nagus-q6u).
 		StaleAfter: EbayContentMaxAge,
 		Logf:       deps.Logf,
 	}

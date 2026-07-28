@@ -15,7 +15,10 @@ type SourceConfig struct {
 	Category        string `json:"category"`
 	Type            string `json:"type"` // "ebay" | "craigslist"
 	IntervalMinutes int    `json:"intervalMinutes"`
-	SecretRef       string `json:"secretRef,omitempty"`
+	// SecretRef is parsed but not yet consumed: secrets currently flow via
+	// global env/ExternalSecret. Reserved for per-source secret wiring in a
+	// later slice.
+	SecretRef string `json:"secretRef,omitempty"`
 
 	// ebay
 	Query string `json:"query,omitempty"`
