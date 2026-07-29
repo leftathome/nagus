@@ -152,15 +152,16 @@ func runIngest(args []string) error {
 	return nil
 }
 
-func buildEbayConnector(fixture, clientID, clientSecret, query, marketplace string, limit int) (listing.Connector, error) {
+func buildEbayConnector(name, fixture, clientID, clientSecret, query, marketplace string, limit int) (listing.Connector, error) {
 	if fixture != "" {
-		return ebay.NewConnector(ebay.Config{FixturePath: fixture}), nil
+		return ebay.NewConnector(ebay.Config{Name: name, FixturePath: fixture}), nil
 	}
 	if clientID == "" || clientSecret == "" {
 		return nil, fmt.Errorf("live ingest needs -client-id and -client-secret (or use -ebay-fixture for offline)")
 	}
 	sandbox := envBool("NAGUS_EBAY_SANDBOX")
 	cfg := ebay.Config{
+		Name:          name,
 		ClientID:      clientID,
 		ClientSecret:  clientSecret,
 		MarketplaceID: marketplace,
