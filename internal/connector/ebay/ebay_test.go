@@ -396,7 +396,51 @@ func TestFetch_MissingItemID_IsSkipped(t *testing.T) {
 func TestSourceID(t *testing.T) {
 	c := NewConnector(Config{ClientID: "id", ClientSecret: "secret"})
 	if got := c.SourceID(); got != "ebay" {
-		t.Errorf("SourceID() = %q, want ebay", got)
+		t.Errorf("SourceID() = %q, want ebay (back-compat, no Name)", got)
+	}
+	// A configured Name yields a per-source identity so multiple eBay sources in
+	// one deployment do not collide on the SourceID-scoped freshness purge or
+	// metrics labels (nagus-08k).
+	named := NewConnector(Config{Name: "hdd", ClientID: "id", ClientSecret: "secret"})
+	if got := named.SourceID(); got != "ebay:hdd" {
+		t.Errorf("named SourceID() = %q, want ebay:hdd", got)
+	}
+}
+
+// TestNamedSourceStampedOnRaws proves the Raw.SourceID a named connector emits
+// MATCHES its SourceID() -- if these diverged, freshness purge (scoped by
+// SourceID) would never match the stored rows.
+func TestNamedSourceStampedOnRaws(t *testing.T) {
+	failIfCalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected network call: %s", r.URL)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(failIfCalled.Close)
+
+	c := NewConnector(Config{
+		Name:         "hdd",
+		ClientID:     "id",
+		ClientSecret: "secret",
+		BaseURL:      failIfCalled.URL,
+		OAuthURL:     failIfCalled.URL + "/oauth-token",
+		HTTPClient:   failIfCalled.Client(),
+		Now:          fixedNow,
+		FixturePath:  "testdata/browse_search.json",
+	})
+	if got := c.SourceID(); got != "ebay:hdd" {
+		t.Fatalf("SourceID() = %q, want ebay:hdd", got)
+	}
+	raws, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if len(raws) == 0 {
+		t.Fatal("no raws emitted")
+	}
+	for i, r := range raws {
+		if r.SourceID != "ebay:hdd" {
+			t.Errorf("raw[%d].SourceID = %q, want ebay:hdd (must match SourceID())", i, r.SourceID)
+		}
 	}
 }
 
