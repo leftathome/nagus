@@ -57,6 +57,13 @@ const (
 
 // Config configures a Connector.
 type Config struct {
+	// Name is the operator-chosen unique source name in a multi-source
+	// deployment. When set, SourceID() returns "craigslist:<Name>" so several
+	// Craigslist sources (e.g. different cities) in one deployment have distinct
+	// identities (freshness purge is scoped by SourceID). Empty -> the bare
+	// "craigslist" identity (single-source / back-compat).
+	Name string
+
 	// City is the Craigslist subdomain to search, e.g. "sfbay". Required.
 	City string
 	// Category is the Craigslist search category, e.g. "reo" (real estate by
@@ -116,9 +123,14 @@ func NewConnector(cfg Config) *Connector {
 	return &Connector{cfg: cfg}
 }
 
-// SourceID returns the stable connector identity stamped onto every Raw
-// this Connector emits.
+// SourceID returns the connector identity stamped onto every Raw this Connector
+// emits. With a configured Config.Name it is "craigslist:<Name>" (unique per
+// source in a multi-source deployment); without one it is the bare "craigslist"
+// constant.
 func (c *Connector) SourceID() string {
+	if c.cfg.Name != "" {
+		return SourceID + ":" + c.cfg.Name
+	}
 	return SourceID
 }
 
@@ -162,7 +174,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	now := c.cfg.Now()
 	raws := make([]listing.Raw, 0, len(feed.Items))
 	for _, it := range feed.Items {
-		r, ok := mapItem(it, now)
+		r, ok := mapItem(it, c.SourceID(), now)
 		if !ok {
 			// No usable link/rdf:about at all: cannot form provenance
 			// (SourceKey), so this item cannot become a valid Raw. Skip
@@ -241,7 +253,7 @@ var locationRe = regexp.MustCompile(`\(([^()]+)\)\s*$`)
 // when the item has neither a usable link nor rdf:about: without one there
 // is no source-native key or URL to stamp as provenance, so the item cannot
 // become a valid Raw and must be skipped rather than emitted broken.
-func mapItem(it rdfItem, now time.Time) (listing.Raw, bool) {
+func mapItem(it rdfItem, sourceID string, now time.Time) (listing.Raw, bool) {
 	link := strings.TrimSpace(it.Link)
 	about := strings.TrimSpace(it.About)
 
@@ -270,7 +282,7 @@ func mapItem(it rdfItem, now time.Time) (listing.Raw, bool) {
 	}
 
 	return listing.Raw{
-		SourceID:     SourceID,
+		SourceID:     sourceID,
 		SourceKey:    sourceKey,
 		SourceURL:    sourceURL,
 		Title:        title,

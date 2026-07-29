@@ -83,6 +83,13 @@ const (
 // and passes them in at construction -- this package never reads env vars or
 // files for them itself, and they must never be hardcoded or committed.
 type Config struct {
+	// Name is the operator-chosen unique source name in a multi-source
+	// deployment. When set, SourceID() returns "ebay:<Name>" so several eBay
+	// sources in one deployment have distinct identities (freshness purge is
+	// scoped by SourceID, so a shared "ebay" would make them purge each other).
+	// Empty -> the bare "ebay" identity (single-source / back-compat).
+	Name string
+
 	// ClientID and ClientSecret are the eBay application's OAuth2
 	// client-credentials pair.
 	ClientID     string
@@ -187,9 +194,13 @@ func (c *Connector) BudgetStats() BudgetStats {
 	return c.budget.stats()
 }
 
-// SourceID returns the stable connector identity stamped onto every Raw
-// this Connector emits.
+// SourceID returns the connector identity stamped onto every Raw this Connector
+// emits. With a configured Config.Name it is "ebay:<Name>" (unique per source in
+// a multi-source deployment); without one it is the bare "ebay" constant.
 func (c *Connector) SourceID() string {
+	if c.cfg.Name != "" {
+		return SourceID + ":" + c.cfg.Name
+	}
 	return SourceID
 }
 
@@ -229,7 +240,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	profileCache := map[string]sellerProfileResult{}
 	raws := make([]listing.Raw, 0, len(resp.ItemSummaries))
 	for _, is := range resp.ItemSummaries {
-		r, ok := mapItemSummary(is, now)
+		r, ok := mapItemSummary(is, c.SourceID(), now)
 		if !ok {
 			// No itemId: cannot form provenance (SourceKey), so this item
 			// cannot become a valid Raw. Skip rather than emit a broken record.
@@ -404,7 +415,7 @@ func (c *Connector) search(ctx context.Context, token string) (browseSearchRespo
 // that requires a follow-up call to Browse's getItem detail endpoint
 // (GET /buy/browse/v1/item/{itemId}), which is a future enrichment step, not
 // part of this connector's single search call.
-func mapItemSummary(is itemSummary, now time.Time) (listing.Raw, bool) {
+func mapItemSummary(is itemSummary, sourceID string, now time.Time) (listing.Raw, bool) {
 	if strings.TrimSpace(is.ItemID) == "" {
 		return listing.Raw{}, false
 	}
@@ -453,7 +464,7 @@ func mapItemSummary(is itemSummary, now time.Time) (listing.Raw, bool) {
 	}
 
 	return listing.Raw{
-		SourceID:     SourceID,
+		SourceID:     sourceID,
 		SourceKey:    is.ItemID,
 		SourceURL:    is.ItemWebURL,
 		Title:        is.Title,

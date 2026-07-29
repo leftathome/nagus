@@ -253,7 +253,50 @@ func TestFetch_Non200_ReturnsError(t *testing.T) {
 func TestSourceID(t *testing.T) {
 	c := NewConnector(Config{City: "sfbay"})
 	if got := c.SourceID(); got != "craigslist" {
-		t.Errorf("SourceID() = %q, want craigslist", got)
+		t.Errorf("SourceID() = %q, want craigslist (back-compat, no Name)", got)
+	}
+	// A configured Name yields a per-source identity so multiple Craigslist
+	// sources (e.g. different cities) in one deployment do not collide on the
+	// SourceID-scoped freshness purge (nagus-08k).
+	named := NewConnector(Config{Name: "seattle", City: "seattle"})
+	if got := named.SourceID(); got != "craigslist:seattle" {
+		t.Errorf("named SourceID() = %q, want craigslist:seattle", got)
+	}
+}
+
+// TestNamedSourceStampedOnRaws proves the Raw.SourceID a named connector emits
+// MATCHES its SourceID() (freshness purge is scoped by SourceID, so a mismatch
+// would leave stored rows unpurgeable).
+func TestNamedSourceStampedOnRaws(t *testing.T) {
+	failIfCalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected network call: %s", r.URL)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(failIfCalled.Close)
+
+	c := NewConnector(Config{
+		Name:        "seattle",
+		City:        "seattle",
+		Category:    "reo",
+		BaseURL:     failIfCalled.URL,
+		HTTPClient:  failIfCalled.Client(),
+		Now:         fixedNow,
+		FixturePath: "testdata/search_reo.rss",
+	})
+	if got := c.SourceID(); got != "craigslist:seattle" {
+		t.Fatalf("SourceID() = %q, want craigslist:seattle", got)
+	}
+	raws, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if len(raws) == 0 {
+		t.Fatal("no raws emitted")
+	}
+	for i, r := range raws {
+		if r.SourceID != "craigslist:seattle" {
+			t.Errorf("raw[%d].SourceID = %q, want craigslist:seattle (must match SourceID())", i, r.SourceID)
+		}
 	}
 }
 

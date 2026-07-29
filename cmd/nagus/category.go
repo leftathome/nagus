@@ -72,7 +72,7 @@ func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector,
 	switch s.Type {
 	case "ebay":
 		// Default query is HDD-specific; eBay currently only feeds the hdd category.
-		conn, err := buildEbayConnector(s.Fixture, o.ebayClientID, o.ebaySecret, orDefault(s.Query, "internal hard drive"), "EBAY_US", orInt(s.Limit, 50))
+		conn, err := buildEbayConnector(s.Name, s.Fixture, o.ebayClientID, o.ebaySecret, orDefault(s.Query, "internal hard drive"), "EBAY_US", orInt(s.Limit, 50))
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
@@ -80,12 +80,12 @@ func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector,
 	case "craigslist":
 		clCat := orDefault(s.ClCategory, "reo")
 		if s.Fixture != "" {
-			return craigslist.NewConnector(craigslist.Config{FixturePath: s.Fixture, Category: clCat}), nil
+			return craigslist.NewConnector(craigslist.Config{Name: s.Name, FixturePath: s.Fixture, Category: clCat}), nil
 		}
 		if s.City == "" {
 			return nil, fmt.Errorf("source %q: craigslist needs city or fixture", s.Name)
 		}
-		return craigslist.NewConnector(craigslist.Config{City: s.City, Category: clCat}), nil
+		return craigslist.NewConnector(craigslist.Config{Name: s.Name, City: s.City, Category: clCat}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
