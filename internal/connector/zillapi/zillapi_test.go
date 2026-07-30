@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -351,4 +352,69 @@ func mustFetch(t *testing.T, c Config) []listing.Raw {
 		t.Fatalf("Fetch: %v", err)
 	}
 	return raws
+}
+
+// --- real captured response ---------------------------------------------------
+
+// search_lots_live.json is a REAL Zillapi response captured 2026-07-30 (5 credits,
+// bbox = North Sound, homeTypes=[lot], lotSize.min=43560, price.max=200000). It
+// exists so the mapping is proven against genuine upstream output -- which carries
+// many fields the published OpenAPI schema does not declare -- rather than only
+// against a fixture we wrote ourselves.
+func TestFetchRealCapturedResponse(t *testing.T) {
+	raws := mustFetch(t, Config{FixturePath: "testdata/search_lots_live.json"})
+	if len(raws) != 5 {
+		t.Fatalf("len(raws) = %d, want 5", len(raws))
+	}
+
+	// Every row in the real capture is a priced lot with a known acreage above the
+	// 1-acre floor we asked for -- which is also the proof that lotSize.min is in
+	// SQUARE FEET: had 43560 been read as acres, the filter would have demanded
+	// ~68 square miles and returned nothing.
+	for i, r := range raws {
+		if r.SourceKey == "" {
+			t.Errorf("raws[%d] has no SourceKey", i)
+		}
+		if !strings.HasPrefix(r.SourceURL, "https://www.zillow.com/") {
+			t.Errorf("raws[%d].SourceURL = %q, want an absolute zillow URL", i, r.SourceURL)
+		}
+		if r.PriceCents <= 0 {
+			t.Errorf("raws[%d].PriceCents = %d, want > 0", i, r.PriceCents)
+		}
+		acr, ok := r.Aspects["acreage"]
+		if !ok {
+			t.Errorf("raws[%d] has no acreage aspect", i)
+			continue
+		}
+		v, err := strconv.ParseFloat(acr, 64)
+		if err != nil || v < 1 {
+			t.Errorf("raws[%d].acreage = %q, want a number >= 1 (the requested floor)", i, acr)
+		}
+	}
+
+	// Spot-check the first row against the captured values.
+	if raws[0].SourceKey != "456629829" {
+		t.Errorf("raws[0].SourceKey = %q, want 456629829", raws[0].SourceKey)
+	}
+	if raws[0].PriceCents != 16_000_000 {
+		t.Errorf("raws[0].PriceCents = %d, want 16000000 ($160,000)", raws[0].PriceCents)
+	}
+	if got, want := raws[0].Aspects["acreage"], "6.129"; got != want {
+		t.Errorf("raws[0].acreage = %q, want %q (top-level lotArea.value, in acres)", got, want)
+	}
+	if got, want := raws[0].Aspects["location"], "Sedro Woolley, WA"; got != want {
+		t.Errorf("raws[0].location = %q, want %q", got, want)
+	}
+}
+
+// taxAssessedValue is undeclared upstream and present on only SOME rows, so it
+// must be carried when there and absent (not zero) when not.
+func TestRealCaptureAssessedValueIsOptional(t *testing.T) {
+	raws := mustFetch(t, Config{FixturePath: "testdata/search_lots_live.json"})
+	if got, want := raws[1].Aspects["assessed_value_cents"], "4610000"; got != want {
+		t.Errorf("raws[1].assessed_value_cents = %q, want %q ($46,100)", got, want)
+	}
+	if v, ok := raws[0].Aspects["assessed_value_cents"]; ok {
+		t.Errorf("raws[0] has assessed_value_cents = %q, want absent (upstream omitted it)", v)
+	}
 }

@@ -339,6 +339,14 @@ func (c *Connector) mapRow(row searchResultRow, now time.Time) (listing.Raw, boo
 	if zip := strings.TrimSpace(row.AddressZipcode); zip != "" {
 		aspects["zip"] = zip
 	}
+	// Assessed value: the structure/land-value signal land scoring otherwise pays
+	// Rentcast for. Present on only some rows, so strictly optional.
+	if row.TaxAssessedValue != nil && *row.TaxAssessedValue > 0 {
+		aspects["assessed_value_cents"] = strconv.FormatInt(int64(*row.TaxAssessedValue*100+0.5), 10)
+	}
+	if row.DaysOnZillow != nil && *row.DaysOnZillow >= 0 {
+		aspects["days_on_market"] = strconv.Itoa(*row.DaysOnZillow)
+	}
 	if row.LatLong.Latitude != 0 || row.LatLong.Longitude != 0 {
 		aspects["lat"] = strconv.FormatFloat(row.LatLong.Latitude, 'f', -1, 64)
 		aspects["lon"] = strconv.FormatFloat(row.LatLong.Longitude, 'f', -1, 64)
@@ -422,9 +430,24 @@ type searchResultRow struct {
 		Latitude  float64 `json:"latitude"`
 		Longitude float64 `json:"longitude"`
 	} `json:"latLong"`
+	// LotArea is the top-level lot-area object. It is NOT in the published OpenAPI
+	// schema but IS present on every row of a real response (confirmed by live
+	// capture 2026-07-30), and it is the more canonical of the two places lot area
+	// appears, so it is preferred over hdpData.homeInfo below.
+	LotArea *struct {
+		Value     float64 `json:"value"`
+		Unit      string  `json:"unit"`
+		Formatted string  `json:"formatted"`
+	} `json:"lotArea"`
+	// TaxAssessedValue is likewise undeclared but present on some rows. It is the
+	// assessed-value signal land scoring otherwise pays Rentcast for, so it is
+	// carried through when available -- and frequently absent, so never required.
+	TaxAssessedValue *float64 `json:"taxAssessedValue"`
+	// DaysOnZillow at the top level is a freshness signal.
+	DaysOnZillow *int `json:"daysOnZillow"`
 	// HdpData is loosely typed upstream (additionalProperties: true). Lot area is
-	// NOT in the declared search-row schema; it commonly appears here, so it is
-	// read opportunistically and its absence is not an error.
+	// NOT in the declared search-row schema; it appears here as well, and is used
+	// as the fallback when the top-level LotArea is missing.
 	HdpData struct {
 		HomeInfo struct {
 			HomeStatus   string  `json:"homeStatus"`
@@ -436,13 +459,24 @@ type searchResultRow struct {
 }
 
 // acres returns the row's lot area in acres, converting from whatever unit
-// upstream reported. ok=false when no usable lot area is present.
+// upstream reported. It prefers the top-level lotArea object and falls back to
+// hdpData.homeInfo; ok=false when neither carries a usable value. Neither field is
+// in the published schema, so absence is normal and never an error.
 func (r searchResultRow) acres() (float64, bool) {
-	v := r.HdpData.HomeInfo.LotAreaValue
+	if r.LotArea != nil && r.LotArea.Value > 0 {
+		if a, ok := toAcres(r.LotArea.Value, r.LotArea.Unit); ok {
+			return a, true
+		}
+	}
+	return toAcres(r.HdpData.HomeInfo.LotAreaValue, r.HdpData.HomeInfo.LotAreaUnit)
+}
+
+// toAcres normalizes a (value, unit) lot area to acres.
+func toAcres(v float64, unit string) (float64, bool) {
 	if v <= 0 {
 		return 0, false
 	}
-	switch strings.ToLower(strings.TrimSpace(r.HdpData.HomeInfo.LotAreaUnit)) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
 	case "acres", "acre", "ac":
 		return v, true
 	case "sqft", "square feet", "sq ft", "sf", "":
