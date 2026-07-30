@@ -30,10 +30,11 @@ connector -> glovebox sanitize -> extract/tokenize -> normalize -> store
 Two reference adapters: **land** (free gov geo-enrichment: FEMA flood / USGS
 elevation / USDA soil / USFWS wetlands / Census geocode, plus a parcel-data
 adapter) and **HDD** (`$/TB` deal-watch via a free valuation API). eBay Browse is
-the common-denominator listing connector for durables. **land currently has no
-acquisition connector**: it was a Craigslist RSS source until Craigslist retired
-that feed, and the replacement adapter is not wired yet, so land surfaces
-already-stored items and ingests nothing.
+the common-denominator listing connector for durables; land acquisition is
+Zillapi (`internal/connector/zillapi`), which replaced a Craigslist RSS source
+after Craigslist retired that feed. Zillapi bills per RESULT returned, so a land
+source polls daily with a bounded result cap -- see
+`docs/design/2026-07-29-zillapi-land-connector.md`.
 
 ## Design
 

@@ -103,6 +103,7 @@ outbound source-API creds -- one secret, one property per source).
 | Postgres role (`<release>-db`) | `eso/nagus/infrastructure` -> `postgres_password` | `username`, `password` | `storage.postgres.externalSecret` (on by default) |
 | Rentcast (land) | `eso/nagus/sources` -> `rentcast_key` | `NAGUS_RENTCAST_KEY` | `land.rentcastExternalSecret` (or `land.rentcastSecret` override) |
 | eBay OAuth (hdd live ingest) | `eso/nagus/sources` -> `ebay_client_id`, `ebay_client_secret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` | `externalSecret` (or `ebay.existingSecret` override) |
+| Zillapi (land live ingest) | `eso/nagus/sources` -> `zillapi_key` | `NAGUS_ZILLAPI_KEY` | `land.zillapiExternalSecret` (or `land.zillapiSecret` override) |
 
 The demo path (`demo.enabled=true`) needs no secrets at all.
 
@@ -160,14 +161,20 @@ against the sandbox / live keyset (nagus-hm0) before enabling in production.**
   `serve.ingestInterval`. nagus stores NO eBay user PII (no seller username or
   per-seller key); only coarse, per-listing seller-trust tiers land on the item,
   which is why we take the Marketplace Account Deletion opt-out. See SECURITY.md.
-- **land**: structure-first scoring, **no acquisition source at present**. The
-  Craigslist RSS source was removed when Craigslist retired that feed, and the
-  replacement adapter is not wired yet, so land is surface-only: it serves
-  already-stored items and ingests nothing. Scoring/enrichment config still
-  applies to what is stored -- set `land.budgetCents` / `land.minAcreageAcres` /
-  `land.maxAcreageAcres`; enable `land.rentcastExternalSecret` (syncs the key
-  from `eso/nagus/sources`) or set `land.rentcastSecret` for structure signals
-  (without it, land surfaces as unassessed candidates).
+- **land**: structure-first scoring over a **Zillapi** source (`type: zillapi` in
+  `sources[]`), which replaced the Craigslist RSS source Craigslist retired. Set
+  `land.budgetCents` / `land.minAcreageAcres` / `land.maxAcreageAcres` -- the
+  connector pushes that window UPSTREAM, so it is a spend control as well as a
+  filter. Enable `land.zillapiExternalSecret` for the API key, and
+  `land.rentcastExternalSecret` for structure signals (without Rentcast, land
+  surfaces as unassessed candidates).
+
+  **Zillapi bills one credit per RESULT returned, not per call.** A land source is
+  anchored on a bounding box (read `mapBounds` off a zillow.com map URL; a
+  free-text place name is rejected upstream) and wants `intervalMinutes: 1440`
+  with a small `maxItems` and a `daysOnZillow` window. Do NOT copy the 30m cadence
+  used for eBay: a half-hourly poll of 50 lots is ~2,400 credits/day against a
+  1,000-credit/month plan. See `docs/design/2026-07-29-zillapi-land-connector.md`.
 
 ## Watches (delivery)
 

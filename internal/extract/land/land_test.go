@@ -329,3 +329,67 @@ func baseSanitized() listing.Sanitized {
 		Boundary:     "test-sanitizer",
 	}
 }
+
+// TestExtractPrefersTypedAcreageAspect: a structured connector (e.g. zillapi)
+// supplies acreage as a typed aspect already in acres, and the extractor must use
+// it verbatim rather than re-deriving a number by regex from the title/body.
+func TestExtractPrefersTypedAcreageAspect(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID:   "zillapi:north-sound",
+		SourceKey:  "2078311111",
+		Title:      "1234 Cascade View Rd, Sedro-Woolley, WA 98284",
+		PriceCents: 14_900_000,
+		Currency:   "USD",
+		Aspects:    map[string]string{"acreage": "5.19"},
+		SeenAt:     time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if got, want := it.Attributes["acreage"], "5.19"; got != want {
+		t.Fatalf("acreage = %q, want %q (from the typed aspect)", got, want)
+	}
+}
+
+// The typed aspect WINS over a conflicting figure in the free text: the
+// structured value is the authoritative one.
+func TestExtractTypedAspectBeatsFreeText(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID:  "zillapi:north-sound",
+		SourceKey: "z1",
+		Title:     "Bargain 40 acres advertised in the title",
+		Aspects:   map[string]string{"acreage": "2.5"},
+		Currency:  "USD",
+		SeenAt:    time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if got, want := it.Attributes["acreage"], "2.5"; got != want {
+		t.Fatalf("acreage = %q, want %q (typed aspect must beat free text)", got, want)
+	}
+}
+
+// A junk or nonpositive aspect value must NOT poison the attribute: the extractor
+// falls back to scanning free text, exactly as a source with no aspect would.
+func TestExtractFallsBackWhenAspectIsJunk(t *testing.T) {
+	for _, bad := range []string{"not-a-number", "0", "-3", ""} {
+		s := listing.Sanitized{
+			SourceID:  "zillapi:north-sound",
+			SourceKey: "z2",
+			Title:     "Nice 7.5 acres near the river",
+			Aspects:   map[string]string{"acreage": bad},
+			Currency:  "USD",
+			SeenAt:    time.Unix(1_750_000_000, 0).UTC(),
+		}
+		it, err := New().Extract(context.Background(), s)
+		if err != nil {
+			t.Fatalf("Extract(%q): %v", bad, err)
+		}
+		if got, want := it.Attributes["acreage"], "7.5"; got != want {
+			t.Errorf("aspect %q: acreage = %q, want %q (fallback to free text)", bad, got, want)
+		}
+	}
+}

@@ -290,7 +290,7 @@ func runServe(args []string) error {
 	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
 	intervals := make([]time.Duration, 0, len(cfg.Sources))
 	for _, src := range cfg.Sources {
-		ing, ierr := buildIngester(src, st, opts)
+		ing, ierr := buildIngester(src, cfg.Categories[src.Category], st, opts)
 		if ierr != nil {
 			return ierr
 		}
@@ -358,24 +358,16 @@ func resolveRunConfig(configPath, cat string, o categoryOpts, legacy legacySourc
 	if !supportedCategory(cat) {
 		return RunConfig{}, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
 	}
-	cc := CategoryConfig{}
-	switch cat {
-	case "hdd":
-		cc.MinCapacityTB = o.hddMinCapacity
-	case "land":
-		cc.MinAcreageAcres = o.landMinAcreage
-		cc.MaxAcreageAcres = o.landMaxAcreage
-		cc.BudgetCents = o.landBudgetCents
-	}
+	cc := categoryConfigFromOpts(cat, o)
 	rc := RunConfig{
 		Categories:      map[string]CategoryConfig{cat: cc},
 		DefaultCategory: cat,
 	}
-	// Only hdd has a connector in the legacy path. land's Craigslist source was
-	// removed when Craigslist retired its RSS feed (nagus-hh5) and the replacement
-	// adapter is not wired yet (nagus-hla), so legacy land resolves to
-	// surface-only (no source) regardless of interval -- the same supported shape
-	// as interval == 0.
+	// Only hdd has a connector in the legacy path. The land connector (zillapi) is
+	// anchored on a bounding box, which these legacy flags cannot express, so
+	// legacy land resolves to surface-only (no source) regardless of interval --
+	// the same supported shape as interval == 0. Declare a zillapi source in a
+	// config.json to ingest land.
 	if legacy.interval > 0 && cat == "hdd" {
 		rc.Sources = []SourceConfig{{
 			Name:            cat + "-legacy",
