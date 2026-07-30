@@ -13,7 +13,7 @@ import (
 type SourceConfig struct {
 	Name            string `json:"name"`
 	Category        string `json:"category"`
-	Type            string `json:"type"` // "ebay" | "craigslist"
+	Type            string `json:"type"` // "ebay"
 	IntervalMinutes int    `json:"intervalMinutes"`
 	// SecretRef is parsed but not yet consumed: secrets currently flow via
 	// global env/ExternalSecret. Reserved for per-source secret wiring in a
@@ -23,10 +23,6 @@ type SourceConfig struct {
 	// ebay
 	Query string `json:"query,omitempty"`
 	Limit int    `json:"limit,omitempty"`
-
-	// craigslist
-	City       string `json:"city,omitempty"`
-	ClCategory string `json:"clCategory,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`

@@ -71,7 +71,7 @@ func (m *MemoryStore) Search(_ context.Context, q Query) ([]item.Item, error) {
 // DeleteStale removes every item from the given source whose SeenAt is strictly
 // before olderThan, returning the count deleted. It is scoped by source so a
 // freshness/retention window applies to one source (e.g. eBay's 6h content-age
-// obligation) without touching others (e.g. keyless Craigslist).
+// obligation) without touching others (e.g. a keyless feed source).
 func (m *MemoryStore) DeleteStale(_ context.Context, sourceID string, olderThan time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

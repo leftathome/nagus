@@ -219,7 +219,7 @@ func TestExtract_APN(t *testing.T) {
 func TestDeterministicID(t *testing.T) {
 	e := New()
 	s1 := baseSanitized()
-	s1.SourceID = "craigslist"
+	s1.SourceID = "landsource"
 	s1.SourceKey = "abc123"
 
 	it1a, err := e.Extract(context.Background(), s1)
@@ -238,7 +238,7 @@ func TestDeterministicID(t *testing.T) {
 	}
 
 	s2 := baseSanitized()
-	s2.SourceID = "craigslist"
+	s2.SourceID = "landsource"
 	s2.SourceKey = "xyz789"
 	it2, err := e.Extract(context.Background(), s2)
 	if err != nil {
@@ -316,7 +316,7 @@ func TestExtract_NegativePriceErrors(t *testing.T) {
 // a starting point for test cases that only need to vary one field.
 func baseSanitized() listing.Sanitized {
 	return listing.Sanitized{
-		SourceID:     "craigslist",
+		SourceID:     "landsource",
 		SourceKey:    "7654321",
 		SourceURL:    "https://example.invalid/land/7654321.html",
 		Title:        "5 Acre Rural Parcel, Great Views",

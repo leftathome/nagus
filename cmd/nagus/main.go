@@ -72,14 +72,18 @@ func usage() {
 usage:
   nagus version
   nagus ingest -category hdd  ... (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query ...] [-limit 50]
-  nagus ingest -category land ... (-craigslist-fixture FILE | -craigslist-city sfbay) [-craigslist-category reo]
   nagus search -category hdd|land -db nagus.db [-text STR] [-limit 20] [-min-capacity 6] [-offline] [-json]
   nagus serve  -category hdd|land -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-offline]
 
-Categories: hdd ($/TB deal-watch, eBay) and land (structure-first, Craigslist +
-free gov geo enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
+Categories: hdd ($/TB deal-watch, eBay) and land (structure-first + free gov geo
+enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
 NAGUS_RENTCAST_KEY env). ingest collects + stores; search/serve surface ranked
 candidates read-only (eyes, not hands).
+
+land currently has NO acquisition connector: Craigslist retired the RSS feed the
+old source read (nagus-hh5) and the replacement adapter is not wired yet
+(nagus-hla), so "ingest -category land" errors. land still surfaces normally from
+already-stored items.
 `)
 }
 
@@ -92,33 +96,28 @@ func runIngest(args []string) error {
 	clientSecret := fs.String("client-secret", "", "eBay OAuth client secret (live hdd ingest)")
 	query := fs.String("query", "internal hard drive", "eBay search query (live hdd ingest)")
 	limit := fs.Int("limit", 50, "eBay max listings (live hdd ingest)")
-	clFixture := fs.String("craigslist-fixture", "", "Craigslist RSS fixture (offline land ingest)")
-	clCity := fs.String("craigslist-city", "", "Craigslist city subdomain, e.g. sfbay (live land ingest)")
-	clCategory := fs.String("craigslist-category", "reo", "Craigslist category (reo/sss/cta)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !supportedCategory(*cat) {
 		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
-
-	sourceType := "ebay"
+	// land has no acquisition connector right now: the Craigslist RSS source was
+	// removed when Craigslist retired the feed it read (nagus-hh5), and the
+	// replacement land adapter is not built yet (nagus-hla). Fail loudly rather
+	// than "succeed" having collected nothing -- the land category still SURFACES
+	// (search/serve read whatever is already stored), it just cannot ingest.
 	if *cat == "land" {
-		sourceType = "craigslist"
+		return fmt.Errorf("land ingest has no connector: the Craigslist source was removed (nagus-hh5) and its replacement is not wired yet (nagus-hla); land can still be searched/served from stored items")
 	}
+
 	sc := SourceConfig{
-		Name:       *cat,
-		Category:   *cat,
-		Type:       sourceType,
-		Query:      *query,
-		Limit:      *limit,
-		City:       *clCity,
-		ClCategory: *clCategory,
-	}
-	if *cat == "hdd" {
-		sc.Fixture = *fixture
-	} else {
-		sc.Fixture = *clFixture
+		Name:     *cat,
+		Category: *cat,
+		Type:     "ebay",
+		Query:    *query,
+		Limit:    *limit,
+		Fixture:  *fixture,
 	}
 
 	st, closeSt, err := sflags.open(context.Background())
