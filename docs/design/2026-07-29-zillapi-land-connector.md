@@ -118,6 +118,26 @@ declares: `zpid`, `id`, `address` + `addressStreet`/`City`/`State`/`Zipcode`,
 `area`/`livingArea`, `latLong`, `statusType`, `statusText`, `homeType`, `imgSrc`,
 `detailUrl`, `hdpData`.
 
+> **RESOLVED 2026-07-30 by the live capture (5 credits, balance 100 -> 95).** Both
+> questions below are answered, and the observed billing confirms the cost model:
+> 5 results cost exactly 5 credits.
+>
+> 1. **Lot area IS present**, in two undeclared places: a top-level `lotArea`
+>    object `{value, unit, formatted}` on every row, and
+>    `hdpData.homeInfo.lotAreaValue`/`lotAreaUnit`. Both reported `unit: "acres"`.
+>    The connector prefers the top-level object and falls back to `hdpData`.
+>    Option A stands; option B (per-row detail calls) is not needed.
+> 2. **`filters.lotSize` is in SQUARE FEET.** Sending `lotSize.min = 43560`
+>    returned five lots of 5.02-19.58 acres; had it been read as acres the filter
+>    would have demanded ~68 square miles and returned nothing. `SqftPerAcre`
+>    stays 43560.
+>
+> The real response also carries fields the published schema omits, now mapped:
+> `taxAssessedValue` (the assessed-value signal land scoring otherwise pays
+> Rentcast for -- present on only some rows, so strictly optional) and a top-level
+> `daysOnZillow`. And every `detailUrl` came back ABSOLUTE, so the relative-URL
+> handling is defensive rather than load-bearing.
+
 **Open question -- lot size is NOT in the declared search-row schema.** The spec
 mentions lot size only as a *filter*; `hdpData` is `additionalProperties: true`
 (loosely typed) and in real Zillow payloads its `homeInfo` often carries
