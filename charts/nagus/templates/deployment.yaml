@@ -99,10 +99,6 @@ spec:
               value: {{ .Values.land.minAcreageAcres | quote }}
             - name: NAGUS_LAND_MAX_ACREAGE
               value: {{ .Values.land.maxAcreageAcres | quote }}
-            - name: NAGUS_CL_CITY
-              value: {{ .Values.land.craigslistCity | quote }}
-            - name: NAGUS_CL_CATEGORY
-              value: {{ .Values.land.craigslistCategory | quote }}
             {{- end }}
             {{- end }}
             {{- $rentcast := include "nagus.rentcastSecretName" . }}

@@ -30,8 +30,10 @@ connector -> glovebox sanitize -> extract/tokenize -> normalize -> store
 Two reference adapters: **land** (free gov geo-enrichment: FEMA flood / USGS
 elevation / USDA soil / USFWS wetlands / Census geocode, plus a parcel-data
 adapter) and **HDD** (`$/TB` deal-watch via a free valuation API). eBay Browse is
-the common-denominator listing connector for durables; Craigslist rides the
-existing glovebox RSS connector.
+the common-denominator listing connector for durables. **land currently has no
+acquisition connector**: it was a Craigslist RSS source until Craigslist retired
+that feed, and the replacement adapter is not wired yet, so land surfaces
+already-stored items and ingests nothing.
 
 ## Design
 

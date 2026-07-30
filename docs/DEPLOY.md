@@ -104,8 +104,7 @@ outbound source-API creds -- one secret, one property per source).
 | Rentcast (land) | `eso/nagus/sources` -> `rentcast_key` | `NAGUS_RENTCAST_KEY` | `land.rentcastExternalSecret` (or `land.rentcastSecret` override) |
 | eBay OAuth (hdd live ingest) | `eso/nagus/sources` -> `ebay_client_id`, `ebay_client_secret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` | `externalSecret` (or `ebay.existingSecret` override) |
 
-The demo path (`demo.enabled=true`) and the keyless Craigslist **land** source
-need no secrets at all.
+The demo path (`demo.enabled=true`) needs no secrets at all.
 
 ## eBay API call budget
 
@@ -124,8 +123,8 @@ must be < 6h older than eBay. After each ingest the hdd pipeline purges eBay
 items not re-seen within `EbayContentMaxAge` (6h): live listings are re-ingested
 (their `SeenAt` refreshed), stale/ended ones fall past the cutoff and are removed.
 **Set `serve.ingestInterval` well under 6h** (e.g. 30m-1h) so live listings are
-refreshed before the window closes. The Craigslist **land** source is not eBay
-Content and is not purged.
+refreshed before the window closes. Non-eBay sources are not eBay Content and are
+not purged under this rule.
 
 ### Sandbox testing
 
@@ -161,12 +160,14 @@ against the sandbox / live keyset (nagus-hm0) before enabling in production.**
   `serve.ingestInterval`. nagus stores NO eBay user PII (no seller username or
   per-seller key); only coarse, per-listing seller-trust tiers land on the item,
   which is why we take the Marketplace Account Deletion opt-out. See SECURITY.md.
-- **land**: Craigslist source (`land.craigslistCity`, `land.craigslistCategory`)
-  + structure-first scoring. Set `land.budgetCents` / `land.minAcreageAcres` /
+- **land**: structure-first scoring, **no acquisition source at present**. The
+  Craigslist RSS source was removed when Craigslist retired that feed, and the
+  replacement adapter is not wired yet, so land is surface-only: it serves
+  already-stored items and ingests nothing. Scoring/enrichment config still
+  applies to what is stored -- set `land.budgetCents` / `land.minAcreageAcres` /
   `land.maxAcreageAcres`; enable `land.rentcastExternalSecret` (syncs the key
   from `eso/nagus/sources`) or set `land.rentcastSecret` for structure signals
-  (without it, land surfaces as unassessed candidates). The Craigslist source is
-  keyless; it needs residential egress -- in-cluster egress qualifies.
+  (without it, land surfaces as unassessed candidates).
 
 ## Watches (delivery)
 

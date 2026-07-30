@@ -39,7 +39,7 @@ type Item struct {
 	PriceCents  int64             `json:"price_cents"`  // minor units; 0 == unknown
 	Currency    string            `json:"currency"`     // ISO 4217, e.g. "USD"
 	Condition   string            `json:"condition"`    // new|refurb|used|... (category-defined)
-	SourceID    string            `json:"source_id"`    // connector that produced it (e.g. "craigslist")
+	SourceID    string            `json:"source_id"`    // connector that produced it (e.g. "ebay")
 	SourceKey   string            `json:"source_key"`   // source-native id (listing id / APN)
 	SourceURL   string            `json:"source_url"`   // canonical link
 	SeenAt      time.Time         `json:"seen_at"`      // when nagus first ingested it

@@ -84,8 +84,8 @@ func (s *server) routes() *http.ServeMux {
 
 // handleMetrics emits Prometheus-text metrics. Currently it reports the eBay API
 // call budget (License 2.4: we track usage against the ~5k/day production cap and
-// never circumvent it). When the source is not the eBay connector (e.g. land /
-// Craigslist), there is no budget to report and the body is empty.
+// never circumvent it). When the source is not the eBay connector (e.g. a land
+// source), there is no budget to report and the body is empty.
 func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	// Collect the eBay ingesters first so each metric family's HELP/TYPE lines
@@ -273,9 +273,6 @@ func runServe(args []string) error {
 		interval:    *interval,
 		ebayQuery:   *query,
 		ebayFixture: *fixture,
-		clCity:      envOr("NAGUS_CL_CITY", ""),
-		clCategory:  envOr("NAGUS_CL_CATEGORY", "reo"),
-		clFixture:   envOr("NAGUS_CL_FIXTURE", ""),
 	}
 	cfg, err := resolveRunConfig(*configPath, *cat, opts, legacy)
 	if err != nil {
@@ -347,9 +344,6 @@ type legacySource struct {
 	interval    time.Duration
 	ebayQuery   string
 	ebayFixture string
-	clCity      string
-	clCategory  string
-	clFixture   string
 }
 
 // resolveRunConfig loads config.json when configPath != "", else synthesizes a
@@ -377,24 +371,20 @@ func resolveRunConfig(configPath, cat string, o categoryOpts, legacy legacySourc
 		Categories:      map[string]CategoryConfig{cat: cc},
 		DefaultCategory: cat,
 	}
-	if legacy.interval > 0 {
-		src := SourceConfig{
+	// Only hdd has a connector in the legacy path. land's Craigslist source was
+	// removed when Craigslist retired its RSS feed (nagus-hh5) and the replacement
+	// adapter is not wired yet (nagus-hla), so legacy land resolves to
+	// surface-only (no source) regardless of interval -- the same supported shape
+	// as interval == 0.
+	if legacy.interval > 0 && cat == "hdd" {
+		rc.Sources = []SourceConfig{{
 			Name:            cat + "-legacy",
 			Category:        cat,
 			IntervalMinutes: int(legacy.interval / time.Minute),
-		}
-		switch cat {
-		case "hdd":
-			src.Type = "ebay"
-			src.Query = legacy.ebayQuery
-			src.Fixture = legacy.ebayFixture
-		case "land":
-			src.Type = "craigslist"
-			src.City = legacy.clCity
-			src.ClCategory = legacy.clCategory
-			src.Fixture = legacy.clFixture
-		}
-		rc.Sources = []SourceConfig{src}
+			Type:            "ebay",
+			Query:           legacy.ebayQuery,
+			Fixture:         legacy.ebayFixture,
+		}}
 	}
 	return rc, nil
 }

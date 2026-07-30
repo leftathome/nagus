@@ -8,13 +8,13 @@ import (
 
 func validItem() Item {
 	return Item{
-		ID:         "craigslist:reo:12345",
+		ID:         "landsource:reo:12345",
 		Category:   "land",
 		Class:      ClassDurable,
 		Title:      "5 acres with old cabin",
 		PriceCents: 4500000,
 		Currency:   "USD",
-		SourceID:   "craigslist",
+		SourceID:   "landsource",
 		SourceKey:  "reo/12345",
 		SourceURL:  "https://example.org/12345",
 		SeenAt:     time.Unix(1_700_000_000, 0),

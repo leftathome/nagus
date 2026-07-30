@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/leftathome/nagus/internal/category"
-	"github.com/leftathome/nagus/internal/connector/craigslist"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -77,15 +76,6 @@ func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector,
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		return conn, nil
-	case "craigslist":
-		clCat := orDefault(s.ClCategory, "reo")
-		if s.Fixture != "" {
-			return craigslist.NewConnector(craigslist.Config{Name: s.Name, FixturePath: s.Fixture, Category: clCat}), nil
-		}
-		if s.City == "" {
-			return nil, fmt.Errorf("source %q: craigslist needs city or fixture", s.Name)
-		}
-		return craigslist.NewConnector(craigslist.Config{Name: s.Name, City: s.City, Category: clCat}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}

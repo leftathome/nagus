@@ -12,7 +12,7 @@ func TestLoadRunConfigParsesSourcesAndCategories(t *testing.T) {
 	body := `{
 	  "sources": [
 	    {"name":"ebay","category":"hdd","type":"ebay","query":"internal hard drive","intervalMinutes":30,"secretRef":"ebay"},
-	    {"name":"cl-seattle","category":"land","type":"craigslist","city":"seattle","clCategory":"rea","intervalMinutes":60}
+	    {"name":"land-src","category":"land","type":"ebay","intervalMinutes":60}
 	  ],
 	  "categories": {"hdd":{"minCapacityTB":8},"land":{"minAcreageAcres":1,"budgetCents":0}}
 	}`
