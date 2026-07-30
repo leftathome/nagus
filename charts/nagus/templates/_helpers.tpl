@@ -66,6 +66,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
+{{/* The Secret name carrying the Zillapi API key, or "" when neither an
+     existing Secret nor an ExternalSecret is configured. */}}
+{{- define "nagus.zillapiSecretName" -}}
+{{- if .Values.land.zillapiSecret -}}
+{{- .Values.land.zillapiSecret -}}
+{{- else if .Values.land.zillapiExternalSecret.enabled -}}
+{{- printf "%s-zillapi" (include "nagus.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The local basic-auth Secret name carrying the postgres role credentials. */}}
 {{- define "nagus.dbSecretName" -}}
 {{- if .Values.storage.postgres.existingSecret -}}

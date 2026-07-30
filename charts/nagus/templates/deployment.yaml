@@ -109,6 +109,14 @@ spec:
                   name: {{ $rentcast }}
                   key: NAGUS_RENTCAST_KEY
             {{- end }}
+            {{- $zillapi := include "nagus.zillapiSecretName" . }}
+            {{- if $zillapi }}
+            - name: NAGUS_ZILLAPI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $zillapi }}
+                  key: NAGUS_ZILLAPI_KEY
+            {{- end }}
           {{- $secret := include "nagus.ebaySecretName" . }}
           {{- if and $secret (not .Values.demo.enabled) }}
           envFrom:

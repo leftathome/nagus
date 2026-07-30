@@ -1,0 +1,108 @@
+{
+  "data": [
+    {
+      "zpid": "2078311111",
+      "id": "2078311111",
+      "address": "1234 Cascade View Rd, Sedro-Woolley, WA 98284",
+      "addressStreet": "1234 Cascade View Rd",
+      "addressCity": "Sedro-Woolley",
+      "addressState": "WA",
+      "addressZipcode": "98284",
+      "price": "$149,000",
+      "unformattedPrice": 149000,
+      "latLong": { "latitude": 48.5041, "longitude": -122.2359 },
+      "statusType": "FOR_SALE",
+      "statusText": "Lot / Land for sale",
+      "homeType": "LOT",
+      "imgSrc": "https://photos.zillowstatic.com/fp/example-a.jpg",
+      "hasImage": true,
+      "detailUrl": "/homedetails/1234-Cascade-View-Rd-Sedro-Woolley-WA-98284/2078311111_zpid/",
+      "hdpData": {
+        "homeInfo": {
+          "homeStatus": "FOR_SALE",
+          "daysOnZillow": 3,
+          "lotAreaValue": 5.19,
+          "lotAreaUnit": "acres"
+        }
+      }
+    },
+    {
+      "zpid": "2078322222",
+      "id": "2078322222",
+      "address": "5678 Samish Way, Bellingham, WA 98229",
+      "addressStreet": "5678 Samish Way",
+      "addressCity": "Bellingham",
+      "addressState": "WA",
+      "addressZipcode": "98229",
+      "price": "$92,500",
+      "unformattedPrice": 92500,
+      "latLong": { "latitude": 48.7135, "longitude": -122.4512 },
+      "statusType": "FOR_SALE",
+      "statusText": "Lot / Land for sale",
+      "homeType": "LOT",
+      "detailUrl": "https://www.zillow.com/homedetails/5678-Samish-Way-Bellingham-WA-98229/2078322222_zpid/",
+      "hdpData": {
+        "homeInfo": {
+          "homeStatus": "FOR_SALE",
+          "daysOnZillow": 6,
+          "lotAreaValue": 87120,
+          "lotAreaUnit": "sqft"
+        }
+      }
+    },
+    {
+      "zpid": "2078333333",
+      "id": "2078333333",
+      "address": "0 Guemes Island Rd, Anacortes, WA 98221",
+      "addressStreet": "0 Guemes Island Rd",
+      "addressCity": "Anacortes",
+      "addressState": "WA",
+      "addressZipcode": "98221",
+      "price": "$175,000",
+      "unformattedPrice": 175000,
+      "latLong": { "latitude": 48.5498, "longitude": -122.6221 },
+      "statusType": "FOR_SALE",
+      "statusText": "Lot / Land for sale",
+      "homeType": "LOT",
+      "detailUrl": "/homedetails/0-Guemes-Island-Rd-Anacortes-WA-98221/2078333333_zpid/",
+      "hdpData": {
+        "homeInfo": {
+          "homeStatus": "FOR_SALE",
+          "daysOnZillow": 12
+        }
+      }
+    },
+    {
+      "zpid": "2078344444",
+      "id": "2078344444",
+      "address": "Lot 7 Alger Cain Lake Rd, Sedro-Woolley, WA 98284",
+      "addressStreet": "Lot 7 Alger Cain Lake Rd",
+      "addressCity": "Sedro-Woolley",
+      "addressState": "WA",
+      "addressZipcode": "98284",
+      "statusType": "FOR_SALE",
+      "statusText": "Lot / Land for sale",
+      "homeType": "LOT",
+      "detailUrl": "/homedetails/Lot-7-Alger-Cain-Lake-Rd-Sedro-Woolley-WA-98284/2078344444_zpid/",
+      "hdpData": {
+        "homeInfo": {
+          "homeStatus": "FOR_SALE",
+          "daysOnZillow": 1,
+          "lotAreaValue": 2.5,
+          "lotAreaUnit": "acres"
+        }
+      }
+    },
+    {
+      "id": "no-zpid-row",
+      "address": "Unknown Parcel, Skagit County, WA",
+      "price": "$40,000",
+      "unformattedPrice": 40000,
+      "statusType": "FOR_SALE",
+      "homeType": "LOT",
+      "detailUrl": "/homedetails/unknown/"
+    }
+  ],
+  "meta": { "count": 5 },
+  "request_id": "req_synthetic_0000000000"
+}

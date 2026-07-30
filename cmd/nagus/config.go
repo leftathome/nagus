@@ -13,7 +13,7 @@ import (
 type SourceConfig struct {
 	Name            string `json:"name"`
 	Category        string `json:"category"`
-	Type            string `json:"type"` // "ebay"
+	Type            string `json:"type"` // "ebay" | "zillapi"
 	IntervalMinutes int    `json:"intervalMinutes"`
 	// SecretRef is parsed but not yet consumed: secrets currently flow via
 	// global env/ExternalSecret. Reserved for per-source secret wiring in a
@@ -24,8 +24,33 @@ type SourceConfig struct {
 	Query string `json:"query,omitempty"`
 	Limit int    `json:"limit,omitempty"`
 
+	// zillapi (land). The acreage/price WINDOW is not repeated here: it is taken
+	// from the source's CategoryConfig so the filter pushed upstream cannot drift
+	// from the local hard-filter. Only the geography and the cost caps are
+	// per-source.
+	//
+	// BBox is REQUIRED for a live zillapi source: upstream anchors a search on a
+	// bounding box and rejects a free-text location alone with 400
+	// invalid_filters. Get one from a zillow.com map URL's mapBounds.
+	BBox *BBoxConfig `json:"bbox,omitempty"`
+	// MaxItems caps results per poll. Every returned row costs one credit, so this
+	// is a spend cap, not a page size. Clamped to the connector's sync ceiling.
+	MaxItems int `json:"maxItems,omitempty"`
+	// DaysOnZillow restricts a poll to recently-listed lots (1|7|14|30|90|6m|...),
+	// which is what keeps a daily poll from re-billing the standing inventory.
+	DaysOnZillow string `json:"daysOnZillow,omitempty"`
+
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`
+}
+
+// BBoxConfig is a bounding box in decimal degrees, as read off a zillow.com map
+// URL's searchQueryState mapBounds.
+type BBoxConfig struct {
+	West  float64 `json:"west"`
+	South float64 `json:"south"`
+	East  float64 `json:"east"`
+	North float64 `json:"north"`
 }
 
 // CategoryConfig is the surface/scoring config for one category.
