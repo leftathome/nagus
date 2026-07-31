@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/leftathome/nagus/internal/enrich/geo"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
@@ -121,6 +122,31 @@ type landSignals struct {
 	FloodZone         string
 }
 
+// coordsFromAttrs reads exact per-listing coordinates an API source supplied.
+// Both must parse and be non-zero: a 0,0 pair is null island, not a Washington
+// parcel, and enriching there would produce a confident wrong answer.
+func coordsFromAttrs(it item.Item) (lat, lon float64, ok bool) {
+	la, laOK := parseFloatAttr(it, "lat")
+	lo, loOK := parseFloatAttr(it, "lon")
+	if !laOK || !loOK || la == 0 || lo == 0 {
+		return 0, 0, false
+	}
+	if la < -90 || la > 90 || lo < -180 || lo > 180 {
+		return 0, 0, false
+	}
+	return la, lo, true
+}
+
+// firstNonEmpty returns the first non-blank string.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // buildLandSignals derives the rubric inputs. Typed fields (acreage, price) come
 // from the item; structure/flood/wetland come from enrichment when a geocodable
 // location is present. enriched reports whether any parcel/geo lookup resolved.
@@ -131,13 +157,34 @@ func buildLandSignals(ctx context.Context, it item.Item, geoE geoEnricher, parce
 	}
 	sig.PriceOK = it.PriceCents > 0 && (cfg.BudgetCents <= 0 || it.PriceCents <= cfg.BudgetCents)
 
-	addr := it.Attributes["location"]
-	if addr == "" {
+	// Positioning. These are deliberately DIFFERENT inputs, because they answer
+	// different questions and using the wrong one is silently wrong rather than
+	// visibly broken:
+	//
+	//   - geo enrichment (flood zone, wetlands) needs a POINT. A source that
+	//     supplies exact per-listing coordinates is used directly; geocoding is
+	//     only a fallback for sources that give a place name. Geocoding a CITY
+	//     label -- which is what "location" is -- returns the city centroid, so
+	//     the flood zone would describe downtown rather than the parcel.
+	//   - a parcel lookup needs a STREET ADDRESS. "location" cannot resolve one.
+	//
+	// Absent any of them the item simply goes un-enriched, which is a valid
+	// outcome the scorer already understands.
+	locality := it.Attributes["location"]
+	streetAddr := firstNonEmpty(it.Attributes["street_address"], locality)
+	lat, lon, haveCoords := coordsFromAttrs(it)
+	if !haveCoords && locality == "" {
 		return sig, false
 	}
+
 	enriched := false
 	if geoE != nil {
-		if lat, lon, err := geoE.Geocode(ctx, addr); err == nil {
+		if !haveCoords && locality != "" {
+			if glat, glon, err := geoE.Geocode(ctx, locality); err == nil {
+				lat, lon, haveCoords = glat, glon, true
+			}
+		}
+		if haveCoords {
 			enriched = true
 			if gr, gerr := geoE.Enrich(ctx, lat, lon); gerr == nil {
 				if gr.Flood != nil {
@@ -149,8 +196,8 @@ func buildLandSignals(ctx context.Context, it item.Item, geoE geoEnricher, parce
 			}
 		}
 	}
-	if parcelP != nil {
-		if pd, err := parcelP.Lookup(ctx, addr); err == nil {
+	if parcelP != nil && streetAddr != "" {
+		if pd, err := parcelP.Lookup(ctx, streetAddr); err == nil {
 			enriched = true
 			sig.StructurePresent = pd.StructurePresent()
 			sig.LandValueDominant = pd.AssessedLandValueCents > 0 &&

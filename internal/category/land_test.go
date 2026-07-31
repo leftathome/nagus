@@ -2,6 +2,7 @@ package category
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +118,165 @@ func TestLandPipelineStructureFirstEndToEnd(t *testing.T) {
 	}
 	if res.Items[1].Item.ID != "bare-lot" || res.Items[1].Signal.Verdict != "good" {
 		t.Fatalf("second = %s/%s, want bare-lot/good", res.Items[1].Item.ID, res.Items[1].Signal.Verdict)
+	}
+}
+
+// --- positioning: coordinates vs city centroid (nagus-hla follow-up) ----------
+
+// countingGeo records how it was used so a test can prove a code path was NOT
+// taken -- specifically that an exact-coordinate source never geocodes.
+type countingGeo struct {
+	geocodeCalls int
+	geocodeArgs  []string
+	enrichLat    float64
+	enrichLon    float64
+	enrichCalls  int
+	geocodeLat   float64
+	geocodeLon   float64
+	geocodeErr   error
+	result       geo.Result
+}
+
+func (c *countingGeo) Geocode(_ context.Context, addr string) (float64, float64, error) {
+	c.geocodeCalls++
+	c.geocodeArgs = append(c.geocodeArgs, addr)
+	if c.geocodeErr != nil {
+		return 0, 0, c.geocodeErr
+	}
+	return c.geocodeLat, c.geocodeLon, nil
+}
+
+func (c *countingGeo) Enrich(_ context.Context, lat, lon float64) (geo.Result, error) {
+	c.enrichCalls++
+	c.enrichLat, c.enrichLon = lat, lon
+	return c.result, nil
+}
+
+type recordingParcel struct {
+	args []string
+	data parcel.ParcelData
+	err  error
+}
+
+func (r *recordingParcel) Lookup(_ context.Context, addr string) (parcel.ParcelData, error) {
+	r.args = append(r.args, addr)
+	return r.data, r.err
+}
+
+func landItemWith(attrs map[string]string) item.Item {
+	it := item.Item{
+		ID: "t1", Category: "land", Class: item.ClassDurable,
+		PriceCents: 15_000_000, Currency: "USD",
+		SourceID: "zillapi:north-sound", SourceKey: "z1",
+		Attributes: map[string]string{},
+	}
+	for k, v := range attrs {
+		it.Attributes[k] = v
+	}
+	return it
+}
+
+// THE BUG THIS FIXES: "location" is a CITY label ("Sedro Woolley, WA"), so
+// geocoding it returns the city centroid and the flood zone would describe
+// downtown rather than the parcel. When the source supplies exact coordinates
+// they must be used verbatim and Geocode must never be called.
+func TestLandSignalsUseExactCoordinatesAndNeverGeocode(t *testing.T) {
+	g := &countingGeo{geocodeLat: 48.4, geocodeLon: -122.2} // the WRONG (centroid) answer
+	it := landItemWith(map[string]string{
+		"acreage":  "5.19",
+		"location": "Sedro Woolley, WA",
+		"lat":      "48.5041",
+		"lon":      "-122.2359",
+	})
+	_, enriched := buildLandSignals(context.Background(), it, g, nil, LandScoreConfig{MinAcreageAcres: 1})
+	if !enriched {
+		t.Fatal("expected enrichment to run")
+	}
+	if g.geocodeCalls != 0 {
+		t.Errorf("Geocode called %d times with %v; exact coordinates must bypass geocoding entirely", g.geocodeCalls, g.geocodeArgs)
+	}
+	if g.enrichLat != 48.5041 || g.enrichLon != -122.2359 {
+		t.Errorf("enriched at (%v,%v), want the listing's own (48.5041,-122.2359)", g.enrichLat, g.enrichLon)
+	}
+}
+
+// Sources without coordinates keep the old behavior.
+func TestLandSignalsFallBackToGeocodingWithoutCoordinates(t *testing.T) {
+	g := &countingGeo{geocodeLat: 47.6, geocodeLon: -122.3}
+	it := landItemWith(map[string]string{"acreage": "3", "location": "Seattle, WA"})
+	_, enriched := buildLandSignals(context.Background(), it, g, nil, LandScoreConfig{MinAcreageAcres: 1})
+	if !enriched {
+		t.Fatal("expected enrichment to run via the geocode fallback")
+	}
+	if g.geocodeCalls != 1 {
+		t.Fatalf("Geocode called %d times, want 1", g.geocodeCalls)
+	}
+	if g.enrichLat != 47.6 || g.enrichLon != -122.3 {
+		t.Errorf("enriched at (%v,%v), want the geocoded point", g.enrichLat, g.enrichLon)
+	}
+}
+
+// Garbage or null-island coordinates must not be trusted -- fall back rather than
+// confidently enriching the Gulf of Guinea.
+func TestLandSignalsRejectBadCoordinates(t *testing.T) {
+	for _, bad := range []map[string]string{
+		{"lat": "0", "lon": "0"},
+		{"lat": "abc", "lon": "-122.2"},
+		{"lat": "48.5"},
+		{"lat": "91.2", "lon": "-122.2"},
+		{"lat": "48.5", "lon": "-999"},
+	} {
+		g := &countingGeo{geocodeLat: 47.6, geocodeLon: -122.3}
+		attrs := map[string]string{"acreage": "3", "location": "Seattle, WA"}
+		for k, v := range bad {
+			attrs[k] = v
+		}
+		_, _ = buildLandSignals(context.Background(), landItemWith(attrs), g, nil, LandScoreConfig{MinAcreageAcres: 1})
+		if g.geocodeCalls != 1 {
+			t.Errorf("coords %v: Geocode called %d times, want 1 (bad coords must fall back)", bad, g.geocodeCalls)
+		}
+		if g.enrichLat == 0 && g.enrichLon == 0 && g.enrichCalls > 0 {
+			t.Errorf("coords %v: enriched at null island", bad)
+		}
+	}
+}
+
+// A parcel provider needs a STREET ADDRESS. Passing it a city label is a lookup
+// that cannot succeed, so the street address must be preferred when present.
+func TestParcelLookupPrefersStreetAddress(t *testing.T) {
+	p := &recordingParcel{}
+	it := landItemWith(map[string]string{
+		"acreage":        "5",
+		"location":       "Sedro Woolley, WA",
+		"street_address": "0 262XX Helmick Road, Sedro Woolley, WA 98284",
+	})
+	_, _ = buildLandSignals(context.Background(), it, nil, p, LandScoreConfig{MinAcreageAcres: 1})
+	if len(p.args) != 1 {
+		t.Fatalf("parcel Lookup called %d times, want 1", len(p.args))
+	}
+	if !strings.Contains(p.args[0], "Helmick") {
+		t.Errorf("parcel looked up %q, want the street address", p.args[0])
+	}
+}
+
+func TestParcelLookupFallsBackToLocality(t *testing.T) {
+	p := &recordingParcel{}
+	it := landItemWith(map[string]string{"acreage": "5", "location": "Sedro Woolley, WA"})
+	_, _ = buildLandSignals(context.Background(), it, nil, p, LandScoreConfig{MinAcreageAcres: 1})
+	if len(p.args) != 1 || p.args[0] != "Sedro Woolley, WA" {
+		t.Fatalf("parcel args = %v, want the locality fallback", p.args)
+	}
+}
+
+// Coordinates alone are enough to enrich, even with no place label at all.
+func TestCoordinatesAloneEnableEnrichment(t *testing.T) {
+	g := &countingGeo{}
+	it := landItemWith(map[string]string{"acreage": "5", "lat": "48.5", "lon": "-122.2"})
+	_, enriched := buildLandSignals(context.Background(), it, g, nil, LandScoreConfig{MinAcreageAcres: 1})
+	if !enriched {
+		t.Fatal("coordinates alone must enable enrichment")
+	}
+	if g.geocodeCalls != 0 {
+		t.Errorf("Geocode called %d times, want 0", g.geocodeCalls)
 	}
 }

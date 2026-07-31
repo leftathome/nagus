@@ -393,3 +393,62 @@ func TestExtractFallsBackWhenAspectIsJunk(t *testing.T) {
 		}
 	}
 }
+
+// Structured positioning aspects must survive extraction. They are what lets the
+// enrichment stage hit the actual parcel instead of the city centroid, so
+// dropping them (as the extractor previously did) silently degrades every
+// flood/wetland signal on an API-sourced listing.
+func TestExtractCarriesPositioningAspects(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID:  "zillapi:north-sound",
+		SourceKey: "456629829",
+		Title:     "0 262XX Helmick Road, Sedro Woolley, WA 98284",
+		Currency:  "USD",
+		Aspects: map[string]string{
+			"acreage":              "6.129",
+			"location":             "Sedro Woolley, WA",
+			"street_address":       "0 262XX Helmick Road, Sedro Woolley, WA 98284",
+			"lat":                  "48.5041",
+			"lon":                  "-122.2359",
+			"assessed_value_cents": "4610000",
+			"days_on_market":       "3",
+		},
+		SeenAt: time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	for k, want := range map[string]string{
+		"lat":                  "48.5041",
+		"lon":                  "-122.2359",
+		"street_address":       "0 262XX Helmick Road, Sedro Woolley, WA 98284",
+		"assessed_value_cents": "4610000",
+		"days_on_market":       "3",
+		"location":             "Sedro Woolley, WA",
+		"acreage":              "6.129",
+	} {
+		if got := it.Attributes[k]; got != want {
+			t.Errorf("Attributes[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// Blank aspect values must not create empty attributes that later read as "set".
+func TestExtractSkipsBlankPositioningAspects(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID: "zillapi:x", SourceKey: "z", Currency: "USD",
+		Title:   "Some parcel",
+		Aspects: map[string]string{"lat": "", "lon": "   ", "street_address": ""},
+		SeenAt:  time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	for _, k := range []string{"lat", "lon", "street_address"} {
+		if v, ok := it.Attributes[k]; ok {
+			t.Errorf("Attributes[%q] = %q, want absent", k, v)
+		}
+	}
+}

@@ -97,6 +97,22 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["location"] = loc
 	}
 
+	// Structured positioning + context from API sources. These are carried
+	// through verbatim (as untrusted aspect values always are) because the
+	// enrichment stage needs them: exact coordinates let geo enrichment skip
+	// geocoding and hit the actual parcel, and a street address is what a parcel
+	// provider can actually resolve -- "location" is a city label and would
+	// silently enrich the city CENTROID instead.
+	//
+	// assessed_value_cents is carried for context only. It is a TOTAL assessed
+	// value and cannot be decomposed into land vs improvement, so it deliberately
+	// does NOT feed the land-value-dominant signal, which needs that split.
+	for _, k := range []string{"lat", "lon", "street_address", "assessed_value_cents", "days_on_market"} {
+		if v, ok := s.Aspects[k]; ok && strings.TrimSpace(v) != "" {
+			it.Attributes[k] = strings.TrimSpace(v)
+		}
+	}
+
 	if err := it.Validate(); err != nil {
 		return item.Item{}, fmt.Errorf("land: extract: %w", err)
 	}

@@ -329,6 +329,12 @@ func (c *Connector) mapRow(row searchResultRow, now time.Time) (listing.Raw, boo
 	if acres, ok := row.acres(); ok {
 		aspects["acreage"] = formatAcres(acres)
 	}
+	// Full formatted street address, kept distinct from the coarse city label
+	// below: parcel lookups need the street address, geo needs coordinates, and
+	// "location" is only a display/region hint.
+	if a := strings.TrimSpace(row.Address); a != "" {
+		aspects["street_address"] = a
+	}
 	if city := strings.TrimSpace(row.AddressCity); city != "" {
 		loc := city
 		if st := strings.TrimSpace(row.AddressState); st != "" {
