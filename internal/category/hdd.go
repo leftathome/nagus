@@ -71,7 +71,13 @@ const EbayContentMaxAge = 6 * time.Hour
 func NewHDDSurface(deps HDDDeps) *pipeline.Surface {
 	ref := deps.Reference
 	if ref == nil {
-		ref = &valhdd.ShopifySource{ProductsURL: DefaultReferenceProductsURL, HTTPClient: deps.HTTPClient}
+		// Default to a reference derived from our OWN ingested offers rather than
+		// a live third-party fetch per query. The live ShopifySource remains
+		// available (and is still what an operator can inject) but is no longer
+		// the default: its coverage was one retailer's first catalog page, which
+		// left the whole 6-14TB band scoring unknown-no-reference, and it put an
+		// external call on the read path. See internal/valuation/hdd.StoreSource.
+		ref = &valhdd.StoreSource{Store: deps.Store, Category: "hdd"}
 	}
 	valuer := valhdd.Valuer{Source: ref}
 	valuate := func(ctx context.Context, it item.Item) (score.DealSignal, error) {

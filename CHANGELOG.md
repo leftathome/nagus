@@ -4,6 +4,33 @@ All notable changes to nagus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-07-31
+
+### Fixed
+
+- **HDD $/TB reference is now derived from our own ingested offers** instead of
+  fetching a third-party catalog on every search
+  (`internal/valuation/hdd.StoreSource`). With eBay live, every filter survivor
+  was scoring `unknown-no-reference`: the old reference was one retailer's
+  `products.json?limit=250`, whose capacities are enterprise 16-24TB drives plus
+  a lot of SSDs, so the entire 6-14TB band where most listings actually live had
+  no anchor at all. It was also a partial catalog (one page, no pagination) and
+  put a live third-party call -- against a host that rate limits hard -- on the
+  read path of a read-only surface.
+  Measured against the live corpus: 23 of 30 (capacity, condition) buckets now
+  carry enough comparables to anchor a reference, the densest being 10TB refurb
+  with 17 -- precisely the band that previously had none.
+  **This changes what the reference MEANS**: from "what one retailer charges" to
+  "the median of comparable offers nagus has actually seen". That is a market
+  reference; it is better for spotting a deal but moves with the market. The live
+  `ShopifySource` remains available for injection, it is simply no longer the
+  default.
+  Guarded against the self-comparison trap: a reference computed over the same
+  corpus being scored would, for a listing with no comparables, return that
+  listing's own price -- a ratio of exactly 1.0, scoring "market" forever while
+  looking authoritative. Below `MinSamples` (default 3) it reports no reference
+  instead, because unknown is honest and self-referential is not.
+
 ## [0.3.0] - 2026-07-30
 
 ### Added
@@ -158,6 +185,7 @@ acts (eyes, not hands).
 - Postgres text search is substring (`ILIKE`) to match the reference contract;
   ranked FTS/pgvector is a follow-on.
 
+[0.3.1]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.3.1
 [0.3.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.3.0
 [0.2.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.2.0
 [0.1.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.1.0
