@@ -35,6 +35,13 @@ type IngestResult struct {
 	Stored  int
 	Purged  int // items removed by the post-ingest freshness purge (StaleAfter)
 	Skips   []Skip
+
+	// Offer-layer counters. These describe the additive offer store and are
+	// reported separately from the item counters above so that "we stored 79
+	// items" and "we recorded 79 offers" can never be confused for each other.
+	OffersRecorded int // listings written to the offer store this run
+	OffersExpired  int // offers marked expired (RETAINED, not deleted)
+	OffersPurged   int // offers DELETED by the source's retention policy
 }
 
 // Scored is one surfaced item with its deal signal and score.

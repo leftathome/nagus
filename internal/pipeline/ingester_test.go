@@ -8,6 +8,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/store"
 )
@@ -99,4 +100,147 @@ func TestIngesterPurgesStaleSourceItems(t *testing.T) {
 	if _, ok, _ := st.Get(ctx, "other"); !ok {
 		t.Fatal("other-source stale item must be untouched by a scoped purge")
 	}
+}
+
+// --- offer layer (nagus-q6u increment A) --------------------------------------
+
+// The offer layer is ADDITIVE: enabling it must not change what reaches the item
+// store, because the item store is what feeds the live surface.
+func TestIngestWritesOffersWithoutDisturbingItems(t *testing.T) {
+	itemStore := store.NewMemoryStore()
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+
+	ing := &Ingester{
+		Connector: idConnector{id: "shopify:x", raws: []listing.Raw{
+			{SourceID: "shopify:x", SourceKey: "a", Title: "Drive A", PriceCents: 1000, Currency: "USD", SeenAt: now},
+			{SourceID: "shopify:x", SourceKey: "b", Title: "Drive B", PriceCents: 2000, Currency: "USD", SeenAt: now},
+		}},
+		Sanitizer: sanitize.Passthrough{Name: "test"},
+		Extractor: fakeExtractor{},
+		Store:     itemStore,
+		Offers:    offers,
+		Now:       func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Stored != 2 {
+		t.Errorf("Stored = %d, want 2 (item path must be unaffected)", res.Stored)
+	}
+	if res.OffersRecorded != 2 {
+		t.Errorf("OffersRecorded = %d, want 2", res.OffersRecorded)
+	}
+	got, err := offers.Query(context.Background(), offer.Query{})
+	if err != nil {
+		t.Fatalf("offer Query: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("offer store holds %d, want 2", len(got))
+	}
+	for _, o := range got {
+		if !o.Purchasable() {
+			t.Errorf("freshly ingested offer %q should be purchasable", o.SourceKey)
+		}
+	}
+}
+
+// Housekeeping runs on ingest regardless of evaluation: offers the source
+// stopped showing become expired but are RETAINED.
+func TestIngestExpiresOffersButRetainsThem(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	// An old offer from a previous run.
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "shopify:x", SourceKey: "gone", PriceCents: 500, Currency: "USD",
+		LastSeen: now.Add(-72 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector: idConnector{id: "shopify:x", raws: []listing.Raw{
+			{SourceID: "shopify:x", SourceKey: "still-here", Title: "T", PriceCents: 100, Currency: "USD", SeenAt: now},
+		}},
+		Sanitizer:        sanitize.Passthrough{Name: "test"},
+		Extractor:        fakeExtractor{},
+		Store:            store.NewMemoryStore(),
+		Offers:           offers,
+		OfferExpireAfter: 24 * time.Hour,
+		Now:              func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersExpired != 1 {
+		t.Fatalf("OffersExpired = %d, want 1", res.OffersExpired)
+	}
+	if offers.Len() != 2 {
+		t.Fatalf("offer store holds %d, want 2 -- expiry must RETAIN", offers.Len())
+	}
+	live, _ := offers.Query(context.Background(), offer.Query{})
+	if len(live) != 1 || live[0].SourceKey != "still-here" {
+		t.Errorf("purchasable offers = %v, want only still-here", live)
+	}
+}
+
+// Retention is the only thing that deletes, and it is per-source.
+func TestIngestAppliesPerSourceRetention(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "ebay:ebay", SourceKey: "ancient", PriceCents: 500, Currency: "USD",
+		LastSeen: now.Add(-48 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector:      idConnector{id: "ebay:ebay"},
+		Sanitizer:      sanitize.Passthrough{Name: "test"},
+		Extractor:      fakeExtractor{},
+		Store:          store.NewMemoryStore(),
+		Offers:         offers,
+		OfferRetention: offer.Retention{Policy: offer.Purge, Window: 6 * time.Hour},
+		Now:            func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersPurged != 1 || offers.Len() != 0 {
+		t.Fatalf("OffersPurged=%d len=%d, want 1 purged leaving 0", res.OffersPurged, offers.Len())
+	}
+}
+
+// A nil offer store leaves behaviour exactly as before the layer existed.
+func TestIngestWithoutOfferStoreIsUnchanged(t *testing.T) {
+	itemStore := store.NewMemoryStore()
+	ing := &Ingester{
+		Connector: idConnector{id: "shopify:x", raws: []listing.Raw{
+			{SourceID: "shopify:x", SourceKey: "a", Title: "T", PriceCents: 1000, Currency: "USD"},
+		}},
+		Sanitizer: sanitize.Passthrough{Name: "test"},
+		Extractor: fakeExtractor{},
+		Store:     itemStore,
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Stored != 1 || res.OffersRecorded != 0 {
+		t.Fatalf("Stored=%d OffersRecorded=%d, want 1 and 0", res.Stored, res.OffersRecorded)
+	}
+}
+
+// idConnector is fakeConnector with a configurable SourceID, which the offer
+// layer needs because offers and their retention are scoped per source.
+type idConnector struct {
+	id   string
+	raws []listing.Raw
+}
+
+func (c idConnector) SourceID() string { return c.id }
+func (c idConnector) Fetch(context.Context) ([]listing.Raw, error) {
+	return c.raws, nil
 }
