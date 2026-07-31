@@ -466,6 +466,26 @@ Verdict: no clean free firehose. v1 = **Flipp backflipp (name-match a watchlist)
 | UniFi | RESTOCK@MSRP; store.ui.com no stock API | **subscribe** to TrackaLacker/UIPing rather than build |
 - eBay Browse = common denominator (condition enum 1000 New … 2000 Certified-Refurb … 2500 Seller-refurb … 3000 Used … 7000 Parts). **Sold comps gated** (Marketplace Insights, independents routinely denied); free sold data only via Terapeak web UI.
 
+#### A.8.1 Source viability checks (dated — recheck before relying on these)
+
+Each row records what was actually observed and WHEN. Sources change their stance;
+an undated "we looked into it once" is worthless.
+
+| Source | Checked | Finding | Usable? |
+|---|---|---|---|
+| **serverpartdeals** | 2026-07-30 | Shopify `/products.json`, 200, no auth. Rate limits hard (429 `local_rate_limited`, 5 consecutive at 45s intervals). robots.txt does not disallow it. | **YES — live** |
+| **waterpanther** | 2026-07-30 | Shopify `/products.json`, 200, no auth, 250 products. Empty `product_type` on every item; capacity only in the title. | **YES — live** |
+| **goharddrive** | 2026-07-30 | NOT Shopify — a **Volusion** store (`x-powered-by: Volusion`); `/products.json` 301s to `/default.asp`. An earlier probe using `curl -L` reported 200 because it followed the redirect to an HTML page. | no |
+| **pricepergig / datacenterdisk** | 2026-07-30 | Both 404 on `/products.json`; not Shopify storefronts. This retires the long-standing UNVERIFIED flag on them in the body text above — they were listed there as "FREE JSON APIs", which is **not** confirmed. | no (as Shopify) |
+| **Newegg** | 2026-07-31 | No buyer-facing API: the developer program is a **Marketplace/Seller** API (item/price/order management) requiring registered-seller credentials. ToU (last updated 2026-07-21) prohibits *"Access or attempt to access the Site, or any portion thereof, through any automated means, including but not limited to the use of scripts or web crawlers."* robots.txt blanket-bans `ChangeDetection`, `008` and `Nutch` by name — note that is precisely the changedetection.io tool this design names as the v2 scrape-only backend. Cloudflare bot management in front. | **NO — ToU prohibits** |
+| **Pricewatch** | 2026-07-31 | **Defunct.** `www.pricewatch.com` serves a parked-domain page (`meta robots=noindex`, sponsored links via `northwavepoint.com`); apex does not resolve. `/api` returns **410 Gone**, which reads as an API that existed and was deliberately retired. | no (dead) |
+
+Pattern worth carrying forward: the sanctioned API of a large marketplace serves
+**sellers**, not buyers, so it does not answer our question; and where there is no
+buyer API, the ToU generally forbids the automated alternative. Specialist
+Shopify storefronts are the exception that works, because `/products.json` is a
+public storefront feature rather than a tolerated scrape.
+
 ### A.9 Marketplace seller-trust
 | Platform | Trust signal access |
 |---|---|
