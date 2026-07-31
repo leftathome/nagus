@@ -69,7 +69,16 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		Tokens:      tokenize(s.Title),
 	}
 
-	if tb, ok := extractCapacityTB(s.Title); ok {
+	// Capacity: prefer a TYPED aspect when the connector supplied one. Some
+	// sources do not put capacity in the title at all -- specialist Shopify
+	// retailers title products by model number ("Ultrastar DC HC580
+	// WUH722424AL5201") and carry the capacity in structured fields instead, so
+	// title-scanning alone would leave every one of their items with no capacity
+	// and drop them at the hard-filter. Sources that do carry it in the title set
+	// no aspect and fall through to the scan below.
+	if tb, ok := capacityFromAspect(s.Aspects); ok {
+		it.Attributes["capacity_tb"] = tb
+	} else if tb, ok := extractCapacityTB(s.Title); ok {
 		it.Attributes["capacity_tb"] = tb
 	}
 
@@ -123,6 +132,23 @@ func deterministicID(sourceID, sourceKey string) string {
 // uppercase rate letter). This keeps a drive's SATA/SAS link speed from being
 // misread as its capacity.
 var capacityRe = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(TB|tb|GB|gb)\b`)
+
+// capacityFromAspect reads a connector-supplied capacity from
+// Aspects["capacity_tb"], which structured sources populate with a numeric value
+// ALREADY IN TB. Aspect values are untrusted like any other, so it is parsed and
+// re-rendered rather than copied through; a non-numeric or nonpositive value is
+// rejected (ok=false) and the caller falls back to scanning the title.
+func capacityFromAspect(aspects map[string]string) (string, bool) {
+	raw, ok := aspects["capacity_tb"]
+	if !ok {
+		return "", false
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || v <= 0 {
+		return "", false
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64), true
+}
 
 // extractCapacityTB scans title for a capacity expressed in TB or GB and
 // returns it normalized to TB as a string with no trailing zeros. It reports

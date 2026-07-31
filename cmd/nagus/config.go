@@ -13,7 +13,7 @@ import (
 type SourceConfig struct {
 	Name            string `json:"name"`
 	Category        string `json:"category"`
-	Type            string `json:"type"` // "ebay" | "zillapi"
+	Type            string `json:"type"` // "ebay" | "zillapi" | "shopify"
 	IntervalMinutes int    `json:"intervalMinutes"`
 	// SecretRef is parsed but not yet consumed: secrets currently flow via
 	// global env/ExternalSecret. Reserved for per-source secret wiring in a
@@ -39,6 +39,18 @@ type SourceConfig struct {
 	// DaysOnZillow restricts a poll to recently-listed lots (1|7|14|30|90|6m|...),
 	// which is what keeps a daily poll from re-billing the standing inventory.
 	DaysOnZillow string `json:"daysOnZillow,omitempty"`
+
+	// shopify (per-store). One generic connector, N store configs.
+	//
+	// BaseURL is the storefront root, e.g. "https://serverpartdeals.com".
+	// ProductTypePrefixes is the allow-filter that stops a mixed catalog (HDDs AND
+	// SSDs) pulling the whole store downstream -- pass EVERY spelling a store uses
+	// for one category, since real catalogs are inconsistent ("Hard Drives" and
+	// "HDDs" both occur at serverpartdeals).
+	BaseURL             string   `json:"baseUrl,omitempty"`
+	ProductTypePrefixes []string `json:"productTypePrefixes,omitempty"`
+	IncludeUnavailable  bool     `json:"includeUnavailable,omitempty"`
+	MaxPages            int      `json:"maxPages,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`

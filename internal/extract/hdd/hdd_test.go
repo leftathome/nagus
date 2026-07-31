@@ -503,3 +503,67 @@ func baseSanitized() listing.Sanitized {
 		Boundary:     "test-sanitizer",
 	}
 }
+
+// TestExtractPrefersTypedCapacityAspect: specialist Shopify retailers title
+// products by model number with NO capacity in the title, carrying it in
+// structured fields instead. The connector passes it as a typed aspect and the
+// extractor must use it -- otherwise every such item has no capacity and is
+// dropped at the hard-filter.
+func TestExtractPrefersTypedCapacityAspect(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID:   "shopify:serverpartdeals",
+		SourceKey:  "1:2",
+		Title:      "Western Digital Ultrastar DC HC580 WUH722424AL5201 0F62801",
+		PriceCents: 79900,
+		Currency:   "USD",
+		Aspects:    map[string]string{"capacity_tb": "24"},
+		SeenAt:     time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if got, want := it.Attributes["capacity_tb"], "24"; got != want {
+		t.Fatalf("capacity_tb = %q, want %q (from the typed aspect)", got, want)
+	}
+	// Prove the premise: this title yields nothing on its own.
+	if _, ok := extractCapacityTB(s.Title); ok {
+		t.Error("premise broken: the model-number title DOES parse a capacity")
+	}
+}
+
+// The typed aspect wins over a conflicting figure in the title.
+func TestExtractTypedCapacityBeatsTitle(t *testing.T) {
+	s := listing.Sanitized{
+		SourceID: "shopify:x", SourceKey: "1:2", Currency: "USD",
+		Title:   "Bargain 4TB drive advertised in the title",
+		Aspects: map[string]string{"capacity_tb": "18"},
+		SeenAt:  time.Unix(1_750_000_000, 0).UTC(),
+	}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if got := it.Attributes["capacity_tb"]; got != "18" {
+		t.Fatalf("capacity_tb = %q, want 18 (typed aspect must win)", got)
+	}
+}
+
+// A junk or nonpositive aspect must not poison the attribute: fall back to title.
+func TestExtractFallsBackWhenCapacityAspectIsJunk(t *testing.T) {
+	for _, bad := range []string{"not-a-number", "0", "-5", ""} {
+		s := listing.Sanitized{
+			SourceID: "shopify:x", SourceKey: "1:2", Currency: "USD",
+			Title:   "Seagate Exos 16TB enterprise drive",
+			Aspects: map[string]string{"capacity_tb": bad},
+			SeenAt:  time.Unix(1_750_000_000, 0).UTC(),
+		}
+		it, err := New().Extract(context.Background(), s)
+		if err != nil {
+			t.Fatalf("Extract(%q): %v", bad, err)
+		}
+		if got := it.Attributes["capacity_tb"]; got != "16" {
+			t.Errorf("aspect %q: capacity_tb = %q, want 16 (fallback to title)", bad, got)
+		}
+	}
+}

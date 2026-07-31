@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/leftathome/nagus/internal/category"
+	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
@@ -101,6 +102,8 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		return conn, nil
 	case "zillapi":
 		return buildZillapiConnector(s, cc, o)
+	case "shopify":
+		return buildShopifyConnector(s)
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
@@ -136,6 +139,24 @@ func buildZillapiConnector(s SourceConfig, cc CategoryConfig, o categoryOpts) (l
 		}
 	}
 	return zillapi.NewConnector(cfg), nil
+}
+
+// buildShopifyConnector builds one store's connector. There are no credentials:
+// products.json is a public, unauthenticated storefront feed. Storefronts DO rate
+// limit (serverpartdeals returns 429 "local_rate_limited" readily), so pair this
+// with a polite interval -- hourly at most per store.
+func buildShopifyConnector(s SourceConfig) (listing.Connector, error) {
+	if s.Fixture == "" && s.BaseURL == "" {
+		return nil, fmt.Errorf("source %q: shopify needs baseUrl (the storefront root) or a fixture", s.Name)
+	}
+	return shopify.NewConnector(shopify.Config{
+		Name:                s.Name,
+		BaseURL:             s.BaseURL,
+		ProductTypePrefixes: s.ProductTypePrefixes,
+		IncludeUnavailable:  s.IncludeUnavailable,
+		MaxPages:            s.MaxPages,
+		FixturePath:         s.Fixture,
+	}), nil
 }
 
 // buildIngester builds the ingest unit for one source (connector by type, bundle by category).

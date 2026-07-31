@@ -1,0 +1,542 @@
+{
+ "products": [
+  {
+   "id": 10601228861718,
+   "title": "Western Digital Ultrastar DC HC580 WUH722422AL5204 0F62791 22TB 7.2K RPM SAS 12Gb/s 512e 512MB 3.5in Refurbished HDD",
+   "handle": "western-digital-ultrastar-dc-hc580-wuh722422al5204-0f62791-22tb-7-2k-rpm-sas-12gb-s-512e-512mb-3-5-refurbished-hdd",
+   "body_html": "<hr><!-- more -->\n<details open=\"\">\n<summary><span class=\"headline\">Specifications</span></summary>\n<table width=\"100%\">\n<tbody>\n<tr>\n<td style=\"width: 43.4174%;\">Brand</td>\n<td style=\"width: 56.3725%;\">Western Digital</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Series</td>\n<td style=\"width: 56.3725%;\">Ultrastar DC HC580</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Model Number</td>\n<td style=\"width: 56.3725%;\">WUH722422AL5204</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Part Number</td>\n<td style=\"width: 56.3725%;\">0F62791</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Form Factor</td>\n<td style=\"width: 56.3725%;\">3.5\"</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Capacity</td>\n<td style=\"width: 56.3725%;\">22TB</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Interface</td>\n<td style=\"width: 56.3725%;\">SAS 12Gb/s</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Spindle Speed</td>\n<td style=\"width: 56.3725%;\">7.2K RPM</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Tray</td>\n<td style=\"width: 56.3725%;\">Bare Drive</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Weight</td>\n<td style=\"width: 56.3725%;\">2lb</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Width</td>\n<td style=\"width: 56.3725%;\">4in</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Height</td>\n<td style=\"width: 56.3725%;\">1in</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Depth</td>\n<td style=\"width: 56.3725%;\">5.8in</td>\n</tr>\n</tbody>\n</table>\n</details>\n<details open=\"\">\n<summary><span class=\"headline\">Warranty</span></summary>\n<div class=\"indent-content\">\n<div id=\"warranty\">\n<div class=\"option-values\">\n<table class=\"metafield-warranty-table\">\n<tbody>\n<tr>\n<td>\n<div><span>Condition: Seller Refurbished - 2 Year Seller Limited Period Warranty</span></div>\n</td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td>\n</tr>\n<tr>\n<td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td>\n</tr>\n<tr>\n<td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td>\n</tr>\n<tr>\n<td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>\n</div>\n</details>",
+   "published_at": "2026-07-07T16:44:10-04:00",
+   "created_at": "2026-07-07T16:44:10-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "Western Digital",
+   "product_type": "Hard Drives > 22TB > 3.5 > SAS > 7.2K RPM",
+   "tags": [
+    "000CardTitle:Refurbished Ultrastar DC HC580 22TB SAS HDD WUH722422AL5204",
+    "brand:Western Digital",
+    "capacity:22TB",
+    "capacityGroup:8TB and greater",
+    "condition:Seller Refurbished",
+    "formFactor:3.5",
+    "highCapacity:Y",
+    "interface:SAS",
+    "interfaceSpeed:12Gb/s",
+    "series:Ultrastar DC HC580",
+    "skuCondition:SR",
+    "spindleSpeed:7.2K RPM",
+    "type:Hard Drives",
+    "warranty:2 Year Seller"
+   ],
+   "variants": [
+    {
+     "id": 51507326681366,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "WUH722422AL5204-0F62791_SR",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "799.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10601228861718,
+     "created_at": "2026-07-07T16:44:10-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 55820742623510,
+     "created_at": "2026-07-07T19:27:36-04:00",
+     "position": 1,
+     "updated_at": "2026-07-07T19:27:38-04:00",
+     "product_id": 10601228861718,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/WUH722422AL5204-0F62791-CR.png?v=1783466858",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55820095815958,
+     "created_at": "2026-07-07T16:59:46-04:00",
+     "position": 2,
+     "updated_at": "2026-07-07T16:59:48-04:00",
+     "product_id": 10601228861718,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/SAS_HDD.webp?v=1783457988",
+     "width": 1600,
+     "height": 1600
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 10627029795094,
+   "title": "HP Generation 11 MB018000GYDKR P44757-005 18TB 7.2K RPM SATA 6Gb/s 512e 256MB 3.5in HDD",
+   "handle": "hp-generation-11-mb018000gydkr-p44757-005-18tb-7-2k-rpm-sata-6gb-s-512e-256mb-3-5-hdd",
+   "body_html": "<hr><!-- more -->\n<details>\n<summary><span class=\"headline\">Specifications</span></summary>\n<table width=\"100%\">\n<tbody>\n<tr>\n<td>Brand</td>\n<td>HP</td>\n</tr>\n<tr>\n<td>Series</td>\n<td>Generation 11</td>\n</tr>\n<tr>\n<td>Model Number</td>\n<td>MB018000GYDKR</td>\n</tr>\n<tr>\n<td>Part Number</td>\n<td>P44757-005</td>\n</tr>\n<tr>\n<td>Form Factor</td>\n<td>3.5\"</td>\n</tr>\n<tr>\n<td>Capacity</td>\n<td>18TB</td>\n</tr>\n<tr>\n<td>Interface</td>\n<td>SATA 6Gb/s</td>\n</tr>\n<tr>\n<td>Spindle Speed</td>\n<td>7.2K RPM</td>\n</tr>\n<tr>\n<td>Tray</td>\n<td>3.5 inch HP Gen11 Tray compatible with Gen10+ and Gen 11 ProLiant Servers</td>\n</tr>\n<tr>\n<td>Weight</td>\n<td>1.5lb</td>\n</tr>\n<tr>\n<td>Width</td>\n<td>4in</td>\n</tr>\n<tr>\n<td>Height</td>\n<td>1in</td>\n</tr>\n<tr>\n<td>Depth</td>\n<td>5.8in</td>\n</tr>\n</tbody>\n</table>\n</details>\n<details>\n<summary><span class=\"headline\">Warranty</span></summary>\n<div class=\"indent-content\">\n<div id=\"warranty\">\n<div class=\"option-values\">\n<table class=\"metafield-warranty-table\">\n<tbody>\n<tr>\n<td>\n<div><span>Condition: Open Box - 3 Year Seller Limited Period Warranty</span></div>\n</td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td>\n</tr>\n<tr>\n<td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td>\n</tr>\n<tr>\n<td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td>\n</tr>\n<tr>\n<td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>\n</div>\n</details>\n<details>\n<summary><span class=\"headline\">Compatibility</span></summary>\n<div class=\"indent-content\">\n<div id=\"compatibility\">\n<div class=\"compatibility-list\">\n<h2 class=\"compatibility-list-title\">Compatible with these HP/HPE Systems:</h2>\n<h2 class=\"compatibility-list-title\">Generation 11</h2>\n<h3 class=\"compatibility-list-header\">HP ProLiant DL Series:</h3>\n<p class=\"compatibility-list-items\">DL20 (G10+), DL110 (G11), DL320 (G11/G12), DL325 (G10+/11), DL340 (G12), DL345 (G10+/G11), DL360 (G10+/G11/G12), DL365 (G10+/G11), DL380 (G10+/G11/G12), DL385 (G10+/G11), DL560 (G11)</p>\n<h3 class=\"compatibility-list-header\">HP ProLiant ML Series:</h3>\n<p class=\"compatibility-list-items\">ML110 (G11), ML350 (G11/G12)</p>\n</div>\n</div>\n</div>\n</details>",
+   "published_at": "2026-07-16T17:34:26-04:00",
+   "created_at": "2026-07-16T17:34:26-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "HP",
+   "product_type": "HDDs > 18TB > 3.5 > SATA > 7.2K RPM",
+   "tags": [
+    "000CardTitle:New Generation 11 18TB SATA HDD MB018000GYDKR",
+    "brand:HP",
+    "capacity:18TB",
+    "capacityGroup:8TB and greater",
+    "condition:New",
+    "formFactor:3.5",
+    "highCapacity:Y",
+    "interface:SATA",
+    "interfaceSpeed:6Gb/s",
+    "series:Generation 11",
+    "skuCondition:NB",
+    "spindleSpeed:7.2K RPM",
+    "type:Hard Drives",
+    "warranty:3 Year Seller"
+   ],
+   "variants": [
+    {
+     "id": 51569770692886,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "ST18000NM002J-HP_HPG11_NB",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "539.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10627029795094,
+     "created_at": "2026-07-16T17:34:27-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 55899086192918,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 1,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/combine_275d9d88-2003-4617-a179-90dbb019f92b.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086061846,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 2,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1587082.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086127382,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 3,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1587081.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086094614,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 4,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/G11.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086225686,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 5,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1587080.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899085996310,
+     "created_at": "2026-07-16T18:27:11-04:00",
+     "position": 6,
+     "updated_at": "2026-07-16T18:27:13-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1597086.png?v=1784240833",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086029078,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 7,
+     "updated_at": "2026-07-16T18:27:14-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1597089.png?v=1784240834",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55899086160150,
+     "created_at": "2026-07-16T18:27:13-04:00",
+     "position": 8,
+     "updated_at": "2026-07-16T18:27:15-04:00",
+     "product_id": 10627029795094,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/P1597090.png?v=1784240835",
+     "width": 2000,
+     "height": 2000
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 10648607162646,
+   "title": "Western Digital Ultrastar DC HC580 WUH722424AL5201 0F62801 24TB 7.2K RPM SAS 12Gb/s 512e 512MB 3.5in Refurbished HDD",
+   "handle": "western-digital-ultrastar-dc-hc580-wuh722424al5201-0f62801-24tb-7-2k-rpm-sas-12gb-s-512e-512mb-3-5-refurbished-hdd",
+   "body_html": "<hr><!-- more --> <details> <summary>Specifications</summary> <table width=\"100%\"> <tbody> <tr>\n<td>Brand</td>\n<td>Western Digital</td>\n</tr> <tr>\n<td>Series</td>\n<td>Ultrastar DC HC580</td>\n</tr> <tr>\n<td>Model Number</td>\n<td>WUH722424AL5201</td>\n</tr> <tr>\n<td>Part Number</td>\n<td>0F62801</td>\n</tr> <tr>\n<td>Form Factor</td>\n<td>3.5\"</td>\n</tr> <tr>\n<td>Capacity</td>\n<td>24TB</td>\n</tr> <tr>\n<td>Interface</td>\n<td>SAS 12Gb/s</td>\n</tr> <tr>\n<td>Spindle Speed</td>\n<td>7.2K RPM</td>\n</tr> <tr>\n<td>Tray</td>\n<td>Bare Drive</td>\n</tr> <tr>\n<td>Weight</td>\n<td>2lb</td>\n</tr> <tr>\n<td>Width</td>\n<td>4in</td>\n</tr> <tr>\n<td>Height</td>\n<td>1in</td>\n</tr> <tr>\n<td>Depth</td>\n<td>5.8in</td>\n</tr> </tbody> </table> </details><details> <summary><span class=\"headline\">Warranty</span></summary> <div class=\"indent-content\"> <div id=\"warranty\"> <div class=\"option-values\"> <table class=\"metafield-warranty-table\"> <tbody> <tr> <td> <div><span>Condition: Seller Refurbished - 2 Year Seller Limited Period Warranty</span></div> </td> </tr> <tr> <th scope=\"row\"></th> <td></td> </tr> <tr> <th scope=\"row\"></th> <td></td> </tr> <tr> <td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td> </tr> <tr> <td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td> </tr> <tr> <td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td> </tr> <tr> <td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td> </tr> </tbody> </table> </div> </div> </div> </details>",
+   "published_at": "2026-07-29T16:44:31-04:00",
+   "created_at": "2026-07-29T16:44:31-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "Western Digital",
+   "product_type": "Hard Drives > 24TB > 3.5 > SAS > 7.2K RPM",
+   "tags": [
+    "000CardTitle:Refurbished Ultrastar DC HC580 24TB SAS HDD WUH722424AL5201",
+    "brand:Western Digital",
+    "capacity:24TB",
+    "capacityGroup:8TB and greater",
+    "condition:Seller Refurbished",
+    "formFactor:3.5",
+    "highCapacity:Y",
+    "interface:SAS",
+    "interfaceSpeed:12Gb/s",
+    "series:Ultrastar DC HC580",
+    "skuCondition:SR",
+    "spindleSpeed:7.2K RPM",
+    "type:Hard Drives",
+    "warranty:2 Year Seller"
+   ],
+   "variants": [
+    {
+     "id": 51622665748758,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "WUH722424AL5201-0F62801_SR",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": false,
+     "price": "799.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10648607162646,
+     "created_at": "2026-07-29T16:44:31-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 52766495703318,
+     "created_at": "2025-11-04T14:06:26-05:00",
+     "position": 1,
+     "updated_at": "2025-11-04T14:06:28-05:00",
+     "product_id": 10648607162646,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/genericstorageharddrive__80066_44117b91-3b02-4c5f-8c05-7b8a6edb0bf2.jpg?v=1762283188",
+     "width": 1280,
+     "height": 1280
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 10648159977750,
+   "title": "Micron 7400 PRO MTFDKCB960TDZ 960GB 1 DWPD PCIe Gen 4.0 x4 8GB/s 3D TLC U.3 NVMe 2.5in Refurbished SSD",
+   "handle": "micron-7400-pro-mtfdkcb960tdz-960gb-1-dwpd-pcie-gen-4-0-x4-8gb-s-3d-tlc-u-3-nvme-2-5-refurbished-ssd",
+   "body_html": "<hr><!-- more -->\n<details>\n<summary><span class=\"headline\">Specifications</span></summary>\n<table width=\"100%\">\n<tbody>\n<tr>\n<td>Brand</td>\n<td>Micron</td>\n</tr>\n<tr>\n<td>Series</td>\n<td>7400 PRO</td>\n</tr>\n<tr>\n<td>Model Number</td>\n<td>MTFDKCB960TDZ</td>\n</tr>\n<tr>\n<td>Part Number</td>\n<td>MTFDKCB960TDZ-1AZ1ZABYY</td>\n</tr>\n<tr>\n<td>Form Factor</td>\n<td>2.5\"</td>\n</tr>\n<tr>\n<td>Capacity</td>\n<td>960GB</td>\n</tr>\n<tr>\n<td>Interface</td>\n<td>PCIe Gen 4.0 x4 8GB/s</td>\n</tr>\n<tr>\n<td>Endurance</td>\n<td>1 DWPD</td>\n</tr>\n<tr>\n<td>Tray</td>\n<td>Bare Drive</td>\n</tr>\n<tr>\n<td>Weight</td>\n<td>0.5lb</td>\n</tr>\n<tr>\n<td>Width</td>\n<td>2.7in</td>\n</tr>\n<tr>\n<td>Height</td>\n<td>0.4in</td>\n</tr>\n<tr>\n<td>Depth</td>\n<td>4in</td>\n</tr>\n</tbody>\n</table>\n</details>\n<details>\n<summary><span class=\"headline\">Warranty</span></summary>\n<div class=\"indent-content\">\n<div id=\"warranty\">\n<div class=\"option-values\">\n<table class=\"metafield-warranty-table\">\n<tbody>\n<tr>\n<td>\n<div><span>Condition: Seller Refurbished - 3 Year Seller Limited Period Warranty</span></div>\n</td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td>\n</tr>\n<tr>\n<td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td>\n</tr>\n<tr>\n<td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td>\n</tr>\n<tr>\n<td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>\n</div>\n</details>",
+   "published_at": "2026-07-29T12:13:00-04:00",
+   "created_at": "2026-07-29T12:13:00-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "Micron",
+   "product_type": "Solid State Drives > 960GB > 2.5 > PCIe Gen 4.0 x4",
+   "tags": [
+    "000CardTitle:Refurbished 7400 PRO 960GB PCIe Gen 4.0 x4 SSD MTFDKCB960TDZ",
+    "brand:Micron",
+    "capacity:960GB",
+    "capacityGroup:300GB to 2.4TB",
+    "condition:Seller Refurbished",
+    "formFactor:2.5",
+    "highCapacity:N",
+    "interface:PCIe Gen 4.0 x4",
+    "interfaceSpeed:8GB/s",
+    "series:7400 PRO",
+    "skuCondition:SR",
+    "spindleSpeed:",
+    "type:Solid State Drives",
+    "warranty:3 Year Seller"
+   ],
+   "variants": [
+    {
+     "id": 51621670945046,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "MTFDKCB960TDZ_SR",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "269.00",
+     "grams": 227,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10648159977750,
+     "created_at": "2026-07-29T12:13:01-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 56018392482070,
+     "created_at": "2026-07-29T12:38:12-04:00",
+     "position": 1,
+     "updated_at": "2026-07-29T12:38:13-04:00",
+     "product_id": 10648159977750,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/MTFDKCB960TDZ-CR.png?v=1785343093",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 56018015191318,
+     "created_at": "2026-07-29T12:15:23-04:00",
+     "position": 2,
+     "updated_at": "2026-07-29T12:15:24-04:00",
+     "product_id": 10648159977750,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/U.3_-_Details_-_Shopify_8b2ba84f-cc44-4460-ba90-addf0e892ebe.jpg?v=1785341724",
+     "width": 4500,
+     "height": 4500
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 10648607097110,
+   "title": "Western Digital Ultrastar DC HC580 WUH722424AL5201 0F62801 24TB 7.2K RPM SAS 12Gb/s 512e 512MB 3.5in HDD",
+   "handle": "western-digital-ultrastar-dc-hc580-wuh722424al5201-0f62801-24tb-7-2k-rpm-sas-12gb-s-512e-512mb-3-5-hdd",
+   "body_html": "<hr><!-- more --> <details> <summary>Specifications</summary> <table width=\"100%\"> <tbody> <tr>\n<td>Brand</td>\n<td>Western Digital</td>\n</tr> <tr>\n<td>Series</td>\n<td>Ultrastar DC HC580</td>\n</tr> <tr>\n<td>Model Number</td>\n<td>WUH722424AL5201</td>\n</tr> <tr>\n<td>Part Number</td>\n<td>0F62801</td>\n</tr> <tr>\n<td>Form Factor</td>\n<td>3.5\"</td>\n</tr> <tr>\n<td>Capacity</td>\n<td>24TB</td>\n</tr> <tr>\n<td>Interface</td>\n<td>SAS 12Gb/s</td>\n</tr> <tr>\n<td>Spindle Speed</td>\n<td>7.2K RPM</td>\n</tr> <tr>\n<td>Tray</td>\n<td>Bare Drive</td>\n</tr> <tr>\n<td>Weight</td>\n<td>2lb</td>\n</tr> <tr>\n<td>Width</td>\n<td>4in</td>\n</tr> <tr>\n<td>Height</td>\n<td>1in</td>\n</tr> <tr>\n<td>Depth</td>\n<td>5.8in</td>\n</tr> </tbody> </table> </details><details> <summary><span class=\"headline\">Warranty</span></summary> <div class=\"indent-content\"> <div id=\"warranty\"> <div class=\"option-values\"> <table class=\"metafield-warranty-table\"> <tbody> <tr> <td> <div><span>Condition: New - 3 Year Seller Limited Period Warranty</span></div> </td> </tr> <tr> <th scope=\"row\"></th> <td></td> </tr> <tr> <th scope=\"row\"></th> <td></td> </tr> <tr> <td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td> </tr> <tr> <td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td> </tr> <tr> <td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td> </tr> <tr> <td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td> </tr> </tbody> </table> </div> </div> </div> </details>",
+   "published_at": "2026-07-29T16:44:26-04:00",
+   "created_at": "2026-07-29T16:44:26-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "Western Digital",
+   "product_type": "Hard Drives > 24TB > 3.5 > SAS > 7.2K RPM",
+   "tags": [
+    "000CardTitle:New Ultrastar DC HC580 24TB SAS HDD WUH722424AL5201",
+    "brand:Western Digital",
+    "capacity:24TB",
+    "capacityGroup:8TB and greater",
+    "condition:New",
+    "formFactor:3.5",
+    "highCapacity:Y",
+    "interface:SAS",
+    "interfaceSpeed:12Gb/s",
+    "series:Ultrastar DC HC580",
+    "skuCondition:NB",
+    "spindleSpeed:7.2K RPM",
+    "type:Hard Drives",
+    "warranty:3 Year Seller"
+   ],
+   "variants": [
+    {
+     "id": 51622665650454,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "WUH722424AL5201-0F62801_NB",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": false,
+     "price": "799.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10648607097110,
+     "created_at": "2026-07-29T16:44:27-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 52766495703318,
+     "created_at": "2025-11-04T14:06:26-05:00",
+     "position": 1,
+     "updated_at": "2025-11-04T14:06:28-05:00",
+     "product_id": 10648607097110,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/genericstorageharddrive__80066_44117b91-3b02-4c5f-8c05-7b8a6edb0bf2.jpg?v=1762283188",
+     "width": 1280,
+     "height": 1280
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 9900000000001,
+   "title": "SYNTHETIC Multi-Capacity Test Drive",
+   "handle": "synthetic-multi-capacity-test-drive",
+   "body_html": "<hr><!-- more -->\n<details open=\"\">\n<summary><span class=\"headline\">Specifications</span></summary>\n<table width=\"100%\">\n<tbody>\n<tr>\n<td style=\"width: 43.4174%;\">Brand</td>\n<td style=\"width: 56.3725%;\">Western Digital</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Series</td>\n<td style=\"width: 56.3725%;\">Ultrastar DC HC580</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Model Number</td>\n<td style=\"width: 56.3725%;\">WUH722422AL5204</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Part Number</td>\n<td style=\"width: 56.3725%;\">0F62791</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Form Factor</td>\n<td style=\"width: 56.3725%;\">3.5\"</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Capacity</td>\n<td style=\"width: 56.3725%;\">22TB</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Interface</td>\n<td style=\"width: 56.3725%;\">SAS 12Gb/s</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Spindle Speed</td>\n<td style=\"width: 56.3725%;\">7.2K RPM</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Tray</td>\n<td style=\"width: 56.3725%;\">Bare Drive</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Weight</td>\n<td style=\"width: 56.3725%;\">2lb</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Width</td>\n<td style=\"width: 56.3725%;\">4in</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Height</td>\n<td style=\"width: 56.3725%;\">1in</td>\n</tr>\n<tr>\n<td style=\"width: 43.4174%;\">Depth</td>\n<td style=\"width: 56.3725%;\">5.8in</td>\n</tr>\n</tbody>\n</table>\n</details>\n<details open=\"\">\n<summary><span class=\"headline\">Warranty</span></summary>\n<div class=\"indent-content\">\n<div id=\"warranty\">\n<div class=\"option-values\">\n<table class=\"metafield-warranty-table\">\n<tbody>\n<tr>\n<td>\n<div><span>Condition: Seller Refurbished - 2 Year Seller Limited Period Warranty</span></div>\n</td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<th scope=\"row\"></th>\n<td></td>\n</tr>\n<tr>\n<td>Satisfaction Guarantee: Return for refund within 30 days of package reception date.</td>\n</tr>\n<tr>\n<td>This item is covered by serverpartdeals.com <a href=\"https://serverpartdeals.com/pages/return-policy\">Return Policy</a>\n</td>\n</tr>\n<tr>\n<td>To initiate a return please fill out the <a href=\"https://serverpartdeals.com/pages/return-form\">Return Form</a>\n</td>\n</tr>\n<tr>\n<td>For frequently asked questions about warranties and returns please visit our <a href=\"https://serverpartdeals.com/pages/faqs\">FAQs</a>\n</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>\n</div>\n</details>",
+   "published_at": "2026-07-07T16:44:10-04:00",
+   "created_at": "2026-07-07T16:44:10-04:00",
+   "updated_at": "2026-07-30T22:29:25-04:00",
+   "vendor": "Western Digital",
+   "product_type": "Hard Drives > 12TB > 3.5 > SATA > 7.2K RPM",
+   "tags": [
+    "brand:Synthetic",
+    "capacity:12TB",
+    "000CardTitle:Refurbished Synthetic 12TB"
+   ],
+   "variants": [
+    {
+     "id": 9900000000101,
+     "title": "12TB",
+     "option1": "12TB",
+     "option2": null,
+     "option3": null,
+     "sku": "SYN-12TB",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "199.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10601228861718,
+     "created_at": "2026-07-07T16:44:10-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    },
+    {
+     "id": 9900000000102,
+     "title": "16TB",
+     "option1": "16TB",
+     "option2": null,
+     "option3": null,
+     "sku": "SYN-16TB",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "259.00",
+     "grams": 908,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 10601228861718,
+     "created_at": "2026-07-07T16:44:10-04:00",
+     "updated_at": "2026-07-30T22:29:25-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 55820742623510,
+     "created_at": "2026-07-07T19:27:36-04:00",
+     "position": 1,
+     "updated_at": "2026-07-07T19:27:38-04:00",
+     "product_id": 10601228861718,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/WUH722422AL5204-0F62791-CR.png?v=1783466858",
+     "width": 2000,
+     "height": 2000
+    },
+    {
+     "id": 55820095815958,
+     "created_at": "2026-07-07T16:59:46-04:00",
+     "position": 2,
+     "updated_at": "2026-07-07T16:59:48-04:00",
+     "product_id": 10601228861718,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0011/8675/8756/files/SAS_HDD.webp?v=1783457988",
+     "width": 1600,
+     "height": 1600
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  }
+ ]
+}
