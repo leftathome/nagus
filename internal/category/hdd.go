@@ -14,6 +14,7 @@ import (
 	exthdd "github.com/leftathome/nagus/internal/extract/hdd"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
@@ -43,6 +44,17 @@ type HDDDeps struct {
 	// MinCapacityTB overrides DefaultMinCapacityTB when > 0.
 	MinCapacityTB float64
 	Logf          func(format string, args ...any)
+	// --- per-source retention (nagus-q6u) ---
+	// StaleAfter, when > 0, purges this SOURCE's items older than the window.
+	// It is a property of the source's terms (eBay License 8.1(b) needs 6h;
+	// a Shopify storefront needs none), not of the category.
+	StaleAfter time.Duration
+	// Offers, when non-nil, enables the additive offer layer for this source.
+	Offers offer.Store
+	// OfferRetention is this source's offer retention policy.
+	OfferRetention offer.Retention
+	// OfferExpireAfter marks unseen offers expired (retained, not deleted).
+	OfferExpireAfter time.Duration
 }
 
 // HDDFilter builds the deterministic hard-filter for the HDD category: priced,
@@ -105,20 +117,25 @@ func NewHDDSurface(deps HDDDeps) *pipeline.Surface {
 	}
 }
 
-// NewHDDIngester builds the HDD ingest half for one source connector. The eBay
-// freshness window (License 8.1(b)) is applied here.
+// NewHDDIngester builds the HDD ingest half for one source connector.
+//
+// Retention is now taken from deps, NOT hardcoded here (nagus-q6u). It was
+// previously pinned to the eBay 6h window for EVERY hdd source, which applied
+// eBay's License 8.1(b) obligation to sources that have no such restriction --
+// and made them fragile: a Shopify storefront that rate-limited us for six hours
+// would have had its entire corpus purged, despite nothing requiring it. See
+// the spec's locked decision #3: retention is a property of the SOURCE.
 func NewHDDIngester(conn listing.Connector, deps HDDDeps) *pipeline.Ingester {
 	return &pipeline.Ingester{
-		Connector: conn,
-		Sanitizer: sanitize.Passthrough{Name: "sanitize.passthrough(hdd)"},
-		Extractor: exthdd.New(),
-		Store:     deps.Store,
-		// eBay Content must not linger past its public life / 6h freshness bound.
-		// Coupled to the hdd category bundle for now; this retention window is
-		// really a per-source (eBay) decision per the offer/product spec, and
-		// should move onto the source config in slice 2 (bead nagus-q6u).
-		StaleAfter: EbayContentMaxAge,
-		Logf:       deps.Logf,
+		Connector:        conn,
+		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(hdd)"},
+		Extractor:        exthdd.New(),
+		Store:            deps.Store,
+		StaleAfter:       deps.StaleAfter,
+		Offers:           deps.Offers,
+		OfferRetention:   deps.OfferRetention,
+		OfferExpireAfter: deps.OfferExpireAfter,
+		Logf:             deps.Logf,
 	}
 }
 

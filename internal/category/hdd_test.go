@@ -9,11 +9,26 @@ import (
 	"github.com/leftathome/nagus/internal/store"
 )
 
-func TestNewHDDIngesterSetsFreshnessWindow(t *testing.T) {
-	ing := NewHDDIngester(nil, HDDDeps{Store: store.NewMemoryStore()})
-	if ing.StaleAfter != EbayContentMaxAge {
-		t.Fatalf("HDD ingester StaleAfter = %v, want %v (eBay 8.1(b) 6h window)", ing.StaleAfter, EbayContentMaxAge)
+// Retention is a property of the SOURCE, not of the hdd category (nagus-q6u).
+// This previously asserted the opposite -- that every hdd ingester carried
+// eBay's 6h window -- which applied eBay's License 8.1(b) obligation to
+// storefronts that have none, and made them fragile: a source that rate-limited
+// us for six hours would have had its whole corpus purged for no reason.
+func TestHDDIngesterTakesRetentionFromDepsNotTheCategory(t *testing.T) {
+	// A source with no obligation to forget gets no purge at all.
+	plain := NewHDDIngester(nil, HDDDeps{Store: store.NewMemoryStore()})
+	if plain.StaleAfter != 0 {
+		t.Fatalf("StaleAfter = %v with no deps window, want 0 -- the category must not impose one", plain.StaleAfter)
 	}
+	// A source that does carry one passes it in.
+	ebayLike := NewHDDIngester(nil, HDDDeps{Store: store.NewMemoryStore(), StaleAfter: EbayContentMaxAge})
+	if ebayLike.StaleAfter != EbayContentMaxAge {
+		t.Fatalf("StaleAfter = %v, want the window supplied by deps", ebayLike.StaleAfter)
+	}
+}
+
+// The eBay window itself is a compliance bound and must stay within 6h.
+func TestEbayContentMaxAgeStaysWithinLicenseBound(t *testing.T) {
 	if EbayContentMaxAge > 6*time.Hour {
 		t.Fatalf("EbayContentMaxAge = %v, must be <= 6h per eBay License 8.1(b)", EbayContentMaxAge)
 	}

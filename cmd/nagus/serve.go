@@ -17,6 +17,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
+	"github.com/leftathome/nagus/internal/offer/sqliteoffer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -238,6 +239,7 @@ func runServe(args []string) error {
 	interval := fs.Duration("ingest-interval", envDuration("NAGUS_INGEST_INTERVAL", 0), "in-process ingest interval (0 disables scheduled ingest)")
 	minCap := fs.Float64("min-capacity", envFloat("NAGUS_MIN_CAPACITY", category.DefaultMinCapacityTB), "hard-filter capacity floor in TB")
 	offline := fs.Bool("offline", envBool("NAGUS_OFFLINE"), "score against the built-in demo reference instead of the live feed")
+	offersDB := fs.String("offers-db", "", "path to the offer-layer sqlite database; empty disables the offer layer")
 	fixture := fs.String("ebay-fixture", envOr("NAGUS_EBAY_FIXTURE", ""), "eBay fixture path for offline ingest (skips the network)")
 	clientID := fs.String("client-id", envOr("NAGUS_EBAY_CLIENT_ID", ""), "eBay OAuth client id (live ingest)")
 	clientSecret := fs.String("client-secret", envOr("NAGUS_EBAY_CLIENT_SECRET", ""), "eBay OAuth client secret (live ingest)")
@@ -264,6 +266,21 @@ func runServe(args []string) error {
 
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
+
+	// Offer layer (nagus-q6u). OPT-IN: empty path disables it entirely and
+	// behaviour is exactly as before, so it can be enabled per-deployment rather
+	// than arriving with a release. It is a SEPARATE database from the item
+	// store on purpose -- the offer layer is additive and must not be able to
+	// corrupt or lock the store that feeds the live surface.
+	if path := envOr("NAGUS_OFFERS_DB", *offersDB); path != "" {
+		os, oerr := sqliteoffer.New(path)
+		if oerr != nil {
+			return fmt.Errorf("open offer store %s: %w", path, oerr)
+		}
+		defer os.Close()
+		opts.offers = os
+		logf("offer layer enabled at %s", path)
+	}
 	opts.hddMinCapacity = *minCap
 	// Explicit connector flags override the env-seeded defaults (legacy path).
 	opts.ebayClientID = orDefault(*clientID, opts.ebayClientID)

@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/leftathome/nagus/internal/category"
+	"github.com/leftathome/nagus/internal/offer"
 )
 
 func TestLoadRunConfigParsesSourcesAndCategories(t *testing.T) {
@@ -122,5 +126,52 @@ func TestBuildZillapiConnectorFixtureNeedsNoCreds(t *testing.T) {
 	}
 	if got := conn.SourceID(); got != "zillapi:off" {
 		t.Errorf("SourceID = %q, want zillapi:off", got)
+	}
+}
+
+// Retention is a property of the SOURCE's terms, not of the category. Before
+// nagus-q6u every hdd source inherited eBay's 6h purge, which applied eBay's
+// License 8.1(b) obligation to storefronts that have no such restriction -- and
+// made them fragile, since a few hours of rate-limiting would have wiped a
+// storefront's whole corpus.
+func TestRetentionIsPerSourceNotPerCategory(t *testing.T) {
+	ebay := SourceConfig{Name: "ebay", Category: "hdd", Type: "ebay", IntervalMinutes: 30}
+	shop := SourceConfig{Name: "spd", Category: "hdd", Type: "shopify", IntervalMinutes: 60}
+
+	eStale, eRet, eExp := retentionForSource(ebay)
+	if eStale != category.EbayContentMaxAge {
+		t.Errorf("ebay StaleAfter = %v, want the 6h content window", eStale)
+	}
+	if eRet.Policy != offer.Purge || eRet.Window != category.EbayContentMaxAge {
+		t.Errorf("ebay offer retention = %+v, want purge on the 6h window", eRet)
+	}
+
+	sStale, sRet, sExp := retentionForSource(shop)
+	if sStale != 0 {
+		t.Errorf("shopify StaleAfter = %v, want 0 -- a storefront has no obligation to forget", sStale)
+	}
+	if sRet.Policy != offer.RetainFull {
+		t.Errorf("shopify offer retention = %+v, want retain-full", sRet)
+	}
+
+	// Expiry is a grace period of several polls so ONE failed poll never marks a
+	// live catalogue dead -- which matters, storefronts rate-limit hard.
+	if eExp != 3*30*time.Minute {
+		t.Errorf("ebay expireAfter = %v, want 3 poll intervals", eExp)
+	}
+	if sExp != 3*time.Hour {
+		t.Errorf("shopify expireAfter = %v, want 3 poll intervals", sExp)
+	}
+	if sExp <= 60*time.Minute {
+		t.Error("expiry grace must exceed one poll interval, or a single miss expires everything")
+	}
+}
+
+// summarize-decay is the intended eBay end state but must stay OFF until its
+// summary schema is validated against eBay's terms.
+func TestEbayDoesNotUseSummarizeDecayYet(t *testing.T) {
+	_, ret, _ := retentionForSource(SourceConfig{Type: "ebay", IntervalMinutes: 30})
+	if ret.Policy == offer.SummarizeDecay {
+		t.Fatal("eBay must not use summarize-decay until the summary schema is validated as compliant")
 	}
 }

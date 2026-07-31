@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 )
@@ -33,6 +35,8 @@ type categoryOpts struct {
 	landMaxAcreage  float64
 	rentcastKey     string
 	zillapiKey      string
+	// offers is the optional offer layer; nil disables it.
+	offers offer.Store
 
 	ebayClientID string
 	ebaySecret   string
@@ -159,17 +163,59 @@ func buildShopifyConnector(s SourceConfig) (listing.Connector, error) {
 	}), nil
 }
 
+// retentionForSource is the per-SOURCE retention policy table. Retention is a
+// property of the source's terms, not of the category evaluating it (spec locked
+// decision #3), so it is decided here from the source's TYPE rather than inside a
+// category bundle.
+//
+//   - ebay: License 8.1(b) forbids retaining eBay Content past its short public
+//     life, so items are purged at 6h and offers use `purge` on the same window.
+//     The spec's intended end state is `summarize-decay`, but that requires a
+//     compliance judgement about the summary schema and stays OFF until validated.
+//   - everything else: no obligation to forget, so items are not purged and
+//     offers are retained in full. Purging them would also have been actively
+//     harmful -- a storefront that rate-limits us for a few hours would lose its
+//     whole corpus for no reason.
+//
+// Offers are expired (not deleted) after a grace period of several poll
+// intervals, so one failed poll never marks a live catalogue dead.
+func retentionForSource(s SourceConfig) (staleAfter time.Duration, ret offer.Retention, expireAfter time.Duration) {
+	interval := time.Duration(s.IntervalMinutes) * time.Minute
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	// Three missed polls before an offer is considered gone.
+	expireAfter = 3 * interval
+	switch s.Type {
+	case "ebay":
+		return category.EbayContentMaxAge,
+			offer.Retention{Policy: offer.Purge, Window: category.EbayContentMaxAge},
+			expireAfter
+	default:
+		return 0, offer.Retention{Policy: offer.RetainFull}, expireAfter
+	}
+}
+
 // buildIngester builds the ingest unit for one source (connector by type, bundle by category).
 func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o categoryOpts) (*pipeline.Ingester, error) {
 	conn, err := buildConnectorForSource(s, cc, o)
 	if err != nil {
 		return nil, err
 	}
+	staleAfter, offerRetention, expireAfter := retentionForSource(s)
 	switch s.Category {
 	case "hdd":
-		return category.NewHDDIngester(conn, category.HDDDeps{Store: st, HTTPClient: o.http, Logf: o.logf}), nil
+		return category.NewHDDIngester(conn, category.HDDDeps{
+			Store: st, HTTPClient: o.http, Logf: o.logf,
+			StaleAfter: staleAfter, Offers: o.offers,
+			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
+		}), nil
 	case "land":
-		return category.NewLandIngester(conn, category.LandDeps{Store: st, Logf: o.logf}), nil
+		return category.NewLandIngester(conn, category.LandDeps{
+			Store: st, Logf: o.logf,
+			StaleAfter: staleAfter, Offers: o.offers,
+			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
+		}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 	}

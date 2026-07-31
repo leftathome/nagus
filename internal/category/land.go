@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/leftathome/nagus/internal/enrich/geo"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	extland "github.com/leftathome/nagus/internal/extract/land"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
@@ -65,6 +67,17 @@ type LandDeps struct {
 	HTTPClient *http.Client
 	Score      LandScoreConfig
 	Logf       func(format string, args ...any)
+	// --- per-source retention (nagus-q6u) ---
+	// StaleAfter, when > 0, purges this SOURCE's items older than the window.
+	// It is a property of the source's terms (eBay License 8.1(b) needs 6h;
+	// a Shopify storefront needs none), not of the category.
+	StaleAfter time.Duration
+	// Offers, when non-nil, enables the additive offer layer for this source.
+	Offers offer.Store
+	// OfferRetention is this source's offer retention policy.
+	OfferRetention offer.Retention
+	// OfferExpireAfter marks unseen offers expired (retained, not deleted).
+	OfferExpireAfter time.Duration
 }
 
 // LandFilter is the deterministic hard-filter for land: category match plus the
@@ -102,11 +115,15 @@ func NewLandSurface(deps LandDeps) *pipeline.Surface {
 // not eBay Content, so no freshness purge (StaleAfter stays 0).
 func NewLandIngester(conn listing.Connector, deps LandDeps) *pipeline.Ingester {
 	return &pipeline.Ingester{
-		Connector: conn,
-		Sanitizer: sanitize.Passthrough{Name: "sanitize.passthrough(land)"},
-		Extractor: extland.New(),
-		Store:     deps.Store,
-		Logf:      deps.Logf,
+		Connector:        conn,
+		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(land)"},
+		Extractor:        extland.New(),
+		Store:            deps.Store,
+		StaleAfter:       deps.StaleAfter,
+		Offers:           deps.Offers,
+		OfferRetention:   deps.OfferRetention,
+		OfferExpireAfter: deps.OfferExpireAfter,
+		Logf:             deps.Logf,
 	}
 }
 
