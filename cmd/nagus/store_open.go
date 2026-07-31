@@ -7,6 +7,9 @@ import (
 	"net"
 	"net/url"
 
+	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/offer/pgoffer"
+	"github.com/leftathome/nagus/internal/offer/sqliteoffer"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/store/postgresstore"
 	"github.com/leftathome/nagus/internal/store/sqlitestore"
@@ -38,6 +41,49 @@ func registerStoreFlags(fs *flag.FlagSet) *storeFlags {
 		pgUser:     fs.String("pg-user", envOr("NAGUS_PG_USER", ""), "postgres user (inject from a Secret)"),
 		pgPassword: fs.String("pg-password", envOr("NAGUS_PG_PASSWORD", ""), "postgres password (inject from a Secret; never commit)"),
 		pgSSLMode:  fs.String("pg-sslmode", envOr("NAGUS_PG_SSLMODE", "require"), "postgres sslmode"),
+	}
+}
+
+// openOffers opens the OFFER store on the SAME backend as the item store, so the
+// two are peer stores rather than the offer layer being pinned to one engine.
+//
+// The offer layer is opt-in: enabled reports whether the caller asked for it at
+// all, and a disabled layer returns a nil Store (which the Ingester treats as
+// "do not record offers"), NOT an error.
+//
+// Backend shapes deliberately differ, because the engines differ:
+//   - postgres: the SAME database as items, a separate table set loosely related
+//     to them. Postgres autovacuums per table and pgxpool is concurrent, so none
+//     of the reasons to split them apart apply -- and one database means backup
+//     and restore is one unit, so item and offer state cannot be restored out of
+//     step.
+//   - sqlite: a separate FILE, because SQLite's constraints are real -- a VACUUM
+//     takes a database-wide lock and the pool is capped at one connection, so
+//     sharing a file would put offer maintenance in front of the read path that
+//     serves the live surface.
+func (sf *storeFlags) openOffers(ctx context.Context, sqlitePath string, enabled bool) (offer.Store, func(), error) {
+	if !enabled {
+		return nil, func() {}, nil
+	}
+	switch *sf.backend {
+	case "postgres":
+		dsn := buildPostgresDSN(*sf.pgHost, *sf.pgPort, *sf.pgDB, *sf.pgUser, *sf.pgPassword, *sf.pgSSLMode)
+		os, err := pgoffer.New(ctx, dsn)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("open postgres offer store: %w", err)
+		}
+		return os, os.Close, nil
+	case "sqlite":
+		if sqlitePath == "" {
+			return nil, func() {}, fmt.Errorf("sqlite offer store needs a path (-offers-db / NAGUS_OFFERS_DB)")
+		}
+		os, err := sqliteoffer.New(sqlitePath)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("open sqlite offer store %q: %w", sqlitePath, err)
+		}
+		return os, func() { _ = os.Close() }, nil
+	default:
+		return nil, func() {}, fmt.Errorf("unsupported store backend %q for the offer layer", *sf.backend)
 	}
 }
 

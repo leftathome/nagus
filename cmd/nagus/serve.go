@@ -17,7 +17,6 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
-	"github.com/leftathome/nagus/internal/offer/sqliteoffer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -267,19 +266,20 @@ func runServe(args []string) error {
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
 
-	// Offer layer (nagus-q6u). OPT-IN: empty path disables it entirely and
-	// behaviour is exactly as before, so it can be enabled per-deployment rather
-	// than arriving with a release. It is a SEPARATE database from the item
-	// store on purpose -- the offer layer is additive and must not be able to
-	// corrupt or lock the store that feeds the live surface.
-	if path := envOr("NAGUS_OFFERS_DB", *offersDB); path != "" {
-		os, oerr := sqliteoffer.New(path)
-		if oerr != nil {
-			return fmt.Errorf("open offer store %s: %w", path, oerr)
-		}
-		defer os.Close()
-		opts.offers = os
-		logf("offer layer enabled at %s", path)
+	// Offer layer (nagus-q6u). OPT-IN and on the SAME BACKEND as the item store,
+	// so the two are peer stores. On postgres it is a table set in the same
+	// database; on sqlite it is a separate file (see openOffers for why the
+	// shapes differ). NAGUS_OFFERS enables it; NAGUS_OFFERS_DB supplies the
+	// sqlite path and is ignored on postgres.
+	offersOn := envBool("NAGUS_OFFERS") || *offersDB != "" || envOr("NAGUS_OFFERS_DB", "") != ""
+	offerStore, closeOffers, oerr := sflags.openOffers(context.Background(), envOr("NAGUS_OFFERS_DB", *offersDB), offersOn)
+	if oerr != nil {
+		return oerr
+	}
+	defer closeOffers()
+	if offerStore != nil {
+		opts.offers = offerStore
+		logf("offer layer enabled (backend=%s)", *sflags.backend)
 	}
 	opts.hddMinCapacity = *minCap
 	// Explicit connector flags override the env-seeded defaults (legacy path).
