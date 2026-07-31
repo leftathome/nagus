@@ -76,7 +76,14 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 
 	it.CanonicalID = extractAPN(combined)
 
-	if acreage, ok := extractAcreage(combined); ok {
+	// Acreage: prefer a TYPED aspect when the connector supplied one. Sources with
+	// a structured API (e.g. zillapi's lotAreaValue) know the lot size as a number
+	// and pass it through Aspects; re-deriving it by regex from composed prose
+	// would be lossier for no gain. Free-text sources set no aspect and fall back
+	// to scanning Title+Body below.
+	if acreage, ok := acreageFromAspect(s.Aspects); ok {
+		it.Attributes["acreage"] = acreage
+	} else if acreage, ok := extractAcreage(combined); ok {
 		it.Attributes["acreage"] = acreage
 	}
 
@@ -117,6 +124,24 @@ var (
 	acRe   = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*ac\b`)
 	sqftRe = regexp.MustCompile(`(?i)(\d[\d,]*)\s*(?:sq\.?\s*ft|sqft|square\s+feet)\b`)
 )
+
+// acreageFromAspect reads a connector-supplied acreage from Aspects["acreage"],
+// which structured sources populate with a numeric value ALREADY IN ACRES. The
+// value is untrusted like every aspect value, so it is parsed and re-rendered
+// rather than copied through: a non-numeric or nonpositive value is rejected
+// (ok=false) and the caller falls back to scanning free text. This is the typed
+// path that lets an API connector avoid round-tripping a number through prose.
+func acreageFromAspect(aspects map[string]string) (string, bool) {
+	raw, ok := aspects["acreage"]
+	if !ok {
+		return "", false
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || v <= 0 {
+		return "", false
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64), true
+}
 
 // extractAcreage scans text for an acreage figure, preferring an explicit
 // "acre(s)"/"ac" phrasing and falling back to a "sq ft"/"square feet" figure

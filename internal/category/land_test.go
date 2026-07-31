@@ -76,7 +76,7 @@ func putLand(t *testing.T, st store.Store, id, acreage, location string, cents i
 	t.Helper()
 	it := item.Item{
 		ID: id, Category: "land", Class: item.ClassDurable, Title: id,
-		PriceCents: cents, Currency: "USD", SourceID: "craigslist", SourceKey: id,
+		PriceCents: cents, Currency: "USD", SourceID: "landsource", SourceKey: id,
 		SeenAt:     time.Unix(1000, 0),
 		Attributes: map[string]string{"acreage": acreage, "location": location},
 	}

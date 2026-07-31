@@ -87,33 +87,19 @@ func TestResolveRunConfigLegacyHDDWithInterval(t *testing.T) {
 	}
 }
 
-// TestResolveRunConfigLegacyLandWithInterval: cat=land synthesizes exactly one
-// craigslist source bound to land, and the land category config carries the
-// acreage/budget fields from categoryOpts.
-func TestResolveRunConfigLegacyLandWithInterval(t *testing.T) {
+// TestResolveRunConfigLegacyLandIsSurfaceOnly: land has no acquisition connector
+// since the Craigslist source was removed (nagus-hh5) and its replacement is not
+// wired yet (nagus-hla), so the legacy path synthesizes ZERO sources for land even
+// when an ingest interval is set -- while still building the land category surface
+// with the acreage/budget fields from categoryOpts. Ingest is gone; surfacing is not.
+func TestResolveRunConfigLegacyLandIsSurfaceOnly(t *testing.T) {
 	o := categoryOpts{landMinAcreage: 1, landMaxAcreage: 40, landBudgetCents: 500000}
-	legacy := legacySource{
-		interval:   time.Hour,
-		clCity:     "seattle",
-		clCategory: "reo",
-		clFixture:  "",
-	}
-	rc, err := resolveRunConfig("", "land", o, legacy)
+	rc, err := resolveRunConfig("", "land", o, legacySource{interval: time.Hour})
 	if err != nil {
 		t.Fatalf("resolveRunConfig: %v", err)
 	}
-	if len(rc.Sources) != 1 {
-		t.Fatalf("sources = %+v, want exactly 1", rc.Sources)
-	}
-	src := rc.Sources[0]
-	if src.Type != "craigslist" || src.Category != "land" {
-		t.Fatalf("source = %+v, want type=craigslist category=land", src)
-	}
-	if src.City != "seattle" || src.ClCategory != "reo" {
-		t.Fatalf("source city/clCategory = %q/%q, want seattle/reo", src.City, src.ClCategory)
-	}
-	if src.IntervalMinutes != 60 {
-		t.Fatalf("source.IntervalMinutes = %d, want 60", src.IntervalMinutes)
+	if len(rc.Sources) != 0 {
+		t.Fatalf("sources = %+v, want 0 (land has no connector; surface-only)", rc.Sources)
 	}
 	cc, ok := rc.Categories["land"]
 	if !ok {
@@ -121,6 +107,9 @@ func TestResolveRunConfigLegacyLandWithInterval(t *testing.T) {
 	}
 	if cc.MinAcreageAcres != o.landMinAcreage || cc.MaxAcreageAcres != o.landMaxAcreage || cc.BudgetCents != o.landBudgetCents {
 		t.Fatalf("categories[land] = %+v, want min=%v max=%v budget=%v", cc, o.landMinAcreage, o.landMaxAcreage, o.landBudgetCents)
+	}
+	if rc.DefaultCategory != "land" {
+		t.Fatalf("defaultCategory = %q, want land", rc.DefaultCategory)
 	}
 }
 

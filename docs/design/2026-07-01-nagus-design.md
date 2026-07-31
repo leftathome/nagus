@@ -6,6 +6,19 @@
 - **Repo:** a NEW standalone GitLab project, not openclaw and not glovebox (see Section 12)
 - **Supersedes/absorbs:** openclaw-qb9w (land-search cron) becomes one category instance, not a bespoke cron
 
+> **AMENDMENT 2026-07-29 — Craigslist is no longer a usable source.** This document
+> selects Craigslist as the land tier-(a) RSS source throughout (Sections 4, A.1, and
+> the v1 slice plan). Craigslist has since **retired the `?format=rss` search feed**:
+> every URL carrying `format=rss` returns their block page (HTTP 403), while the plain
+> HTML search returns 200 — an endpoint retirement, not an IP or User-Agent block
+> (verified from in-cluster residential egress). Craigslist's Terms of Use prohibit
+> automated collection and circumventing access controls, so **there is no compliant
+> replacement fetch path**; the connector was deleted rather than ported. The land
+> reference adapter moves to the tier-(c) thin-API option this document already names,
+> **Zillapi** (Section A.1). Every Craigslist recommendation below is superseded —
+> read it as the historical rationale, not as guidance. Tracking: nagus-hh5 (removal),
+> nagus-hla (replacement).
+
 ## 1. Problem statement
 
 The operator (and household) repeatedly wants to know when a *good* instance of some
@@ -379,7 +392,7 @@ corrections to body assumptions surfaced by the research.
 ### A.1 Land / rural real estate
 | Source | Bucket |
 |---|---|
-| Craigslist reo/land | (a) RSS — `?format=rss`, reuse glovebox RSS connector |
+| ~~Craigslist reo/land~~ | ~~(a) RSS — `?format=rss`, reuse glovebox RSS connector~~ — **DEAD 2026-07-29: feed retired, 403; ToU bars any replacement fetch. See amendment at top.** |
 | Zillow land | (c) paid wrapper — Zillapi ~$5/mo (search includes lots); Bridge RESO free but MLS-gated |
 | Realtor.com | (c) paid wrapper — RapidAPI |
 | Regrid (parcels/enrichment) | (b/c) paid API — improvval/yearbuilt/zoning/footprint |

@@ -103,9 +103,9 @@ outbound source-API creds -- one secret, one property per source).
 | Postgres role (`<release>-db`) | `eso/nagus/infrastructure` -> `postgres_password` | `username`, `password` | `storage.postgres.externalSecret` (on by default) |
 | Rentcast (land) | `eso/nagus/sources` -> `rentcast_key` | `NAGUS_RENTCAST_KEY` | `land.rentcastExternalSecret` (or `land.rentcastSecret` override) |
 | eBay OAuth (hdd live ingest) | `eso/nagus/sources` -> `ebay_client_id`, `ebay_client_secret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` | `externalSecret` (or `ebay.existingSecret` override) |
+| Zillapi (land live ingest) | `eso/nagus/sources` -> `zillapi_key` | `NAGUS_ZILLAPI_KEY` | `land.zillapiExternalSecret` (or `land.zillapiSecret` override) |
 
-The demo path (`demo.enabled=true`) and the keyless Craigslist **land** source
-need no secrets at all.
+The demo path (`demo.enabled=true`) needs no secrets at all.
 
 ## eBay API call budget
 
@@ -124,8 +124,8 @@ must be < 6h older than eBay. After each ingest the hdd pipeline purges eBay
 items not re-seen within `EbayContentMaxAge` (6h): live listings are re-ingested
 (their `SeenAt` refreshed), stale/ended ones fall past the cutoff and are removed.
 **Set `serve.ingestInterval` well under 6h** (e.g. 30m-1h) so live listings are
-refreshed before the window closes. The Craigslist **land** source is not eBay
-Content and is not purged.
+refreshed before the window closes. Non-eBay sources are not eBay Content and are
+not purged under this rule.
 
 ### Sandbox testing
 
@@ -161,12 +161,20 @@ against the sandbox / live keyset (nagus-hm0) before enabling in production.**
   `serve.ingestInterval`. nagus stores NO eBay user PII (no seller username or
   per-seller key); only coarse, per-listing seller-trust tiers land on the item,
   which is why we take the Marketplace Account Deletion opt-out. See SECURITY.md.
-- **land**: Craigslist source (`land.craigslistCity`, `land.craigslistCategory`)
-  + structure-first scoring. Set `land.budgetCents` / `land.minAcreageAcres` /
-  `land.maxAcreageAcres`; enable `land.rentcastExternalSecret` (syncs the key
-  from `eso/nagus/sources`) or set `land.rentcastSecret` for structure signals
-  (without it, land surfaces as unassessed candidates). The Craigslist source is
-  keyless; it needs residential egress -- in-cluster egress qualifies.
+- **land**: structure-first scoring over a **Zillapi** source (`type: zillapi` in
+  `sources[]`), which replaced the Craigslist RSS source Craigslist retired. Set
+  `land.budgetCents` / `land.minAcreageAcres` / `land.maxAcreageAcres` -- the
+  connector pushes that window UPSTREAM, so it is a spend control as well as a
+  filter. Enable `land.zillapiExternalSecret` for the API key, and
+  `land.rentcastExternalSecret` for structure signals (without Rentcast, land
+  surfaces as unassessed candidates).
+
+  **Zillapi bills one credit per RESULT returned, not per call.** A land source is
+  anchored on a bounding box (read `mapBounds` off a zillow.com map URL; a
+  free-text place name is rejected upstream) and wants `intervalMinutes: 1440`
+  with a small `maxItems` and a `daysOnZillow` window. Do NOT copy the 30m cadence
+  used for eBay: a half-hourly poll of 50 lots is ~2,400 credits/day against a
+  1,000-credit/month plan. See `docs/design/2026-07-29-zillapi-land-connector.md`.
 
 ## Watches (delivery)
 

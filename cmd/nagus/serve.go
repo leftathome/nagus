@@ -84,8 +84,8 @@ func (s *server) routes() *http.ServeMux {
 
 // handleMetrics emits Prometheus-text metrics. Currently it reports the eBay API
 // call budget (License 2.4: we track usage against the ~5k/day production cap and
-// never circumvent it). When the source is not the eBay connector (e.g. land /
-// Craigslist), there is no budget to report and the body is empty.
+// never circumvent it). When the source is not the eBay connector (e.g. a land
+// source), there is no budget to report and the body is empty.
 func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	// Collect the eBay ingesters first so each metric family's HELP/TYPE lines
@@ -273,9 +273,6 @@ func runServe(args []string) error {
 		interval:    *interval,
 		ebayQuery:   *query,
 		ebayFixture: *fixture,
-		clCity:      envOr("NAGUS_CL_CITY", ""),
-		clCategory:  envOr("NAGUS_CL_CATEGORY", "reo"),
-		clFixture:   envOr("NAGUS_CL_FIXTURE", ""),
 	}
 	cfg, err := resolveRunConfig(*configPath, *cat, opts, legacy)
 	if err != nil {
@@ -293,7 +290,7 @@ func runServe(args []string) error {
 	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
 	intervals := make([]time.Duration, 0, len(cfg.Sources))
 	for _, src := range cfg.Sources {
-		ing, ierr := buildIngester(src, st, opts)
+		ing, ierr := buildIngester(src, cfg.Categories[src.Category], st, opts)
 		if ierr != nil {
 			return ierr
 		}
@@ -347,9 +344,6 @@ type legacySource struct {
 	interval    time.Duration
 	ebayQuery   string
 	ebayFixture string
-	clCity      string
-	clCategory  string
-	clFixture   string
 }
 
 // resolveRunConfig loads config.json when configPath != "", else synthesizes a
@@ -364,37 +358,25 @@ func resolveRunConfig(configPath, cat string, o categoryOpts, legacy legacySourc
 	if !supportedCategory(cat) {
 		return RunConfig{}, fmt.Errorf("unsupported category %q (want hdd or land)", cat)
 	}
-	cc := CategoryConfig{}
-	switch cat {
-	case "hdd":
-		cc.MinCapacityTB = o.hddMinCapacity
-	case "land":
-		cc.MinAcreageAcres = o.landMinAcreage
-		cc.MaxAcreageAcres = o.landMaxAcreage
-		cc.BudgetCents = o.landBudgetCents
-	}
+	cc := categoryConfigFromOpts(cat, o)
 	rc := RunConfig{
 		Categories:      map[string]CategoryConfig{cat: cc},
 		DefaultCategory: cat,
 	}
-	if legacy.interval > 0 {
-		src := SourceConfig{
+	// Only hdd has a connector in the legacy path. The land connector (zillapi) is
+	// anchored on a bounding box, which these legacy flags cannot express, so
+	// legacy land resolves to surface-only (no source) regardless of interval --
+	// the same supported shape as interval == 0. Declare a zillapi source in a
+	// config.json to ingest land.
+	if legacy.interval > 0 && cat == "hdd" {
+		rc.Sources = []SourceConfig{{
 			Name:            cat + "-legacy",
 			Category:        cat,
 			IntervalMinutes: int(legacy.interval / time.Minute),
-		}
-		switch cat {
-		case "hdd":
-			src.Type = "ebay"
-			src.Query = legacy.ebayQuery
-			src.Fixture = legacy.ebayFixture
-		case "land":
-			src.Type = "craigslist"
-			src.City = legacy.clCity
-			src.ClCategory = legacy.clCategory
-			src.Fixture = legacy.clFixture
-		}
-		rc.Sources = []SourceConfig{src}
+			Type:            "ebay",
+			Query:           legacy.ebayQuery,
+			Fixture:         legacy.ebayFixture,
+		}}
 	}
 	return rc, nil
 }

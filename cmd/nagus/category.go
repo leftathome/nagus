@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/leftathome/nagus/internal/category"
-	"github.com/leftathome/nagus/internal/connector/craigslist"
+	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -31,6 +31,7 @@ type categoryOpts struct {
 	landMinAcreage  float64
 	landMaxAcreage  float64
 	rentcastKey     string
+	zillapiKey      string
 
 	ebayClientID string
 	ebaySecret   string
@@ -46,6 +47,7 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		landMinAcreage:  envFloat("NAGUS_LAND_MIN_ACREAGE", category.DefaultMinAcreageAcres),
 		landMaxAcreage:  envFloat("NAGUS_LAND_MAX_ACREAGE", 0),
 		rentcastKey:     envOr("NAGUS_RENTCAST_KEY", ""),
+		zillapiKey:      envOr("NAGUS_ZILLAPI_KEY", ""),
 		ebayClientID:    envOr("NAGUS_EBAY_CLIENT_ID", ""),
 		ebaySecret:      envOr("NAGUS_EBAY_CLIENT_SECRET", ""),
 	}
@@ -67,8 +69,28 @@ func orInt(n, def int) int {
 	return n
 }
 
+// categoryConfigFromOpts builds a CategoryConfig from the env-derived
+// categoryOpts. It is the single place that maps env config onto the category
+// window, used both by the legacy single-source path (which has no config.json to
+// read a CategoryConfig from) and by resolveRunConfig when it synthesizes one.
+func categoryConfigFromOpts(cat string, o categoryOpts) CategoryConfig {
+	cc := CategoryConfig{}
+	switch cat {
+	case "hdd":
+		cc.MinCapacityTB = o.hddMinCapacity
+	case "land":
+		cc.MinAcreageAcres = o.landMinAcreage
+		cc.MaxAcreageAcres = o.landMaxAcreage
+		cc.BudgetCents = o.landBudgetCents
+	}
+	return cc
+}
+
 // buildConnectorForSource builds the collection connector for one source by type.
-func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector, error) {
+// cc is the CategoryConfig of the source's category: a connector that can push a
+// filter upstream (zillapi) derives its window from the SAME config the local
+// hard-filter uses, so the two cannot drift apart.
+func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) (listing.Connector, error) {
 	switch s.Type {
 	case "ebay":
 		// Default query is HDD-specific; eBay currently only feeds the hdd category.
@@ -77,23 +99,48 @@ func buildConnectorForSource(s SourceConfig, o categoryOpts) (listing.Connector,
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		return conn, nil
-	case "craigslist":
-		clCat := orDefault(s.ClCategory, "reo")
-		if s.Fixture != "" {
-			return craigslist.NewConnector(craigslist.Config{Name: s.Name, FixturePath: s.Fixture, Category: clCat}), nil
-		}
-		if s.City == "" {
-			return nil, fmt.Errorf("source %q: craigslist needs city or fixture", s.Name)
-		}
-		return craigslist.NewConnector(craigslist.Config{Name: s.Name, City: s.City, Category: clCat}), nil
+	case "zillapi":
+		return buildZillapiConnector(s, cc, o)
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
 }
 
+// buildZillapiConnector builds the land connector. The acreage floor and price
+// ceiling come from cc (the category's own window) and are pushed UPSTREAM, which
+// is a cost control and not just a filter: Zillapi bills one credit per result
+// returned, so narrowing before the response is what keeps the bill down. See
+// docs/design/2026-07-29-zillapi-land-connector.md.
+func buildZillapiConnector(s SourceConfig, cc CategoryConfig, o categoryOpts) (listing.Connector, error) {
+	cfg := zillapi.Config{
+		Name:         s.Name,
+		APIKey:       o.zillapiKey,
+		MinLotAcres:  cc.MinAcreageAcres,
+		MaxPriceUSD:  int(cc.BudgetCents / 100),
+		DaysOnZillow: s.DaysOnZillow,
+		MaxItems:     s.MaxItems,
+		HTTPClient:   o.http,
+		FixturePath:  s.Fixture,
+	}
+	if s.BBox != nil {
+		cfg.BBox = zillapi.BBox{West: s.BBox.West, South: s.BBox.South, East: s.BBox.East, North: s.BBox.North}
+	}
+	if s.Fixture == "" {
+		// Live mode preconditions, checked here so a misconfigured source fails at
+		// startup with a clear message instead of burning a call on a 400.
+		if s.BBox == nil {
+			return nil, fmt.Errorf("source %q: zillapi needs a bbox (upstream rejects a search with no bounding box) or a fixture", s.Name)
+		}
+		if o.zillapiKey == "" {
+			return nil, fmt.Errorf("source %q: zillapi needs NAGUS_ZILLAPI_KEY set", s.Name)
+		}
+	}
+	return zillapi.NewConnector(cfg), nil
+}
+
 // buildIngester builds the ingest unit for one source (connector by type, bundle by category).
-func buildIngester(s SourceConfig, st store.Store, o categoryOpts) (*pipeline.Ingester, error) {
-	conn, err := buildConnectorForSource(s, o)
+func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o categoryOpts) (*pipeline.Ingester, error) {
+	conn, err := buildConnectorForSource(s, cc, o)
 	if err != nil {
 		return nil, err
 	}

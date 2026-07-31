@@ -73,7 +73,7 @@ func TestIngesterPurgesStaleSourceItems(t *testing.T) {
 	}
 	staleOther := item.Item{
 		ID: "other", Category: "hdd", Class: item.ClassDurable, Title: "old thing",
-		PriceCents: 5000, Currency: "USD", SourceID: "craigslist", SourceKey: "other",
+		PriceCents: 5000, Currency: "USD", SourceID: "landsource", SourceKey: "other",
 		SeenAt: time.Unix(1000, 0),
 	}
 	if err := st.Put(ctx, staleSame); err != nil {

@@ -72,14 +72,18 @@ func usage() {
 usage:
   nagus version
   nagus ingest -category hdd  ... (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query ...] [-limit 50]
-  nagus ingest -category land ... (-craigslist-fixture FILE | -craigslist-city sfbay) [-craigslist-category reo]
   nagus search -category hdd|land -db nagus.db [-text STR] [-limit 20] [-min-capacity 6] [-offline] [-json]
   nagus serve  -category hdd|land -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-offline]
 
-Categories: hdd ($/TB deal-watch, eBay) and land (structure-first, Craigslist +
-free gov geo enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
+Categories: hdd ($/TB deal-watch, eBay) and land (structure-first + free gov geo
+enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
 NAGUS_RENTCAST_KEY env). ingest collects + stores; search/serve surface ranked
 candidates read-only (eyes, not hands).
+
+land acquisition (zillapi) is anchored on a bounding box, which these legacy
+single-source flags cannot express, so "ingest -category land" errors and directs
+you to the multi-source config path: declare a zillapi source in a config.json and
+run "nagus serve -config FILE". land still surfaces normally from stored items.
 `)
 }
 
@@ -92,33 +96,29 @@ func runIngest(args []string) error {
 	clientSecret := fs.String("client-secret", "", "eBay OAuth client secret (live hdd ingest)")
 	query := fs.String("query", "internal hard drive", "eBay search query (live hdd ingest)")
 	limit := fs.Int("limit", 50, "eBay max listings (live hdd ingest)")
-	clFixture := fs.String("craigslist-fixture", "", "Craigslist RSS fixture (offline land ingest)")
-	clCity := fs.String("craigslist-city", "", "Craigslist city subdomain, e.g. sfbay (live land ingest)")
-	clCategory := fs.String("craigslist-category", "reo", "Craigslist category (reo/sss/cta)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !supportedCategory(*cat) {
 		return fmt.Errorf("unsupported category %q (want hdd or land)", *cat)
 	}
-
-	sourceType := "ebay"
+	// land ingest is only reachable through the multi-source config path. Its
+	// connector (zillapi) is anchored on a bounding box, which this legacy
+	// single-source CLI has no way to express -- and upstream rejects a search with
+	// no bbox. Rather than invent flags for it, point the operator at the config
+	// file the deployment already uses. Fail loudly rather than "succeed" having
+	// collected nothing; land still SURFACES from stored items either way.
 	if *cat == "land" {
-		sourceType = "craigslist"
+		return fmt.Errorf("land ingest is not available from these legacy flags: the land connector (zillapi) needs a bounding box, so configure it as a source in a config.json and run `nagus serve -config ...`; land can still be searched/served from stored items")
 	}
+
 	sc := SourceConfig{
-		Name:       *cat,
-		Category:   *cat,
-		Type:       sourceType,
-		Query:      *query,
-		Limit:      *limit,
-		City:       *clCity,
-		ClCategory: *clCategory,
-	}
-	if *cat == "hdd" {
-		sc.Fixture = *fixture
-	} else {
-		sc.Fixture = *clFixture
+		Name:     *cat,
+		Category: *cat,
+		Type:     "ebay",
+		Query:    *query,
+		Limit:    *limit,
+		Fixture:  *fixture,
 	}
 
 	st, closeSt, err := sflags.open(context.Background())
@@ -135,7 +135,7 @@ func runIngest(args []string) error {
 	opts.ebayClientID = *clientID
 	opts.ebaySecret = *clientSecret
 
-	ing, err := buildIngester(sc, st, opts)
+	ing, err := buildIngester(sc, categoryConfigFromOpts(sc.Category, opts), st, opts)
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,8 @@ category: hdd
 # /land.*) are NOT emitted. Leave empty to keep the legacy single-category path.
 sources: []
   # - {name: ebay, category: hdd, type: ebay, query: "internal hard drive", intervalMinutes: 30}
-  # - {name: cl-seattle, category: land, type: craigslist, city: seattle, clCategory: rea, intervalMinutes: 60}
+  # - {name: north-sound, category: land, type: zillapi, intervalMinutes: 1440, maxItems: 25,
+  #    daysOnZillow: "7", bbox: {west: -123.141452, south: 48.055894, east: -121.868411, north: 48.673576}}
 categories: {}
   # hdd:  {minCapacityTB: 8}
   # land: {minAcreageAcres: 1, budgetCents: 0}
@@ -61,15 +62,21 @@ demo:
   ingestInterval: "1h"
 
 # land-category tuning (only consumed when category: land). Scoring is
-# structure-first; these set the budget + acreage window. Craigslist is the
-# source (keyless RSS); Rentcast (paid, optional) supplies the structure/
-# assessed-value signals -- without it, land surfaces as unassessed candidates.
+# structure-first; these set the budget + acreage window. Rentcast (paid,
+# optional) supplies the structure/assessed-value signals -- without it, land
+# surfaces as unassessed candidates.
+#
+# The land ACQUISITION source is Zillapi (type: zillapi in sources[]), which
+# replaced the Craigslist RSS source Craigslist retired (nagus-hh5). Zillapi bills
+# ONE CREDIT PER RESULT RETURNED, so a land source wants a DAILY intervalMinutes
+# (1440), a small maxItems, and a daysOnZillow window -- see
+# docs/design/2026-07-29-zillapi-land-connector.md before raising the cadence. The
+# acreage/price window below is pushed upstream by the connector, so it is a spend
+# control as well as a filter.
 land:
   budgetCents: 0
   minAcreageAcres: 1
   maxAcreageAcres: 0
-  craigslistCity: ""
-  craigslistCategory: reo
   # rentcastSecret names a pre-made Secret exposing key NAGUS_RENTCAST_KEY. Leave
   # empty to let rentcastExternalSecret (below) sync it from Vault instead; set it
   # to override with a standalone Secret and skip the ExternalSecret.
@@ -87,6 +94,22 @@ land:
     remoteRef:
       key: eso/nagus/sources
       property: rentcast_key
+
+  # zillapiSecret names a pre-made Secret exposing key NAGUS_ZILLAPI_KEY. Leave
+  # empty to let zillapiExternalSecret (below) sync it from Vault instead.
+  zillapiSecret: ""
+  # zillapiExternalSecret syncs the Zillapi API key (zk_...) from the SHARED
+  # app-source Vault path (eso/nagus/sources, property zillapi_key) into a local
+  # Secret exposing NAGUS_ZILLAPI_KEY -- same path as the Rentcast and eBay creds.
+  zillapiExternalSecret:
+    enabled: false
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    refreshInterval: "1h"
+    remoteRef:
+      key: eso/nagus/sources
+      property: zillapi_key
 
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,

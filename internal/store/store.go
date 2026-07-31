@@ -48,6 +48,6 @@ type Store interface {
 	// strictly before olderThan, returning the count deleted. It is scoped by
 	// source so a freshness/retention window (e.g. eBay's License 8.1(b) 6h
 	// content-age obligation) applies to one source without touching others
-	// (e.g. keyless Craigslist).
+	// (e.g. a keyless feed source).
 	DeleteStale(ctx context.Context, sourceID string, olderThan time.Time) (int, error)
 }
