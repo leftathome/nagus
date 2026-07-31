@@ -4,6 +4,42 @@ All notable changes to nagus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-30
+
+### Added
+
+- **Shopify `products.json` connector** (`internal/connector/shopify`): one generic
+  connector over the public, unauthenticated storefront feed, configured per
+  retailer (`type: shopify`, with `baseUrl`, `productTypePrefixes`,
+  `includeUnavailable`, `maxPages`). No credentials and no cost. This gives the
+  **hdd** category a working live source, which it has lacked entirely since eBay
+  Browse went dark behind the ungranted production keyset.
+  Encodes three things the published Shopify schema does not state, found by
+  capturing real catalogs: capacity is often NOT in the product title (it lives in
+  `product_type` and a `capacity:` tag); condition is carried in tags, with new and
+  refurbished listed as separate products; and `product_type` prefixes are
+  inconsistent for one category, so the allow-filter takes a list. Also handles
+  per-variant capacities, payloads that are not valid UTF-8, and aggressive
+  storefront rate limiting (429 as a distinct error -- poll hourly at most).
+- **Typed capacity path in the hdd extractor**: a structured connector may supply
+  `Aspects["capacity_tb"]` and the extractor prefers it over scanning the title,
+  falling back to the title when it is absent, non-numeric or nonpositive. Without
+  this, sources that title products by model number would have every item dropped
+  by the capacity hard-filter.
+
+### Fixed
+
+- **Land enrichment now resolves at the parcel, not the city centroid.** Flood and
+  wetland signals were derived by geocoding `Attributes["location"]`, which for the
+  Zillapi source is a city label -- so those signals described downtown rather than
+  the parcel, and fed the verdict that decides whether to notify. Exact
+  per-listing coordinates are now used directly (geocoding remains the fallback for
+  place-name-only sources) and are validated first, so null-island, unparseable and
+  out-of-range values fall back instead of enriching confidently at the wrong
+  place. The parcel provider is now given a street address rather than a city name,
+  which it cannot resolve. Root cause was the land extractor silently discarding
+  the `lat`/`lon` aspects the connector had been emitting all along.
+
 ## [0.2.0] - 2026-07-30
 
 ### Compliance
@@ -122,5 +158,6 @@ acts (eyes, not hands).
 - Postgres text search is substring (`ILIKE`) to match the reference contract;
   ranked FTS/pgvector is a follow-on.
 
+[0.3.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.3.0
 [0.2.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.2.0
 [0.1.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.1.0

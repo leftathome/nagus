@@ -7,14 +7,18 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
+# 0.4.0: appVersion 0.3.0 (Shopify connector + land parcel-coordinate fix). No
+# template change was needed for a Shopify source -- sources[] is rendered
+# verbatim into config.json -- but Chart.yaml content changed, so the version is
+# bumped rather than reusing a published digest.
 # 0.3.0: land acquisition moves to Zillapi -- adds the zillapi ExternalSecret and
 # NAGUS_ZILLAPI_KEY env, and REMOVES the craigslist values/env (land.craigslistCity,
 # land.craigslistCategory, NAGUS_CL_*). Bumped so Flux pulls the new templates.
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.3.0
-appVersion: "0.2.0"
+version: 0.4.0
+appVersion: "0.3.0"
 kubeVersion: ">=1.27.0-0"
 keywords:
   - acquisition

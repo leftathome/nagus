@@ -339,3 +339,48 @@ func TestMultiVariantCapacityIsPerVariant(t *testing.T) {
 		}
 	}
 }
+
+// products_waterpanther.json is a REAL waterpanther.com page captured 2026-07-30.
+// It is a SECOND store with a materially different catalog shape, kept because a
+// connector claiming to be generic should be proven against more than one store:
+// product_type is EMPTY on every product and the tag convention is different
+// ("2-Storage Capacity^24TB", not "capacity:24TB"), so neither structured
+// capacity path fires. The capacity is in the TITLE instead, which is precisely
+// the case the extractor's title fallback exists for.
+const waterPantherFixture = "testdata/products_waterpanther.json"
+
+func TestSecondStoreWithDifferentShape(t *testing.T) {
+	raws := mustFetch(t, Config{Name: "waterpanther", FixturePath: waterPantherFixture})
+	if len(raws) == 0 {
+		t.Fatal("waterpanther fixture produced no rows")
+	}
+	for _, r := range raws {
+		if r.SourceID != "shopify:waterpanther" {
+			t.Errorf("SourceID = %q", r.SourceID)
+		}
+		if r.PriceCents <= 0 {
+			t.Errorf("row %q has no price", r.SourceKey)
+		}
+		// This store's structured fields carry no capacity, so the connector
+		// legitimately emits no aspect. The title must carry it instead, or the
+		// item would be dropped at the hdd hard-filter.
+		if r.Aspects["capacity_tb"] == "" && !strings.Contains(strings.ToUpper(r.Title), "TB") {
+			t.Errorf("row %q has neither a capacity aspect nor a capacity in its title: %q", r.SourceKey, r.Title)
+		}
+	}
+}
+
+// An allow-filter tuned for one store must not silently empty another. Water
+// Panther has an EMPTY product_type on every product, so the serverpartdeals
+// filter would drop its entire catalog -- a config trap worth pinning.
+func TestAllowFilterEmptiesAStoreWithNoProductType(t *testing.T) {
+	unfiltered := mustFetch(t, Config{Name: "wp", FixturePath: waterPantherFixture})
+	filtered := mustFetch(t, Config{Name: "wp", FixturePath: waterPantherFixture,
+		ProductTypePrefixes: []string{"Hard Drives", "HDDs"}})
+	if len(unfiltered) == 0 {
+		t.Fatal("precondition: unfiltered should yield rows")
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("filtered yielded %d rows; expected 0 -- this store has no product_type, so a prefix filter must be left OFF for it", len(filtered))
+	}
+}

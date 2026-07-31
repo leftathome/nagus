@@ -1,0 +1,337 @@
+{
+ "products": [
+  {
+   "id": 7310740947077,
+   "title": "Refurbished: 24TB 7.2K SAS 12Gb/s 3.5\" HDD for HPE ProLiant Servers | Enterprise Drive in Gen11 Tray",
+   "handle": "refurbished-24tb-7-2k-sas-12gb-s-3-5-hdd-for-hpe-proliant-servers-enterprise-drive-in-gen11-tray",
+   "body_html": "<ul>\n<li>Refurbished server hard drive. Compatible in HP servers with 3.5in chassis</li>\n<li>Equipped with an 11th gen. HPE hot-plug carrier, tray is compatible with 11th &amp; 10+ gen. servers</li>\n<li>Designed for 24x7 availability in high data workload environments</li>\n<li>Enterprise-grade reliability and performance, optimized for scale-out data centers</li>\n<li>Backed by a 2-year replacement warranty</li>\n</ul>",
+   "published_at": "2026-07-30T15:36:24-04:00",
+   "created_at": "2026-07-30T15:36:24-04:00",
+   "updated_at": "2026-07-31T02:53:32-04:00",
+   "vendor": "Water Panther",
+   "product_type": "",
+   "tags": [
+    "1-Device Type^Hot-Plug Hard Disk Drive",
+    "2-Storage Capacity^24TB",
+    "24 TB",
+    "24000 GB",
+    "24000GB",
+    "24t",
+    "24TB",
+    "4-Interface^SAS-3.0 12Gbit/s",
+    "5-Form Factor^3.5 Inches",
+    "6-Hot-Plug Carrier Type^HP Generation 11",
+    "Device Type_Hard Disk Drive",
+    "Form Factor_3.5 Inches",
+    "G10+",
+    "G11",
+    "Gen11",
+    "generation 10+",
+    "HD",
+    "HDD",
+    "Hot-Plug Tray Type_HP Gen. 11",
+    "HP",
+    "HPE",
+    "Interface_SAS 12Gb/s",
+    "Item Condition_Refurbished",
+    "LFF",
+    "recertified",
+    "refurb",
+    "SAS",
+    "Spindle Speed_7.2K RPM"
+   ],
+   "variants": [
+    {
+     "id": 41786183876741,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "SWP_24TB72KSAS35_WPHPG11_MR_CR_12G_2",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "809.00",
+     "grams": 907,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 7310740947077,
+     "created_at": "2026-07-30T15:36:24-04:00",
+     "updated_at": "2026-07-31T02:53:32-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 35218940854405,
+     "created_at": "2026-07-30T15:36:38-04:00",
+     "position": 1,
+     "updated_at": "2026-07-30T15:36:39-04:00",
+     "product_id": 7310740947077,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0385/2176/6021/files/SASClean_be697ae0-1eb3-4397-88fe-53b3f026c7f5.webp?v=1785440199",
+     "width": 1600,
+     "height": 1600
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 7310739177605,
+   "title": "Refurbished: 24TB 7.2K SAS 12Gb/s 3.5\" HDD for HPE ProLiant Servers | Enterprise Drive in Gen8 Tray",
+   "handle": "refurbished-24tb-7-2k-sas-12gb-s-3-5-hdd-for-hpe-proliant-servers-enterprise-drive-in-gen8-tray",
+   "body_html": "<ul>\n<li>Refurbished server hard drive. Compatible in HP servers with 3.5in chassis</li>\n<li>Equipped with an 8th gen. HPE hot-plug carrier, tray is compatible with 9th &amp; 10th gen. servers</li>\n<li>Designed for 24x7 availability in high data workload environments</li>\n<li>Enterprise-grade reliability and performance, optimized for scale-out data centers</li>\n<li>Backed by a 2-year replacement warranty</li>\n</ul>",
+   "published_at": "2026-07-30T15:33:42-04:00",
+   "created_at": "2026-07-30T15:33:42-04:00",
+   "updated_at": "2026-07-31T02:53:32-04:00",
+   "vendor": "Water Panther",
+   "product_type": "",
+   "tags": [
+    "1-Device Type^Hot-Plug Hard Disk Drive",
+    "2-Storage Capacity^24TB",
+    "24 TB",
+    "24000 GB",
+    "24000GB",
+    "24t",
+    "24TB",
+    "4-Interface^SAS-3.0 12Gbit/s",
+    "5-Form Factor^3.5 Inches",
+    "6-Hot-Plug Carrier Type^HP Generation 8",
+    "Device Type_Hard Disk Drive",
+    "Form Factor_3.5 Inches",
+    "G8",
+    "Gen8",
+    "Gen9",
+    "HD",
+    "HDD",
+    "Hot-Plug Tray Type_HP Gen. 8",
+    "HP",
+    "HPE",
+    "Interface_SAS 12Gb/s",
+    "Item Condition_Refurbished",
+    "LFF",
+    "recertified",
+    "refurb",
+    "SAS",
+    "Spindle Speed_7.2K RPM"
+   ],
+   "variants": [
+    {
+     "id": 41786177388677,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "SWP_24TB72KSAS35_WPHPG8_MR_CR_12G_2",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "809.00",
+     "grams": 907,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 7310739177605,
+     "created_at": "2026-07-30T15:33:43-04:00",
+     "updated_at": "2026-07-31T02:53:32-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 35218938724485,
+     "created_at": "2026-07-30T15:33:59-04:00",
+     "position": 1,
+     "updated_at": "2026-07-30T15:34:01-04:00",
+     "product_id": 7310739177605,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0385/2176/6021/files/SAS_496a3862-0e08-4dcd-b11f-41da4ef5e2e0.png?v=1785440041",
+     "width": 3306,
+     "height": 3306
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 7310736720005,
+   "title": "Refurbished: 22TB 7.2K SAS 12Gb/s 3.5\" HDD for HPE ProLiant Servers | Enterprise Drive in Gen11 Tray",
+   "handle": "refurbished-22tb-7-2k-sas-12gb-s-3-5-hdd-for-hpe-proliant-servers-enterprise-drive-in-gen11-tray",
+   "body_html": "<ul>\n<li>Refurbished server hard drive. Compatible in HP servers with 3.5in chassis</li>\n<li>Equipped with an 11th gen. HPE hot-plug carrier, tray is compatible with 11th &amp; 10+ gen. servers</li>\n<li>Designed for 24x7 availability in high data workload environments</li>\n<li>Enterprise-grade reliability and performance, optimized for scale-out data centers</li>\n<li>Backed by a 2-year replacement warranty</li>\n</ul>",
+   "published_at": "2026-07-30T15:28:54-04:00",
+   "created_at": "2026-07-30T15:28:54-04:00",
+   "updated_at": "2026-07-31T02:53:32-04:00",
+   "vendor": "Water Panther",
+   "product_type": "",
+   "tags": [
+    "1-Device Type^Hot-Plug Hard Disk Drive",
+    "2-Storage Capacity^22TB",
+    "22 TB",
+    "22000 GB",
+    "22000GB",
+    "22t",
+    "22TB",
+    "4-Interface^SAS-3.0 12Gbit/s",
+    "5-Form Factor^3.5 Inches",
+    "6-Hot-Plug Carrier Type^HP Generation 11",
+    "Device Type_Hard Disk Drive",
+    "Form Factor_3.5 Inches",
+    "G10+",
+    "G11",
+    "Gen11",
+    "generation 10+",
+    "HD",
+    "HDD",
+    "Hot-Plug Tray Type_HP Gen. 11",
+    "HP",
+    "HPE",
+    "Interface_SAS 12Gb/s",
+    "Item Condition_Refurbished",
+    "LFF",
+    "recertified",
+    "refurb",
+    "SAS",
+    "Spindle Speed_7.2K RPM"
+   ],
+   "variants": [
+    {
+     "id": 41786170048645,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": "SWP_22TB72KSAS35_WPHPG11_MR_CR_12G_2",
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": true,
+     "price": "749.00",
+     "grams": 907,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 7310736720005,
+     "created_at": "2026-07-30T15:28:54-04:00",
+     "updated_at": "2026-07-31T02:53:32-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 35218926108805,
+     "created_at": "2026-07-30T15:29:11-04:00",
+     "position": 1,
+     "updated_at": "2026-07-30T15:29:12-04:00",
+     "product_id": 7310736720005,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0385/2176/6021/files/SASClean_58f685c5-5c06-4a06-bef9-aa23d90a7e39.webp?v=1785439752",
+     "width": 1600,
+     "height": 1600
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": 7310718304389,
+   "title": "Refurbished: 20TB 7.2K SAS 12Gb/s 3.5\" HDD for HPE ProLiant Servers | Enterprise Drive in Gen8 Tray",
+   "handle": "refurbished-20tb-7-2k-sas-12gb-s-3-5-hdd-for-hpe-proliant-servers-enterprise-drive-in-gen8-tray-1",
+   "body_html": "<ul>\n<li>Refurbished server hard drive. Compatible in HP servers with 3.5in chassis</li>\n<li>Equipped with an 8th gen. HPE hot-plug carrier, tray is compatible with 9th &amp; 10th gen. servers</li>\n<li>Designed for 24x7 availability in high data workload environments</li>\n<li>Enterprise-grade reliability and performance, optimized for scale-out data centers</li>\n<li>Backed by a 2-year replacement warranty</li>\n</ul>",
+   "published_at": "2026-07-30T15:08:01-04:00",
+   "created_at": "2026-07-30T15:08:01-04:00",
+   "updated_at": "2026-07-31T02:53:32-04:00",
+   "vendor": "Water Panther",
+   "product_type": "",
+   "tags": [
+    "1-Device Type^Hot-Plug Hard Disk Drive",
+    "18 TB",
+    "18000GB",
+    "18t",
+    "18TB",
+    "2-Storage Capacity^18TB",
+    "4-Interface^SAS-3.0 12Gbit/s",
+    "5-Form Factor^3.5 Inches",
+    "6-Hot-Plug Carrier Type^HP Generation 8",
+    "Device Type_Hard Disk Drive",
+    "Form Factor_3.5 Inches",
+    "G8",
+    "Gen8",
+    "Gen9",
+    "HD",
+    "HDD",
+    "Hot-Plug Tray Type_HP Gen. 8",
+    "HP",
+    "HPE",
+    "Interface_SAS 12Gb/s",
+    "Item Condition_Refurbished",
+    "LFF",
+    "recertified",
+    "refurb",
+    "SAS",
+    "Spindle Speed_7.2K RPM"
+   ],
+   "variants": [
+    {
+     "id": 41786141474949,
+     "title": "Default Title",
+     "option1": "Default Title",
+     "option2": null,
+     "option3": null,
+     "sku": null,
+     "requires_shipping": true,
+     "taxable": true,
+     "featured_image": null,
+     "available": false,
+     "price": "609.00",
+     "grams": 907,
+     "compare_at_price": null,
+     "position": 1,
+     "product_id": 7310718304389,
+     "created_at": "2026-07-30T15:08:02-04:00",
+     "updated_at": "2026-07-31T02:53:32-04:00"
+    }
+   ],
+   "images": [
+    {
+     "id": 35218942853253,
+     "created_at": "2026-07-30T15:40:56-04:00",
+     "position": 1,
+     "updated_at": "2026-07-30T15:40:58-04:00",
+     "product_id": 7310718304389,
+     "variant_ids": [],
+     "src": "https://cdn.shopify.com/s/files/1/0385/2176/6021/files/SAS_e84cbda5-94c4-4d3b-a5e9-25330957d3b3.png?v=1785440458",
+     "width": 3306,
+     "height": 3306
+    }
+   ],
+   "options": [
+    {
+     "name": "Title",
+     "position": 1,
+     "values": [
+      "Default Title"
+     ]
+    }
+   ]
+  }
+ ]
+}
