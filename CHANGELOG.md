@@ -4,7 +4,20 @@ All notable changes to nagus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-30
+
+### Compliance
+
+- **The Craigslist source was a Terms of Use violation and is removed.**
+  Craigslist's ToU prohibits copying or collecting their content "via robots,
+  spiders, scripts, scrapers, crawlers, or any automated or manual equivalent" --
+  a blanket prohibition on automated collection. Consuming a search feed they
+  publish is still automated collection, so the connector was in violation from
+  the start, not merely once the feed was withdrawn. **Craigslist is not a
+  supported source for nagus and must not be reintroduced** in any form: not the
+  RSS feed, not the internal JSON search API, not a headless browser, and not by
+  relocating the same fetch into another service -- moving code does not change
+  consent. It was removed as soon as this was recognized.
 
 ### Added
 
@@ -109,4 +122,5 @@ acts (eyes, not hands).
 - Postgres text search is substring (`ILIKE`) to match the reference contract;
   ranked FTS/pgvector is a follow-on.
 
+[0.2.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.2.0
 [0.1.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.1.0

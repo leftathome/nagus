@@ -15,7 +15,13 @@ Every URL carrying `format=rss` now returns their WAF block page (HTTP 403) whil
 the plain HTML search returns 200 -- an endpoint retirement, not an IP or
 User-Agent block. Craigslist's ToU prohibits automated collection and
 circumventing access controls, so there is no compliant replacement fetch path.
-The connector was deleted (nagus-hh5) and land is currently surface-only.
+
+To be precise about the compliance position: the ToU ban is blanket ("robots,
+spiders, scripts, scrapers, crawlers, or any automated or manual equivalent"), so
+polling a feed Craigslist publishes was ALREADY a violation -- the original
+connector was non-compliant from the start, not merely once the feed was
+withdrawn. Craigslist is a prohibited source and must not be reintroduced by any
+mechanism. See CLAUDE.md.
 
 Zillapi is the tier-(c) thin-API option the original design already named for
 land ("Zillow land | paid wrapper -- Zillapi ~$5/mo (search includes lots)").

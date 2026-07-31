@@ -13,7 +13,10 @@
 > HTML search returns 200 — an endpoint retirement, not an IP or User-Agent block
 > (verified from in-cluster residential egress). Craigslist's Terms of Use prohibit
 > automated collection and circumventing access controls, so **there is no compliant
-> replacement fetch path**; the connector was deleted rather than ported. The land
+> replacement fetch path**; the connector was deleted rather than ported. The ban
+> is blanket ("robots, spiders, scripts, scrapers, crawlers, or any automated or
+> manual equivalent"), so polling the published feed was already a violation --
+> Craigslist is a PROHIBITED source, not merely an unavailable one. The land
 > reference adapter moves to the tier-(c) thin-API option this document already names,
 > **Zillapi** (Section A.1). Every Craigslist recommendation below is superseded —
 > read it as the historical rationale, not as guidance. Tracking: nagus-hh5 (removal),

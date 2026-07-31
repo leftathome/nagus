@@ -19,6 +19,15 @@ recognizer/archiver, and openclaw (agent runtime + delivery).
   raw listing free-text reach an LLM instruction context; quote it as data.
 - **Never commit secrets.** API keys (Zillapi/Regrid/eBay/Keepa/...) live in Vault,
   synced to runtime. Not in git, not in config committed here.
+- **Craigslist is a PROHIBITED source. Never reintroduce it.** Their ToU bars
+  copying/collecting content "via robots, spiders, scripts, scrapers, crawlers, or
+  any automated or manual equivalent" -- a blanket ban on automated collection, so
+  even polling a feed they publish violates it. The old RSS connector was removed
+  in 0.2.0 for this reason (and their feed is gone: `?format=rss` now returns a 403
+  block page). This applies to every mechanism -- RSS, the internal JSON search
+  API, a headless browser, or relocating the same fetch into glovebox. Moving code
+  does not change consent. If a land source is needed, use Zillapi
+  (`internal/connector/zillapi`).
 - **Storage is an adapter.** SQLite+FTS5 and Postgres+pgvector both implement
   `internal/store.Store`. Do not couple the pipeline to one backend.
 
