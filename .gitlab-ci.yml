@@ -16,7 +16,7 @@
 
 include:
   - project: 'homelab/ci-templates'
-    ref: v0.1.1
+    ref: v0.2.0
     file: '/kaniko.yml'
 
 stages:
@@ -69,17 +69,51 @@ test:
     - if: '$CI_COMMIT_TAG'
 
 # ---------------------------------------------------------------------------
-# build -- the single distroless image (CGO-free static binary + pure-Go
-# sqlite). No enricher base, no connector matrix: nagus is one image.
+# build -- the distroless image (CGO-free static binary + pure-Go sqlite), built
+# MULTI-ARCH. orac is a mixed-architecture cluster (johnny/venus amd64; bailey
+# and orac01-04 arm64), and a single-arch image runs only where the scheduler
+# happens to place it -- an amd64-only nagus crashlooped with "exec format
+# error" after being scheduled onto orac04, taking the service down because the
+# chart uses strategy: Recreate (nagus-viw).
+#
+# Three jobs, per the ci-templates recipe: two NATIVE per-arch legs (no QEMU --
+# emulation would need a privileged binfmt DaemonSet this cluster does not have)
+# publishing only the immutable :<sha>-<arch> tags, then a crane merge that
+# publishes the tags we actually deploy (:<sha>, :latest, :<semver>) as an index
+# over those two. Sourcing the index from immutable per-commit tags is what stops
+# two concurrent pipelines stitching an index whose halves are different commits.
+#
+# Do NOT set MULTIARCH here; the legs assert it themselves. Setting it on one leg
+# only would make the other publish to the unsuffixed tags and quietly leave
+# :latest single-arch.
 # ---------------------------------------------------------------------------
-build:
-  extends: .kaniko-build
+build-amd64:
+  extends: .kaniko-build-amd64
   stage: build
   needs: ["test"]
   rules: *build_rules
   variables:
     IMAGE: nagus
     DOCKERFILE: ./Dockerfile
+
+build-arm64:
+  extends: .kaniko-build-arm64
+  stage: build
+  needs: ["test"]
+  rules: *build_rules
+  variables:
+    IMAGE: nagus
+    DOCKERFILE: ./Dockerfile
+
+# The index. This is the job whose output the HelmRelease consumes -- the legs'
+# per-arch tags are an implementation detail and are never deployed directly.
+build:
+  extends: .manifest-merge
+  stage: build
+  needs: ["build-amd64", "build-arm64"]
+  rules: *build_rules
+  variables:
+    IMAGE: nagus
 
 # ---------------------------------------------------------------------------
 # chart -- package + push charts/nagus as an OCI artifact. On a tag the template

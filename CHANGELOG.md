@@ -4,6 +4,27 @@ All notable changes to nagus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Images are now built multi-arch (`linux/amd64` + `linux/arm64`)**
+  (nagus-viw). orac is a mixed-architecture cluster and an amd64-only nagus
+  crashlooped with `exec format error` after a rollout scheduled it onto an
+  arm64 node -- taking the service down, because the chart uses
+  `strategy: Recreate`. Scheduling had been working by luck: only 2 of the 7
+  nodes are amd64.
+  CI adopts `homelab/ci-templates` v0.2.0 and its three-job recipe: two NATIVE
+  per-arch kaniko legs (no QEMU -- emulation would need a privileged binfmt
+  DaemonSet the cluster does not have) publishing immutable `:<sha>-<arch>`
+  tags, then a crane merge publishing the deployed tags as an index over those.
+  The Dockerfile pins **both** platform digests and selects one per leg, rather
+  than switching to the multi-arch index digest: the in-cluster zot mirror
+  on-demand-syncs whatever is requested and the full `golang:1.26` index is
+  ~3GB across 9 platforms, which the residential uplink cannot pull reliably --
+  pinning the index would have re-broken exactly what nagus-c4p fixed. Each leg
+  still pulls only its own ~312MB.
+
 ## [0.3.1] - 2026-07-31
 
 ### Fixed
