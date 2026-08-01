@@ -17,10 +17,31 @@ spec:
     metadata:
       labels:
         {{- include "nagus.selectorLabels" . | nindent 8 }}
-      {{- with .Values.podAnnotations }}
       annotations:
+        # Roll the Deployment when the mounted config changes. nagus reads
+        # NAGUS_CONFIG (and the watches file) ONCE AT STARTUP, so without these a
+        # values-only edit updates the ConfigMap while the running pod keeps
+        # serving the old config -- and `kubectl rollout status` reports success,
+        # because the previous rollout is genuinely complete.
+        #
+        # That failure mode is not merely inconvenient, it is MISLEADING: it
+        # bit twice, and both times produced a confidently wrong reading rather
+        # than an obvious error. Removing a source appeared to have no effect,
+        # and enabling product-identity hints appeared to yield zero keyed
+        # offers -- in both cases the change was fine and the pod was simply
+        # still running the previous config.
+        #
+        # Hashing the rendered TEMPLATE (not just .Values) means the checksum
+        # also moves when the template's own rendering logic changes. A template
+        # that renders to nothing hashes consistently, so a chart with no
+        # sources/watches/demo gets a stable annotation rather than a spurious
+        # roll.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-config.yaml") . | sha256sum }}
+        checksum/watches: {{ include (print $.Template.BasePath "/configmap-watches.yaml") . | sha256sum }}
+        checksum/demo: {{ include (print $.Template.BasePath "/configmap-demo.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

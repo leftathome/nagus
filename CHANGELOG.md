@@ -25,6 +25,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinning the index would have re-broken exactly what nagus-c4p fixed. Each leg
   still pulls only its own ~312MB.
 
+## [Unreleased]
+
+### Fixed
+
+- **Chart: a config-only change now rolls the Deployment** (chart 0.5.1). nagus
+  reads `NAGUS_CONFIG` and the watches file once at startup, so editing values
+  updated the ConfigMap while the running pod kept serving the old config -- and
+  `kubectl rollout status` reported success, because the previous rollout really
+  was complete. The failure mode was misleading rather than merely inconvenient:
+  it bit twice and each time produced a confidently wrong reading (a removed
+  source appeared to have no effect; enabling product-identity hints appeared to
+  yield zero keyed offers). Both changes were fine; the pod was simply still on
+  the old config. Fixed with `checksum/config`, `checksum/watches` and
+  `checksum/demo` pod-template annotations over the RENDERED templates, so the
+  checksum also moves when a template's own rendering logic changes.
+
 ## [0.4.0] - 2026-07-31
 
 ### Added
