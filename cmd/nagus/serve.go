@@ -442,8 +442,17 @@ func ingestOnceSource(ctx context.Context, ing *pipeline.Ingester) {
 		fmt.Fprintf(os.Stderr, "nagus serve: source %s ingest error: %v\n", ing.SourceID(), err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "nagus serve: source %s fetched=%d stored=%d purged=%d skipped=%d\n",
-		ing.SourceID(), res.Fetched, res.Stored, res.Purged, len(res.Skips))
+	// Offer counters are reported SEPARATELY from item counters, and only when
+	// the layer is on, so "stored 76 items" and "recorded 76 offers" can never be
+	// read as each other -- and so an operator can actually see whether the offer
+	// layer is doing anything, which is otherwise invisible.
+	offers := ""
+	if res.OffersRecorded > 0 || res.OffersExpired > 0 || res.OffersPurged > 0 {
+		offers = fmt.Sprintf(" offers=%d offers-expired=%d offers-purged=%d",
+			res.OffersRecorded, res.OffersExpired, res.OffersPurged)
+	}
+	fmt.Fprintf(os.Stderr, "nagus serve: source %s fetched=%d stored=%d purged=%d skipped=%d%s\n",
+		ing.SourceID(), res.Fetched, res.Stored, res.Purged, len(res.Skips), offers)
 }
 
 // --- env helpers (flag defaults seed from env; explicit flags override) ---
