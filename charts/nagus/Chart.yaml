@@ -7,6 +7,8 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
+# 0.5.0: offer layer (nagus-q6u) -- adds offers.enabled + offers.sqlitePath and
+# the NAGUS_OFFERS / NAGUS_OFFERS_DB env. appVersion 0.4.0.
 # 0.4.1: appVersion 0.3.1 (store-derived $/TB reference).
 # 0.4.0: appVersion 0.3.0 (Shopify connector + land parcel-coordinate fix). No
 # template change was needed for a Shopify source -- sources[] is rendered
@@ -18,8 +20,8 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.4.1
-appVersion: "0.3.1"
+version: 0.5.0
+appVersion: "0.4.0"
 kubeVersion: ">=1.27.0-0"
 keywords:
   - acquisition

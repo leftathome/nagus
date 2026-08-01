@@ -109,6 +109,16 @@ spec:
                   name: {{ $rentcast }}
                   key: NAGUS_RENTCAST_KEY
             {{- end }}
+            {{- if .Values.offers.enabled }}
+            - name: NAGUS_OFFERS
+              value: "true"
+            {{- if eq .Values.storage.backend "sqlite" }}
+            # Only meaningful on sqlite; on postgres the offer tables live in the
+            # same database as items and no separate path exists.
+            - name: NAGUS_OFFERS_DB
+              value: {{ .Values.offers.sqlitePath | quote }}
+            {{- end }}
+            {{- end }}
             {{- $zillapi := include "nagus.zillapiSecretName" . }}
             {{- if $zillapi }}
             - name: NAGUS_ZILLAPI_KEY

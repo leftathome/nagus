@@ -25,6 +25,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinning the index would have re-broken exactly what nagus-c4p fixed. Each leg
   still pulls only its own ~312MB.
 
+## [0.4.0] - 2026-07-31
+
+### Added
+
+- **Offer layer** (`internal/offer`), opt-in via `offers.enabled` in the chart.
+  Offers accumulate from every source regardless of whether any category
+  currently evaluates them, so activating a category later does not start cold
+  and price history survives for goods nothing scores. Additive: the item store,
+  surface, `search_items` and watches are unchanged.
+  Expiry and retention are deliberately separate axes -- an offer the source
+  stops showing becomes *expired* and is RETAINED as evidence, while per-source
+  retention policy is the only thing that deletes. An expired offer must never
+  reach a purchase recommendation, so `offer.Query` returns only purchasable
+  offers unless `IncludeExpired` is set.
+- **Three store adapters** (memory / sqlite / postgres) all passing one shared
+  reference contract, so offers and items are peer stores. On postgres the offer
+  tables live in the SAME database as items; on sqlite they are a separate file.
+- **Per-source retention** replaces a per-category hardcode that applied eBay's
+  6h content window to every hdd source -- including storefronts with no such
+  obligation, which a few hours of rate-limiting would have wiped.
+- **Product hints from Shopify sources**, declared per store rather than guessed,
+  making cross-seller dedup real: 250 offers in the serverpartdeals catalogue
+  resolve to 132 distinct products.
+
 ## [0.3.1] - 2026-07-31
 
 ### Fixed
@@ -206,6 +230,7 @@ acts (eyes, not hands).
 - Postgres text search is substring (`ILIKE`) to match the reference contract;
   ranked FTS/pgvector is a follow-on.
 
+[0.4.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.4.0
 [0.3.1]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.3.1
 [0.3.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.3.0
 [0.2.0]: https://gitlab.orac.local/agentic/nagus/-/releases/v0.2.0

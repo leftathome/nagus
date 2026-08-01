@@ -111,6 +111,30 @@ land:
       key: eso/nagus/sources
       property: zillapi_key
 
+# The OFFER LAYER (nagus-q6u). Offers accumulate from every source regardless of
+# whether any category currently evaluates them, so activating a category later
+# does not start cold, and price history survives for goods nothing scores.
+#
+# It is ADDITIVE and OPT-IN: disabled leaves the item store, the surface,
+# search_items and watches byte-identical to before.
+#
+# The offer store follows storage.backend, so the two are peer stores:
+#   postgres -> its own TABLE SET in the SAME database as items. Backup and
+#               restore stay one unit, so item and offer state cannot be
+#               restored out of step with each other.
+#   sqlite   -> a separate FILE at offers.sqlitePath. SQLite's constraints are
+#               real (a VACUUM takes a database-wide lock, the pool is capped at
+#               one connection), so sharing a file would put offer maintenance in
+#               front of the read path that serves the live surface.
+#
+# NOTE ON GROWTH: sources with retain-full retention accumulate indefinitely by
+# design. On the sqlite backend that file shares the PVC with the item store, so
+# watch the volume -- see storage.sqlite.persistence.size.
+offers:
+  enabled: false
+  # Ignored when storage.backend is postgres.
+  sqlitePath: /data/nagus-offers.db
+
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
 # strong matches -> ping; audience is routed by openclaw's household resolver).
