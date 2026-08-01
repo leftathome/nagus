@@ -384,3 +384,78 @@ func TestAllowFilterEmptiesAStoreWithNoProductType(t *testing.T) {
 		t.Fatalf("filtered yielded %d rows; expected 0 -- this store has no product_type, so a prefix filter must be left OFF for it", len(filtered))
 	}
 }
+
+// --- product identity / dedup hints -------------------------------------------
+
+// serverpartdeals states a real manufacturer and its SKU embeds the MPN, so
+// hints are emitted and the provisional key can group offers.
+func TestHintsEmittedWhenTheStoreStatesThem(t *testing.T) {
+	raws := mustFetch(t, Config{
+		Name: "serverpartdeals", FixturePath: fixture,
+		BrandTag: "brand:", SKUIsMPN: true, SKUSuffixes: []string{"_SR", "_MR", "_NB"},
+	})
+	var withBrand, withMPN int
+	for _, r := range raws {
+		if r.Aspects["brand"] != "" {
+			withBrand++
+		}
+		if r.Aspects["mpn"] != "" {
+			withMPN++
+		}
+	}
+	if withBrand == 0 || withMPN == 0 {
+		t.Fatalf("hints not emitted: brand=%d mpn=%d of %d rows", withBrand, withMPN, len(raws))
+	}
+}
+
+// THE DEDUP CASE: serverpartdeals lists the SAME physical drive three times,
+// once per condition, with SKUs differing only by suffix (_SR/_MR/_NB). Stripping
+// the suffix must make all three share one MPN -- one product, three offers.
+func TestConditionVariantsShareOneMPN(t *testing.T) {
+	c := NewConnector(Config{
+		Name: "spd", SKUIsMPN: true, SKUSuffixes: []string{"_SR", "_MR", "_NB"},
+	})
+	got := map[string]bool{}
+	for _, sku := range []string{"WUH722424AL5201-0F62801_SR", "WUH722424AL5201-0F62801_MR", "WUH722424AL5201-0F62801_NB"} {
+		got[c.mpnOf(variant{SKU: sku})] = true
+	}
+	if len(got) != 1 {
+		t.Fatalf("condition variants produced %d distinct MPNs, want 1: %v", len(got), got)
+	}
+	for k := range got {
+		if k != "WUH722424AL5201-0F62801" {
+			t.Errorf("MPN = %q, want the suffix stripped", k)
+		}
+	}
+}
+
+// A store with no manufacturer data must emit NOTHING rather than pass off its
+// own house label as a brand. waterpanther's vendor is "Water Panther" -- the
+// STORE -- on generic OEM-tray drives; grouping by that would invent a product.
+func TestNoHintsWhenTheStoreHasNoProductIdentity(t *testing.T) {
+	raws := mustFetch(t, Config{Name: "waterpanther", FixturePath: waterPantherFixture})
+	if len(raws) == 0 {
+		t.Fatal("fixture produced no rows")
+	}
+	for _, r := range raws {
+		if b := r.Aspects["brand"]; b != "" {
+			t.Errorf("emitted brand %q for a store that states no manufacturer -- a reseller label must not become a product identity", b)
+		}
+		if m := r.Aspects["mpn"]; m != "" {
+			t.Errorf("emitted mpn %q from an internal SKU", m)
+		}
+	}
+}
+
+// Unconfigured stores stay silent even when a vendor field exists.
+func TestVendorIsNeverUsedAsBrand(t *testing.T) {
+	c := NewConnector(Config{Name: "x"}) // no BrandTag configured
+	p := product{Vendor: "Water Panther", Tags: []string{"brand:Western Digital"}}
+	if got := c.brandOf(p); got != "" {
+		t.Fatalf("brandOf = %q with no BrandTag configured, want empty", got)
+	}
+	c2 := NewConnector(Config{Name: "x", BrandTag: "brand:"})
+	if got := c2.brandOf(p); got != "Western Digital" {
+		t.Fatalf("brandOf = %q, want the tag value not the vendor", got)
+	}
+}

@@ -158,6 +158,9 @@ func buildShopifyConnector(s SourceConfig) (listing.Connector, error) {
 		BaseURL:             s.BaseURL,
 		ProductTypePrefixes: s.ProductTypePrefixes,
 		IncludeUnavailable:  s.IncludeUnavailable,
+		BrandTag:            s.BrandTag,
+		SKUIsMPN:            s.SKUIsMPN,
+		SKUSuffixes:         s.SKUSuffixes,
 		MaxPages:            s.MaxPages,
 		FixturePath:         s.Fixture,
 	}), nil

@@ -106,6 +106,30 @@ type Config struct {
 	// is noise.
 	IncludeUnavailable bool
 
+	// --- product identity (cross-seller dedup) ---
+	//
+	// These are DECLARED PER STORE rather than guessed, because guessing mints
+	// false product identities. Concretely: serverpartdeals' `vendor` really is
+	// the manufacturer ("Western Digital"), but waterpanther's is "Water
+	// Panther" -- the STORE's own house label on generic OEM-tray drives whose
+	// actual manufacturer is not stated anywhere. Reading vendor as a brand
+	// there would group unrelated drives under a reseller name and then present
+	// them as one product. A store with no real identity data should emit NO
+	// hints and stay ungrouped, which is an honest answer.
+	//
+	// BrandTag is the tag prefix carrying the manufacturer, e.g. "brand:".
+	// Empty means this store does not state a manufacturer.
+	BrandTag string
+	// SKUIsMPN declares that variant.sku IS (or embeds) the manufacturer part
+	// number. Off by default: most stores' SKUs are internal codes.
+	SKUIsMPN bool
+	// SKUSuffixes are trailing SKU segments to strip before using it as an MPN.
+	// serverpartdeals encodes CONDITION in the suffix (_SR seller-refurbished,
+	// _MR manufacturer-recertified, _NB new-bulk) so the same physical product
+	// has three SKUs; stripping them is what lets the three group as one
+	// product with three offers, which is exactly the intent.
+	SKUSuffixes []string
+
 	// MaxPages bounds pagination. Defaults to DefaultMaxPages.
 	MaxPages int
 	// Limit is the page size. Defaults to DefaultLimit.
@@ -282,6 +306,12 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if vt := strings.TrimSpace(v.Title); vt != "" && !strings.EqualFold(vt, "Default Title") {
 				aspects["variant"] = vt
 			}
+			if b := c.brandOf(p); b != "" {
+				aspects["brand"] = b
+			}
+			if m := c.mpnOf(v); m != "" {
+				aspects["mpn"] = m
+			}
 			out = append(out, listing.Raw{
 				SourceID:     c.SourceID(),
 				SourceKey:    fmt.Sprintf("%d:%d", p.ID, v.ID),
@@ -345,6 +375,54 @@ type variant struct {
 	SKU       string `json:"sku"`
 	Available bool   `json:"available"`
 	Option1   string `json:"option1"`
+}
+
+// brandOf returns the manufacturer from the configured brand tag, or "" when the
+// store does not state one. It deliberately does NOT fall back to `vendor`: see
+// Config.BrandTag for why that would be actively wrong at some stores.
+func (c *Connector) brandOf(p product) string {
+	if c.cfg.BrandTag == "" {
+		return ""
+	}
+	for _, t := range p.Tags {
+		if v, ok := cutPrefixFold(strings.TrimSpace(t), c.cfg.BrandTag); ok {
+			if v = strings.TrimSpace(v); v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// mpnOf returns the manufacturer part number from the variant SKU, with any
+// configured condition suffix stripped, or "" when this store's SKUs are not
+// MPNs.
+func (c *Connector) mpnOf(v variant) string {
+	if !c.cfg.SKUIsMPN {
+		return ""
+	}
+	sku := strings.TrimSpace(v.SKU)
+	if sku == "" {
+		return ""
+	}
+	for _, suf := range c.cfg.SKUSuffixes {
+		if suf == "" {
+			continue
+		}
+		if strings.HasSuffix(strings.ToUpper(sku), strings.ToUpper(suf)) {
+			sku = sku[:len(sku)-len(suf)]
+			break
+		}
+	}
+	return strings.TrimSpace(sku)
+}
+
+// cutPrefixFold is strings.CutPrefix with case-insensitive matching.
+func cutPrefixFold(s, prefix string) (string, bool) {
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return s[len(prefix):], true
+	}
+	return "", false
 }
 
 // --- field derivation ---------------------------------------------------------

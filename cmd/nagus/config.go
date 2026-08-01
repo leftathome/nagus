@@ -50,7 +50,13 @@ type SourceConfig struct {
 	BaseURL             string   `json:"baseUrl,omitempty"`
 	ProductTypePrefixes []string `json:"productTypePrefixes,omitempty"`
 	IncludeUnavailable  bool     `json:"includeUnavailable,omitempty"`
-	MaxPages            int      `json:"maxPages,omitempty"`
+	// Product-identity extraction, DECLARED per store because guessing mints
+	// false identities: one store's `vendor` is the real manufacturer, another's
+	// is its own house label on generic hardware. See shopify.Config.
+	BrandTag    string   `json:"brandTag,omitempty"`
+	SKUIsMPN    bool     `json:"skuIsMpn,omitempty"`
+	SKUSuffixes []string `json:"skuSuffixes,omitempty"`
+	MaxPages    int      `json:"maxPages,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`
