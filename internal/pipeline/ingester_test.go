@@ -324,3 +324,101 @@ func TestOfferOnlySourceStillDoesHousekeeping(t *testing.T) {
 		t.Fatalf("OffersExpired = %d, want 1 -- housekeeping is independent of evaluation", res.OffersExpired)
 	}
 }
+
+// --- expiry requires complete coverage ----------------------------------------
+
+// partialConnector reports an INCOMPLETE fetch, as a paginated connector does
+// when it stops at the page cap or is cut short by rate limiting.
+type partialConnector struct {
+	id       string
+	raws     []listing.Raw
+	complete bool
+}
+
+func (c partialConnector) SourceID() string                             { return c.id }
+func (c partialConnector) Fetch(context.Context) ([]listing.Raw, error) { return c.raws, nil }
+func (c partialConnector) FetchComplete() bool                          { return c.complete }
+
+// Marking an offer expired asserts "the source no longer lists this". After a
+// PARTIAL fetch that conclusion is unsound -- the unseen tail is
+// indistinguishable from a withdrawn listing -- and acting on it would mark
+// live, purchasable offers as gone.
+func TestExpiryIsSkippedAfterAnIncompleteFetch(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	// An offer last seen long ago: eligible for expiry on the numbers alone.
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "shopify:big", SourceKey: "unseen", PriceCents: 100, Currency: "USD",
+		LastSeen: now.Add(-72 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector:        partialConnector{id: "shopify:big", complete: false},
+		Offers:           offers,
+		OfferExpireAfter: 24 * time.Hour,
+		Now:              func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersExpired != 0 {
+		t.Fatalf("expired %d offers after an INCOMPLETE fetch -- a live listing we simply did not reach would be marked gone", res.OffersExpired)
+	}
+	o, _, _ := offers.Get(context.Background(), offer.DeterministicID("shopify:big", "unseen"))
+	if !o.Purchasable() {
+		t.Fatal("the offer must remain purchasable: we never established that it is gone")
+	}
+}
+
+// A COMPLETE fetch does expire, because absence is then real evidence.
+func TestExpiryRunsAfterACompleteFetch(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "shopify:big", SourceKey: "gone", PriceCents: 100, Currency: "USD",
+		LastSeen: now.Add(-72 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector:        partialConnector{id: "shopify:big", complete: true},
+		Offers:           offers,
+		OfferExpireAfter: 24 * time.Hour,
+		Now:              func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersExpired != 1 {
+		t.Fatalf("OffersExpired = %d, want 1 -- after a complete walk, absence IS evidence", res.OffersExpired)
+	}
+}
+
+// A connector that cannot report completeness keeps the old behaviour, so
+// single-shot sources are unaffected.
+func TestConnectorsWithoutCompletenessStillExpire(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "s", SourceKey: "gone", PriceCents: 100, Currency: "USD",
+		LastSeen: now.Add(-72 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector:        idConnector{id: "s"}, // no FetchComplete method
+		Offers:           offers,
+		OfferExpireAfter: 24 * time.Hour,
+		Now:              func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersExpired != 1 {
+		t.Fatalf("OffersExpired = %d, want 1 -- a connector with no completeness signal is treated as complete", res.OffersExpired)
+	}
+}

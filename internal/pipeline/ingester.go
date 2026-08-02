@@ -146,6 +146,22 @@ func (i *Ingester) keepOffers(ctx context.Context, res *IngestResult) {
 	}
 	src := i.Connector.SourceID()
 	now := i.now()
+
+	// EXPIRY REQUIRES COMPLETE COVERAGE. Marking an offer expired asserts "the
+	// source no longer lists this", and that conclusion is only sound if we
+	// actually saw the whole catalogue. After a truncated or rate-limited walk
+	// the unseen tail is indistinguishable from a withdrawn listing, so expiring
+	// on a partial fetch would quietly mark live, purchasable offers as gone --
+	// exactly the wrong direction, since a purchasable offer wrongly expired
+	// disappears from every recommendation.
+	//
+	// A connector that cannot report completeness is treated as complete, which
+	// preserves existing behaviour for sources that fetch in one shot.
+	if rc, ok := i.Connector.(interface{ FetchComplete() bool }); ok && !rc.FetchComplete() {
+		i.logf("ingest: %s fetch was incomplete; skipping offer expiry (cannot tell a withdrawn listing from one we did not reach)", src)
+		return
+	}
+
 	if i.OfferExpireAfter > 0 {
 		n, err := i.Offers.MarkExpired(ctx, src, now.Add(-i.OfferExpireAfter), now)
 		if err != nil {

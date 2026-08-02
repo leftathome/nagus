@@ -256,7 +256,9 @@ func TestRateLimitIsIdentifiable(t *testing.T) {
 		_, _ = w.Write([]byte("local_rate_limited"))
 	}))
 	defer srv.Close()
-	c := NewConnector(Config{Name: "s", BaseURL: srv.URL})
+	// MaxRetries -1 disables retrying so this exercises the error path directly;
+	// with the default the test would really sleep out the retry budget.
+	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, MaxRetries: -1})
 	_, err := c.Fetch(context.Background())
 	if err == nil {
 		t.Fatal("want an error on 429")
@@ -510,5 +512,125 @@ func TestNoTruncationWarningWhenTheCatalogueEnds(t *testing.T) {
 	}
 	if len(logged) != 0 {
 		t.Fatalf("warned on a complete fetch: %v", logged)
+	}
+}
+
+// --- 429 retry, and the completeness contract ---------------------------------
+
+// A rate-limited page is retried, waiting as long as the SERVER asked. This is
+// obeying a rate limiter, not defeating one.
+func TestRateLimitedPageIsRetriedHonouringRetryAfter(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if hits == 1 {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte("local_rate_limited"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"products":[{"id":1,"title":"D","handle":"d","product_type":"Hard Drives > 8TB > 3.5","variants":[{"id":2,"price":"10.00","available":true}]}]}`))
+	}))
+	defer srv.Close()
+
+	var waited []time.Duration
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, Limit: 250, Now: func() time.Time { return fixedNow },
+		Sleep: func(_ context.Context, d time.Duration) error { waited = append(waited, d); return nil },
+	})
+	raws, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("a retryable 429 must not fail the fetch: %v", err)
+	}
+	if len(raws) != 1 {
+		t.Fatalf("got %d raws, want 1 after the retry succeeded", len(raws))
+	}
+	if len(waited) != 1 || waited[0] != 7*time.Second {
+		t.Fatalf("waited %v, want exactly the server's Retry-After of 7s", waited)
+	}
+}
+
+// A wait is capped so a mistaken or hostile header cannot wedge the source's
+// ingest goroutine.
+func TestRetryAfterIsCapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "99999")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	var waited []time.Duration
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, MaxRetries: 1, Now: func() time.Time { return fixedNow },
+		Sleep: func(_ context.Context, d time.Duration) error { waited = append(waited, d); return nil },
+	})
+	_, _ = c.Fetch(context.Background())
+	if len(waited) != 1 || waited[0] != MaxRetryWait {
+		t.Fatalf("waited %v, want it capped at %v", waited, MaxRetryWait)
+	}
+}
+
+// Retries are bounded: a permanently rate-limited store fails rather than
+// looping forever.
+func TestRetriesAreBounded(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, MaxRetries: 2, Now: func() time.Time { return fixedNow },
+		Sleep: func(context.Context, time.Duration) error { return nil },
+	})
+	if _, err := c.Fetch(context.Background()); !errorsIs(err, ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited after exhausting retries", err)
+	}
+	if hits != 3 { // initial + 2 retries
+		t.Fatalf("made %d attempts, want 3 (initial + MaxRetries)", hits)
+	}
+}
+
+// Non-rate-limit errors are NOT retried -- retrying a 404 just delays the same
+// answer.
+func TestNonRateLimitErrorsAreNotRetried(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, Now: func() time.Time { return fixedNow },
+		Sleep: func(context.Context, time.Duration) error { t.Fatal("must not sleep on a 404"); return nil }})
+	if _, err := c.Fetch(context.Background()); err == nil {
+		t.Fatal("want an error")
+	}
+	if hits != 1 {
+		t.Fatalf("made %d attempts on a 404, want 1", hits)
+	}
+}
+
+// THE COMPLETENESS CONTRACT: callers must not draw absence conclusions from a
+// partial fetch, so the connector has to report which kind it was.
+func TestFetchCompleteReportsTruncation(t *testing.T) {
+	full := `{"products":[{"id":1,"title":"D","handle":"d","product_type":"Hard Drives > 8TB > 3.5","variants":[{"id":2,"price":"10.00","available":true}]},{"id":3,"title":"E","handle":"e","product_type":"Hard Drives > 8TB > 3.5","variants":[{"id":4,"price":"11.00","available":true}]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(full)) // always full -> never ends
+	}))
+	defer srv.Close()
+	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 2, Now: func() time.Time { return fixedNow }})
+	if _, err := c.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if c.FetchComplete() {
+		t.Fatal("a fetch stopped by the page cap must report INCOMPLETE")
+	}
+	// And a catalogue that ends reports complete.
+	c2 := NewConnector(Config{Name: "s", BaseURL: srv.URL, Limit: 5, MaxPages: 2, Now: func() time.Time { return fixedNow }})
+	if _, err := c2.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !c2.FetchComplete() {
+		t.Fatal("a short final page means the catalogue ended: must report COMPLETE")
 	}
 }

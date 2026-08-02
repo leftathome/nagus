@@ -36,6 +36,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Rate-limited pages are retried, and expiry now requires complete coverage.**
+  Two coupled changes, because the first without the second would have made
+  things worse.
+  Storefronts send `Retry-After` on a 429 (serverpartdeals sends 60), so a
+  retry waits exactly as long as the server asked -- obeying a rate limiter
+  rather than defeating one. Bounded attempts, a wait cap so a mistaken header
+  cannot wedge a source's ingest goroutine, context-aware so shutdown is not
+  blocked, and non-rate-limit errors are not retried since that only delays the
+  same answer.
+  The important half: **expiry is skipped after an incomplete fetch.** Marking an
+  offer expired asserts "the source no longer lists this", and that is only sound
+  if we saw the whole catalogue. After a truncated or rate-limited walk the
+  unseen tail is indistinguishable from a withdrawn listing, so expiring would
+  mark LIVE, PURCHASABLE offers as gone -- and a wrongly-expired offer vanishes
+  from every recommendation. This was already latent before the retry work, and
+  raising the page caps widened the exposure.
+
 - **Images are now built multi-arch (`linux/amd64` + `linux/arm64`)**
   (nagus-viw). orac is a mixed-architecture cluster and an amd64-only nagus
   crashlooped with `exec format error` after a rollout scheduled it onto an

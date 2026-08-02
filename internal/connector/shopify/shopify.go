@@ -59,6 +59,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leftathome/nagus/internal/listing"
@@ -77,6 +78,11 @@ const (
 	// DefaultMaxPages bounds a single Fetch. Specialist retailers run small
 	// catalogs; this stops a mis-pointed source walking an enormous store.
 	DefaultMaxPages = 4
+	// DefaultMaxRetries bounds per-page retries after a 429.
+	DefaultMaxRetries = 3
+	// MaxRetryWait caps how long we will honour a Retry-After, so a hostile or
+	// mistaken header cannot wedge a source's ingest goroutine for hours.
+	MaxRetryWait = 2 * time.Minute
 	// DefaultCurrency -- products.json omits currency entirely.
 	DefaultCurrency = "USD"
 	// DefaultUserAgent identifies the poller politely.
@@ -130,6 +136,15 @@ type Config struct {
 	// product with three offers, which is exactly the intent.
 	SKUSuffixes []string
 
+	// MaxRetries bounds how many times a single page is retried after a 429.
+	// Storefronts send `Retry-After` (serverpartdeals sends 60), so the wait is
+	// the server's own instruction rather than a guess -- retrying is the polite
+	// behaviour a rate limiter expects, not hitting it harder. Defaults to
+	// DefaultMaxRetries; 0 disables retrying.
+	MaxRetries int
+	// Sleep is the delay hook, injectable so tests do not actually wait.
+	Sleep func(ctx context.Context, d time.Duration) error
+
 	// MaxPages bounds pagination. Defaults to DefaultMaxPages.
 	MaxPages int
 	// Limit is the page size. Defaults to DefaultLimit.
@@ -151,6 +166,23 @@ type Config struct {
 // Connector implements listing.Connector over one store's products.json.
 type Connector struct {
 	cfg Config
+
+	mu           sync.Mutex
+	lastComplete bool
+}
+
+// FetchComplete reports whether the most recent Fetch walked the store's
+// catalogue to its end, rather than stopping at the page cap with inventory
+// still behind it.
+//
+// It exists because CALLERS MUST NOT DRAW ABSENCE CONCLUSIONS FROM A PARTIAL
+// FETCH. "This offer did not appear, so it is gone" is only sound if we actually
+// looked at everything; after a truncated or rate-limited walk it is false, and
+// acting on it would expire live, purchasable listings.
+func (c *Connector) FetchComplete() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastComplete
 }
 
 // NewConnector builds a Connector, filling in defaults.
@@ -166,6 +198,14 @@ func NewConnector(cfg Config) *Connector {
 	}
 	if cfg.MaxPages <= 0 {
 		cfg.MaxPages = DefaultMaxPages
+	}
+	if cfg.MaxRetries < 0 {
+		cfg.MaxRetries = 0
+	} else if cfg.MaxRetries == 0 {
+		cfg.MaxRetries = DefaultMaxRetries
+	}
+	if cfg.Sleep == nil {
+		cfg.Sleep = sleepCtx
 	}
 	if cfg.Limit <= 0 {
 		cfg.Limit = DefaultLimit
@@ -217,7 +257,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	// the output. So the cap is reported, never silent.
 	complete := false
 	for page := 1; page <= c.cfg.MaxPages; page++ {
-		data, err := c.fetchPage(ctx, page)
+		data, err := c.fetchPageWithRetry(ctx, page)
 		if err != nil {
 			return nil, err
 		}
@@ -236,6 +276,9 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			break
 		}
 	}
+	c.mu.Lock()
+	c.lastComplete = complete
+	c.mu.Unlock()
 	if !complete {
 		c.logf("shopify %s: TRUNCATED at the %d-page cap (%d products fetched, last page full) -- this store has more inventory than we are collecting; raise maxPages or accept partial coverage",
 			c.SourceID(), c.cfg.MaxPages, len(raws))
@@ -243,31 +286,82 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	return raws, nil
 }
 
-func (c *Connector) fetchPage(ctx context.Context, page int) ([]byte, error) {
+// fetchPageWithRetry retries a rate-limited page, waiting as long as the SERVER
+// asked via Retry-After rather than guessing. Storefronts here send it (60s),
+// so this is obeying a rate limiter, not defeating one.
+//
+// The wait is capped by MaxRetryWait so a mistaken or hostile header cannot
+// wedge a source's ingest goroutine, and it honours context cancellation so a
+// shutdown is not blocked by a sleeping fetch. Errors other than rate limiting
+// are returned immediately -- retrying a 404 or a decode failure just delays the
+// same answer.
+func (c *Connector) fetchPageWithRetry(ctx context.Context, page int) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt <= c.cfg.MaxRetries; attempt++ {
+		data, wait, err := c.fetchPageOnce(ctx, page)
+		if err == nil {
+			return data, nil
+		}
+		if !errors.Is(err, ErrRateLimited) {
+			return nil, err
+		}
+		lastErr = err
+		if attempt == c.cfg.MaxRetries {
+			break
+		}
+		if wait <= 0 {
+			wait = 30 * time.Second
+		}
+		if wait > MaxRetryWait {
+			wait = MaxRetryWait
+		}
+		c.logf("shopify %s: page %d rate limited, waiting %s as instructed (attempt %d/%d)",
+			c.SourceID(), page, wait, attempt+1, c.cfg.MaxRetries)
+		if serr := c.cfg.Sleep(ctx, wait); serr != nil {
+			return nil, serr
+		}
+	}
+	return nil, lastErr
+}
+
+// sleepCtx waits for d, or returns early if the context is cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// fetchPageOnce returns the body, or on a 429 the server's requested wait.
+func (c *Connector) fetchPageOnce(ctx context.Context, page int) ([]byte, time.Duration, error) {
 	url := fmt.Sprintf("%s%s?limit=%d&page=%d", c.cfg.BaseURL, ProductsPath, c.cfg.Limit, page)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("shopify: build request: %w", err)
+		return nil, 0, fmt.Errorf("shopify: build request: %w", err)
 	}
 	req.Header.Set("User-Agent", c.cfg.UserAgent)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("shopify: request: %w", err)
+		return nil, 0, fmt.Errorf("shopify: request: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("shopify: read response body: %w", err)
+		return nil, 0, fmt.Errorf("shopify: read response body: %w", err)
 	}
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		return body, nil
+		return body, 0, nil
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return nil, fmt.Errorf("%w (page %d): %s", ErrRateLimited, page, truncate(body, 80))
+		return nil, retryAfter(resp), fmt.Errorf("%w (page %d): %s", ErrRateLimited, page, truncate(body, 80))
 	default:
-		return nil, fmt.Errorf("shopify: products.json returned status %d: %s", resp.StatusCode, truncate(body, 160))
+		return nil, 0, fmt.Errorf("shopify: products.json returned status %d: %s", resp.StatusCode, truncate(body, 160))
 	}
 }
 
@@ -545,6 +639,21 @@ func priceCents(s string) int64 {
 }
 
 // --- helpers ------------------------------------------------------------------
+
+// retryAfter reads the server's requested wait. Only the delta-seconds form is
+// handled: it is what these storefronts send, and mis-parsing an HTTP-date into
+// a huge wait would be worse than falling back to a sane default.
+func retryAfter(resp *http.Response) time.Duration {
+	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	secs, err := strconv.Atoi(v)
+	if err != nil || secs < 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
 
 var tagRe = regexp.MustCompile(`(?s)<[^>]*>`)
 
