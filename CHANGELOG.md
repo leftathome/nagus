@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Offer-only sources** -- a source may declare no category, in which case it
+  feeds the offer store and nothing evaluates it: no glovebox crossing, no
+  extraction, no typed item. First increment of gate-at-eval (nagus-7yq), and
+  what lets a source be collected SPECULATIVELY -- accumulating history for goods
+  no category evaluates yet, so activating one later does not start cold --
+  without inventing a category bundle first. Expressed as "no extractor" rather
+  than a flag, because that is the actual condition. Offer housekeeping still
+  runs, since expiry and retention are properties of the SOURCE. Configuring one
+  with the offer layer disabled is a startup error, not a silent no-op.
+
 ### Fixed
 
 - **Images are now built multi-arch (`linux/amd64` + `linux/arm64`)**
@@ -24,10 +36,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ~3GB across 9 platforms, which the residential uplink cannot pull reliably --
   pinning the index would have re-broken exactly what nagus-c4p fixed. Each leg
   still pulls only its own ~312MB.
-
-## [Unreleased]
-
-### Fixed
 
 - **Chart: a config-only change now rolls the Deployment** (chart 0.5.1). nagus
   reads `NAGUS_CONFIG` and the watches file once at startup, so editing values
