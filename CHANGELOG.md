@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Inquiries: watches gain a duration and a principal** (nagus-7yq). A watch is
+  the spec's *Inquiry* -- a standing want held by a principal -- and it now
+  carries the two things it was missing: `expires_at`, so a want does not search
+  forever, and `principal`, who asked. Principal is deliberately separate from
+  `audience`: audience is a delivery routing tag openclaw resolves, principal is
+  the requester. They usually coincide, which is why they needed separating
+  before anything depends on the difference.
+  An expired inquiry is **skipped entirely** rather than returning an empty
+  result -- "no longer looking" is not the same as "looked and found nothing" --
+  and a lapsed inquiry naming a category with no surface no longer breaks the
+  whole evaluation pass. Zero expiry means no expiry, so every existing watch
+  keeps working unchanged.
+  `Config.ActiveCategories` reports which categories an unexpired inquiry
+  references, which is the spec's dormant-vs-active distinction. It currently
+  REPORTS activation rather than enforcing it; making it load-bearing is
+  deliberately a separate step so it cannot darken a live surface by surprise.
 - **Offer-only sources** -- a source may declare no category, in which case it
   feeds the offer store and nothing evaluates it: no glovebox crossing, no
   extraction, no typed item. First increment of gate-at-eval (nagus-7yq), and

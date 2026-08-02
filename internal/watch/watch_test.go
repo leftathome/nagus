@@ -161,7 +161,7 @@ func TestEvaluateAll(t *testing.T) {
 		{Name: "big-deals", Category: "hdd"},
 		{Name: "any-good", Category: "hdd", StrongVerdicts: []string{"great", "good"}},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg)
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestEvaluateAllDispatchesByCategory(t *testing.T) {
 		{Name: "land-watch", Category: "land"},
 		{Name: "hdd-watch", Category: "hdd"},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg)
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestEvaluateAllDispatchesByCategory(t *testing.T) {
 func TestEvaluateAllUnknownCategoryErrors(t *testing.T) {
 	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
 	cfg := Config{Watches: []Watch{{Name: "ghost", Category: "nope"}}}
-	if _, err := EvaluateAll(context.Background(), surfaces, cfg); err == nil {
+	if _, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow); err == nil {
 		t.Fatal("expected error for a watch naming an unconfigured category")
 	}
 }
@@ -241,5 +241,116 @@ func TestLoadConfigRejectsNamelessWatch(t *testing.T) {
 func TestLoadConfigMissingFile(t *testing.T) {
 	if _, err := LoadConfig(filepath.Join(t.TempDir(), "nope.json")); err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+// --- inquiries: duration and principal (nagus-7yq) ----------------------------
+
+var inqNow = time.Unix(1_750_000_000, 0).UTC()
+
+// An inquiry with no expiry is always active. This is what keeps every config
+// written before inquiries existed valid and unchanged -- adding a duration
+// concept must not silently stop existing watches from working.
+func TestInquiryWithoutExpiryIsAlwaysActive(t *testing.T) {
+	w := Watch{Name: "forever", Category: "hdd"}
+	if !w.Active(inqNow) {
+		t.Fatal("an inquiry with no expiry must be active")
+	}
+	if !w.Active(inqNow.Add(100 * 365 * 24 * time.Hour)) {
+		t.Fatal("an inquiry with no expiry must stay active indefinitely")
+	}
+}
+
+func TestInquiryExpiryBoundsTheSearch(t *testing.T) {
+	w := Watch{Name: "timeboxed", Category: "hdd", ExpiresAt: inqNow.Add(time.Hour)}
+	if !w.Active(inqNow) {
+		t.Error("should be active before expiry")
+	}
+	if w.Active(inqNow.Add(2 * time.Hour)) {
+		t.Error("should be inactive after expiry")
+	}
+	if w.Active(w.ExpiresAt) {
+		t.Error("expiry is exclusive: at the instant it expires it is no longer active")
+	}
+}
+
+// Principal (who asked) is distinct from Audience (where to deliver). They often
+// coincide, which is exactly why they must be separable.
+func TestPrincipalIsDistinctFromAudience(t *testing.T) {
+	w := Watch{Name: "w", Category: "hdd", Audience: "household", Principal: "steve"}
+	if w.Principal == w.Audience {
+		t.Fatal("fixture is not exercising the distinction")
+	}
+	if w.Principal != "steve" || w.Audience != "household" {
+		t.Fatalf("principal=%q audience=%q did not round-trip", w.Principal, w.Audience)
+	}
+}
+
+// A category is ACTIVE only while an unexpired inquiry references it; otherwise
+// it is dormant and its machinery is not worth running.
+func TestActiveCategoriesTracksUnexpiredInquiriesOnly(t *testing.T) {
+	cfg := Config{Watches: []Watch{
+		{Name: "live-hdd", Category: "hdd"},
+		{Name: "dead-land", Category: "land", ExpiresAt: inqNow.Add(-time.Hour)},
+		{Name: "live-land-later", Category: "land", ExpiresAt: inqNow.Add(time.Hour)},
+	}}
+	got := cfg.ActiveCategories(inqNow)
+	if !got["hdd"] || !got["land"] {
+		t.Fatalf("active = %v, want both hdd (no expiry) and land (one live inquiry)", got)
+	}
+	// Once the live land inquiry expires too, land goes dormant.
+	later := cfg.ActiveCategories(inqNow.Add(2 * time.Hour))
+	if later["land"] {
+		t.Errorf("land should be dormant once every land inquiry has expired: %v", later)
+	}
+	if !later["hdd"] {
+		t.Errorf("hdd has no expiry and must stay active: %v", later)
+	}
+}
+
+// An EXPIRED inquiry produces no result at all -- not an empty one. A want whose
+// duration has run out should stop pinging, and an empty result would read as
+// "looked, found nothing" rather than "no longer looking".
+func TestEvaluateAllSkipsExpiredInquiries(t *testing.T) {
+	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
+	cfg := Config{Watches: []Watch{
+		{Name: "live", Category: "hdd"},
+		{Name: "expired", Category: "hdd", ExpiresAt: inqNow.Add(-time.Hour)},
+	}}
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(rs) != 1 {
+		t.Fatalf("got %d results, want 1 -- the expired inquiry must be absent, not empty", len(rs))
+	}
+	if rs[0].Watch.Name != "live" {
+		t.Fatalf("wrong inquiry survived: %q", rs[0].Watch.Name)
+	}
+	// And it comes back once we ask at a time before it expired.
+	before, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow.Add(-2*time.Hour))
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(before) != 2 {
+		t.Fatalf("got %d results before the expiry, want 2", len(before))
+	}
+}
+
+// An expired inquiry pointing at a category with no surface must NOT error --
+// it is not being evaluated, so its category never needs to exist. Otherwise a
+// lapsed want could break the whole evaluation pass.
+func TestExpiredInquiryWithUnknownCategoryDoesNotError(t *testing.T) {
+	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
+	cfg := Config{Watches: []Watch{
+		{Name: "live", Category: "hdd"},
+		{Name: "lapsed", Category: "sneakers", ExpiresAt: inqNow.Add(-time.Hour)},
+	}}
+	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	if err != nil {
+		t.Fatalf("a lapsed inquiry for a dormant category must not break evaluation: %v", err)
+	}
+	if len(rs) != 1 {
+		t.Fatalf("got %d results, want 1", len(rs))
 	}
 }

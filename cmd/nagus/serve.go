@@ -197,7 +197,7 @@ func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	results, err := watch.EvaluateAll(r.Context(), s.surfaces, s.watches)
+	results, err := watch.EvaluateAll(r.Context(), s.surfaces, s.watches, time.Now())
 	if err != nil {
 		http.Error(w, "watch evaluation failed", http.StatusInternalServerError)
 		return

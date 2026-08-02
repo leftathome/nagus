@@ -12,13 +12,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 )
 
-// Watch is a saved query plus a strong-match threshold. Audience is an opaque
-// routing tag that openclaw's resolver interprets (nagus never interprets it).
+// Watch is an INQUIRY: a standing want held by a principal (spec: offer/product
+// re-architecture, "Inquiries drive category activation"). The type keeps its
+// original name, and the config key stays "watches", because a deployed
+// ConfigMap depends on both; the concept is the one the spec calls an Inquiry.
+//
+// An Inquiry is three things:
+//   - CRITERIA -- what is wanted (Category + Text + the strong-match threshold).
+//   - DURATION -- how long to keep looking, so a want does not search forever.
+//     See ExpiresAt.
+//   - PRINCIPAL -- who asked, and therefore on whose behalf we are looking. This
+//     is NOT the same as Audience: Audience is a delivery routing tag that
+//     openclaw's resolver interprets, whereas Principal is the requester. They
+//     often coincide today, which is exactly why they need separating before
+//     anything depends on the distinction.
 type Watch struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
@@ -26,11 +39,44 @@ type Watch struct {
 	Limit    int    `json:"limit,omitempty"`
 	Audience string `json:"audience,omitempty"`
 
+	// Principal is who requested this inquiry. Opaque to nagus, exactly like
+	// Audience -- nagus never interprets either, it only carries them.
+	Principal string `json:"principal,omitempty"`
+	// ExpiresAt bounds how long to keep looking. ZERO MEANS NO EXPIRY, which
+	// keeps every existing watch valid and unchanged: a config written before
+	// inquiries existed does not silently stop working.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+
 	// StrongVerdicts marks which deal verdicts count as a strong match (ping).
 	// Defaults to ["great"] when both this and MinScore are unset.
 	StrongVerdicts []string `json:"strong_verdicts,omitempty"`
 	// MinScore, when > 0, additionally marks any item scoring >= it as strong.
 	MinScore float64 `json:"min_score,omitempty"`
+}
+
+// Active reports whether this inquiry is still being looked for at time now.
+// An inquiry with no expiry is always active.
+func (w Watch) Active(now time.Time) bool {
+	return w.ExpiresAt.IsZero() || now.Before(w.ExpiresAt)
+}
+
+// ActiveCategories returns the categories that at least one ACTIVE inquiry
+// references, which is what the spec means by a category being active rather
+// than dormant: the machinery for a kind of good is worth running only while
+// someone is actually asking about it.
+//
+// This currently REPORTS activation rather than enforcing it -- surfaces are
+// still built from config. Making it load-bearing (dormant categories skip
+// evaluation entirely) is the next step, and is deliberately separate so that
+// turning it on cannot darken a live surface by surprise.
+func (c Config) ActiveCategories(now time.Time) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range c.Watches {
+		if w.Active(now) && w.Category != "" {
+			out[w.Category] = true
+		}
+	}
+	return out
 }
 
 // Config is a set of saved watches (the "saved queries").
@@ -111,9 +157,16 @@ func Evaluate(ctx context.Context, s Surfacer, w Watch) (Result, error) {
 // (a saved query must resolve to a real surface). A single watch's evaluation
 // error aborts (the query is deterministic; a Surface error is a store fault,
 // not per-watch noise).
-func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg Config) ([]Result, error) {
+func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg Config, now time.Time) ([]Result, error) {
 	out := make([]Result, 0, len(cfg.Watches))
 	for _, w := range cfg.Watches {
+		// An EXPIRED inquiry is not evaluated and produces no result at all --
+		// not an empty one. A want with a duration that has run out should stop
+		// pinging, and an empty result would read as "looked, found nothing"
+		// rather than "no longer looking".
+		if !w.Active(now) {
+			continue
+		}
 		sf, ok := surfaces[w.Category]
 		if !ok {
 			return nil, fmt.Errorf("watch %q: unknown category %q", w.Name, w.Category)
