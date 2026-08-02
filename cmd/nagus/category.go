@@ -107,7 +107,7 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 	case "zillapi":
 		return buildZillapiConnector(s, cc, o)
 	case "shopify":
-		return buildShopifyConnector(s)
+		return buildShopifyConnector(s, o)
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
@@ -149,7 +149,7 @@ func buildZillapiConnector(s SourceConfig, cc CategoryConfig, o categoryOpts) (l
 // products.json is a public, unauthenticated storefront feed. Storefronts DO rate
 // limit (serverpartdeals returns 429 "local_rate_limited" readily), so pair this
 // with a polite interval -- hourly at most per store.
-func buildShopifyConnector(s SourceConfig) (listing.Connector, error) {
+func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, error) {
 	if s.Fixture == "" && s.BaseURL == "" {
 		return nil, fmt.Errorf("source %q: shopify needs baseUrl (the storefront root) or a fixture", s.Name)
 	}
@@ -163,6 +163,7 @@ func buildShopifyConnector(s SourceConfig) (listing.Connector, error) {
 		SKUSuffixes:         s.SKUSuffixes,
 		MaxPages:            s.MaxPages,
 		FixturePath:         s.Fixture,
+		Logf:                o.logf,
 	}), nil
 }
 

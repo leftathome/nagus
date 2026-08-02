@@ -138,6 +138,10 @@ type Config struct {
 	HTTPClient *http.Client
 	UserAgent  string
 	Now        func() time.Time
+	// Logf reports conditions the caller needs to know but which are not errors
+	// -- notably a paginated fetch stopping at MaxPages with more inventory
+	// behind it. nil disables logging.
+	Logf func(format string, args ...any)
 
 	// FixturePath, when non-empty, reads a local products.json instead of any
 	// network call -- the offline proving path.
@@ -171,6 +175,12 @@ func NewConnector(cfg Config) *Connector {
 	return &Connector{cfg: cfg}
 }
 
+func (c *Connector) logf(format string, args ...any) {
+	if c.cfg.Logf != nil {
+		c.cfg.Logf(format, args...)
+	}
+}
+
 // SourceID returns "shopify:<Name>", or the bare family constant if unnamed.
 func (c *Connector) SourceID() string {
 	if c.cfg.Name != "" {
@@ -200,6 +210,12 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	if c.cfg.BaseURL == "" {
 		return nil, errors.New("shopify: no base url configured")
 	}
+	// complete records whether we walked the catalogue to its end. Exhausting
+	// MaxPages while the last page was still FULL means there is more inventory
+	// we did not fetch -- and a bounded fetch that says nothing is the worst kind
+	// of bug, because partial coverage is indistinguishable from full coverage in
+	// the output. So the cap is reported, never silent.
+	complete := false
 	for page := 1; page <= c.cfg.MaxPages; page++ {
 		data, err := c.fetchPage(ctx, page)
 		if err != nil {
@@ -210,13 +226,19 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			return nil, err
 		}
 		if len(prods) == 0 {
+			complete = true
 			break
 		}
 		raws = append(raws, c.mapProducts(prods, now)...)
 		if len(prods) < c.cfg.Limit {
 			// Short page: this was the last one.
+			complete = true
 			break
 		}
+	}
+	if !complete {
+		c.logf("shopify %s: TRUNCATED at the %d-page cap (%d products fetched, last page full) -- this store has more inventory than we are collecting; raise maxPages or accept partial coverage",
+			c.SourceID(), c.cfg.MaxPages, len(raws))
 	}
 	return raws, nil
 }

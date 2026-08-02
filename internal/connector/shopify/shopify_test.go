@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -457,5 +458,57 @@ func TestVendorIsNeverUsedAsBrand(t *testing.T) {
 	c2 := NewConnector(Config{Name: "x", BrandTag: "brand:"})
 	if got := c2.brandOf(p); got != "Western Digital" {
 		t.Fatalf("brandOf = %q, want the tag value not the vendor", got)
+	}
+}
+
+// --- truncation must never be silent ------------------------------------------
+
+// A bounded fetch that says nothing is the worst kind of bug: partial coverage
+// looks exactly like full coverage in the output. Exhausting MaxPages while the
+// last page is still FULL means there is more inventory behind the cap.
+func TestTruncationAtThePageCapIsReported(t *testing.T) {
+	full := `{"products":[` + strings.Repeat(`{"id":1,"title":"D","handle":"d","product_type":"Hard Drives > 8TB > 3.5","variants":[{"id":2,"price":"10.00","available":true}]},`, 2)
+	full = strings.TrimSuffix(full, ",") + `]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(full)) // always a FULL page -> never ends naturally
+	}))
+	defer srv.Close()
+
+	var logged []string
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3,
+		Now:  func() time.Time { return fixedNow },
+		Logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
+	})
+	if _, err := c.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(logged) == 0 {
+		t.Fatal("hit the page cap with a full final page and reported NOTHING -- silent truncation")
+	}
+	if !strings.Contains(logged[0], "TRUNCATED") {
+		t.Errorf("log = %q, want it to say the fetch was truncated", logged[0])
+	}
+}
+
+// A catalogue that ends naturally must NOT warn, or the warning becomes noise
+// and stops being read.
+func TestNoTruncationWarningWhenTheCatalogueEnds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// One product with Limit 2 = a short page = the end.
+		_, _ = w.Write([]byte(`{"products":[{"id":1,"title":"D","handle":"d","product_type":"Hard Drives > 8TB > 3.5","variants":[{"id":2,"price":"10.00","available":true}]}]}`))
+	}))
+	defer srv.Close()
+	var logged []string
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3,
+		Now:  func() time.Time { return fixedNow },
+		Logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
+	})
+	if _, err := c.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(logged) != 0 {
+		t.Fatalf("warned on a complete fetch: %v", logged)
 	}
 }
