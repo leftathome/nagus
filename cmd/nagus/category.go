@@ -206,6 +206,24 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		return nil, err
 	}
 	staleAfter, offerRetention, expireAfter := retentionForSource(s)
+
+	// OFFER-ONLY source: no category, therefore no evaluation machinery. It
+	// records offers and stops (gate-at-eval, nagus-7yq). Refuse to build one
+	// when the offer layer is off, because it would fetch on an interval and
+	// throw everything away -- a silent no-op is worse than a startup error.
+	if s.Category == "" {
+		if o.offers == nil {
+			return nil, fmt.Errorf("source %q: offer-only sources (no category) need the offer layer enabled", s.Name)
+		}
+		return &pipeline.Ingester{
+			Connector:        conn,
+			Offers:           o.offers,
+			OfferRetention:   offerRetention,
+			OfferExpireAfter: expireAfter,
+			Logf:             o.logf,
+		}, nil
+	}
+
 	switch s.Category {
 	case "hdd":
 		return category.NewHDDIngester(conn, category.HDDDeps{

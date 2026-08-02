@@ -9,6 +9,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/store"
 )
 
 func TestLoadRunConfigParsesSourcesAndCategories(t *testing.T) {
@@ -173,5 +174,57 @@ func TestEbayDoesNotUseSummarizeDecayYet(t *testing.T) {
 	_, ret, _ := retentionForSource(SourceConfig{Type: "ebay", IntervalMinutes: 30})
 	if ret.Policy == offer.SummarizeDecay {
 		t.Fatal("eBay must not use summarize-decay until the summary schema is validated as compliant")
+	}
+}
+
+// An offer-only source (no category) is legal: it feeds the offer store and
+// nothing evaluates it. This is what lets a source be collected speculatively
+// without inventing a category bundle for it first (gate-at-eval, nagus-7yq).
+func TestLoadRunConfigAcceptsOfferOnlySource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{
+	  "sources": [
+	    {"name":"ebay","category":"hdd","type":"ebay","intervalMinutes":30},
+	    {"name":"speculative","type":"shopify","baseUrl":"https://example.test","intervalMinutes":360}
+	  ],
+	  "categories": {"hdd":{"minCapacityTB":6}}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadRunConfig(path)
+	if err != nil {
+		t.Fatalf("an offer-only source must be accepted: %v", err)
+	}
+	if len(cfg.Sources) != 2 || cfg.Sources[1].Category != "" {
+		t.Fatalf("sources = %+v", cfg.Sources)
+	}
+}
+
+// A source naming a category that does not exist is still an error -- an empty
+// category means "offer-only", a WRONG one is a typo we must not swallow.
+func TestLoadRunConfigStillRejectsAnUnknownCategory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{"sources":[{"name":"x","category":"ghost","type":"ebay"}],"categories":{"hdd":{}}}`
+	_ = os.WriteFile(path, []byte(body), 0o600)
+	if _, err := LoadRunConfig(path); err == nil {
+		t.Fatal("expected an error for a category that is neither empty nor known")
+	}
+}
+
+// An offer-only source with the offer layer OFF must fail at startup rather than
+// fetch on an interval and silently discard everything.
+func TestOfferOnlySourceRequiresTheOfferLayer(t *testing.T) {
+	_, err := buildIngester(
+		SourceConfig{Name: "spec", Type: "shopify", Fixture: "../../internal/connector/shopify/testdata/products.json"},
+		CategoryConfig{}, store.NewMemoryStore(), categoryOpts{}, // no offers store
+	)
+	if err == nil {
+		t.Fatal("want an error when an offer-only source is configured without the offer layer")
+	}
+	if !strings.Contains(err.Error(), "offer layer") {
+		t.Errorf("err = %v, want it to name the missing offer layer", err)
 	}
 }

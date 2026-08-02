@@ -244,3 +244,83 @@ func (c idConnector) SourceID() string { return c.id }
 func (c idConnector) Fetch(context.Context) ([]listing.Raw, error) {
 	return c.raws, nil
 }
+
+// --- offer-only sources (gate-at-eval, nagus-7yq) ------------------------------
+
+// A source with no evaluation machinery records offers and stops. This is what
+// lets a source be collected speculatively -- accumulating history for goods no
+// category evaluates yet -- at ZERO extraction cost.
+func TestOfferOnlySourceRecordsOffersAndDoesNotEvaluate(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	itemStore := store.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+
+	ing := &Ingester{
+		Connector: idConnector{id: "shopify:speculative", raws: []listing.Raw{
+			{SourceID: "shopify:speculative", SourceKey: "a", Title: "A whole server", PriceCents: 381880, Currency: "USD", SeenAt: now},
+			{SourceID: "shopify:speculative", SourceKey: "b", Title: "Another server", PriceCents: 250000, Currency: "USD", SeenAt: now},
+		}},
+		Offers: offers,
+		Now:    func() time.Time { return now },
+		// No Sanitizer, Extractor or Store: nothing evaluates this source.
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersRecorded != 2 {
+		t.Errorf("OffersRecorded = %d, want 2", res.OffersRecorded)
+	}
+	if res.Stored != 0 {
+		t.Errorf("Stored = %d, want 0 -- an offer-only source must not produce items", res.Stored)
+	}
+	if len(res.Skips) != 0 {
+		t.Errorf("skips = %v, want none: not evaluating is the intended behaviour, not a failure", res.Skips)
+	}
+	if n, _ := itemStore.Search(context.Background(), store.Query{}); len(n) != 0 {
+		t.Errorf("item store got %d rows from an offer-only source", len(n))
+	}
+	got, _ := offers.Query(context.Background(), offer.Query{})
+	if len(got) != 2 {
+		t.Fatalf("offer store holds %d, want 2", len(got))
+	}
+}
+
+// A nil Sanitizer must not panic -- the glovebox crossing is deliberately not
+// performed for goods nothing evaluates (that is the cost saving).
+func TestOfferOnlySourceSkipsTheGloveboxCrossing(t *testing.T) {
+	ing := &Ingester{
+		Connector: idConnector{id: "s", raws: []listing.Raw{{SourceID: "s", SourceKey: "k", Title: "T", PriceCents: 1, Currency: "USD"}}},
+		Offers:    offer.NewMemoryStore(),
+		Now:       func() time.Time { return time.Unix(1_750_000_000, 0).UTC() },
+	}
+	if _, err := ing.Ingest(context.Background()); err != nil {
+		t.Fatalf("Ingest with no Sanitizer must not error: %v", err)
+	}
+}
+
+// Offer housekeeping still runs for an offer-only source -- expiry and retention
+// are properties of the SOURCE, not of whether anything evaluates it.
+func TestOfferOnlySourceStillDoesHousekeeping(t *testing.T) {
+	offers := offer.NewMemoryStore()
+	now := time.Unix(1_750_000_000, 0).UTC()
+	if err := offers.Put(context.Background(), offer.Offer{
+		SourceID: "s", SourceKey: "old", PriceCents: 100, Currency: "USD",
+		LastSeen: now.Add(-72 * time.Hour), Status: offer.StatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{
+		Connector:        idConnector{id: "s"},
+		Offers:           offers,
+		OfferExpireAfter: 24 * time.Hour,
+		Now:              func() time.Time { return now },
+	}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.OffersExpired != 1 {
+		t.Fatalf("OffersExpired = %d, want 1 -- housekeeping is independent of evaluation", res.OffersExpired)
+	}
+}

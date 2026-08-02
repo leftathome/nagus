@@ -110,6 +110,18 @@ func LoadRunConfig(path string) (RunConfig, error) {
 			return RunConfig{}, fmt.Errorf("source %q: duplicate name", s.Name)
 		}
 		seen[s.Name] = true
+		// An EMPTY category means an OFFER-ONLY source (gate-at-eval,
+		// nagus-7yq): it feeds the offer store and nothing evaluates it. This is
+		// how a source can be collected speculatively -- accumulating history for
+		// goods we may want to evaluate later -- without inventing a category
+		// bundle for it first, and without paying any extraction cost meanwhile.
+		//
+		// Offer-only sources require the offer layer to be ON; otherwise the
+		// source would fetch and silently discard everything, which is worse than
+		// refusing to start.
+		if s.Category == "" {
+			continue
+		}
 		if !supportedCategory(s.Category) {
 			return RunConfig{}, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 		}

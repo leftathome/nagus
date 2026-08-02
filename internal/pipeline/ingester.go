@@ -77,6 +77,15 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 	}
 	res := IngestResult{Fetched: len(raws)}
 	now := i.now()
+	// OFFER-ONLY source (gate-at-eval, nagus-7yq). A source with no evaluation
+	// machinery attached feeds the offer store and stops there: no glovebox
+	// crossing, no extraction, no typed item. That is the point -- a category
+	// nothing is currently asking about should cost ZERO evaluation while its
+	// offers still accumulate, so activating it later does not start cold.
+	//
+	// It is expressed as "no Extractor" rather than a flag because that IS the
+	// condition: without an extractor there is nothing to evaluate INTO.
+	evaluates := i.Extractor != nil && i.Store != nil
 	for _, r := range raws {
 		// Offer FIRST, and unconditionally: the whole point is to accumulate
 		// what a source is selling even when no category extracts it. A listing
@@ -88,6 +97,10 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			} else {
 				res.OffersRecorded++
 			}
+		}
+		if !evaluates {
+			// Offers were recorded above; there is deliberately nothing else to do.
+			continue
 		}
 		san, err := i.Sanitizer.Sanitize(ctx, r)
 		if err != nil {
@@ -108,7 +121,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		}
 		res.Stored++
 	}
-	if i.StaleAfter > 0 && i.Connector != nil {
+	if i.StaleAfter > 0 && i.Connector != nil && i.Store != nil {
 		cutoff := i.now().Add(-i.StaleAfter)
 		purged, derr := i.Store.DeleteStale(ctx, i.Connector.SourceID(), cutoff)
 		if derr != nil {
