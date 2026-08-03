@@ -1,0 +1,14 @@
+{
+  "version": "6.18.1",
+  "project_name": "nagus",
+  "tech_stack": "Go 1.26, PostgreSQL (pgx) + SQLite (modernc, CGO-free), Helm/Flux on Kubernetes, MCP server",
+  "project_management": "beads",
+  "task_prefix": "nagus",
+  "team_chat": "none",
+  "auto_load_navigator": true,
+  "compact_strategy": "conservative",
+  "auto_update": {
+    "enabled": true,
+    "check_interval_hours": 1
+  }
+}

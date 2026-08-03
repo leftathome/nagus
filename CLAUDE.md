@@ -107,3 +107,40 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+## Navigator (`.agent/`)
+
+Navigator is initialized here for **architecture docs and SOPs only**. It does
+NOT track work.
+
+- **Issue tracking stays in `bd` (beads).** The rule above is unchanged: no
+  TodoWrite, no markdown TODO lists, and **no `TASK-XX.md` files in
+  `.agent/tasks/`**. Navigator's default workflow creates those; in this repo it
+  must not. `.nav-config.json` records `project_management: beads` and
+  `task_prefix: nagus` so tooling agrees.
+- **`.agent/system/`** holds durable architecture notes -- the shape of the
+  spine, the offer layer, the storage model. Things that stay true across
+  sessions and are tedious to re-derive by reading code.
+- **`.agent/sops/`** holds procedures worth repeating exactly: deploys,
+  source onboarding, the verification habits below.
+
+### Verification habits this repo learned the hard way
+
+Three separate bugs this codebase has hit all had the same shape: **the failure
+looked like success.** When changing anything here, prefer evidence over the
+absence of an error.
+
+1. **A config-only change did not roll the pod** (fixed by checksum annotations
+   in chart 0.5.1), and `kubectl rollout status` reported success because the
+   PREVIOUS rollout was complete. It twice produced a confidently wrong reading.
+2. **Pagination capped silently**, so partial catalogue coverage was
+   indistinguishable from full coverage. Two live sources were truncated for days
+   before a warning was added.
+3. **Expiry after a partial fetch** would mark live, purchasable offers as gone,
+   because "did not appear" only means "withdrawn" if you actually looked at
+   everything.
+
+Practical consequences: after a values-only edit, confirm the pod actually
+restarted; when a bound is applied, log what was dropped; and before concluding a
+change had no effect, check the running pod is newer than the config it should
+have picked up.

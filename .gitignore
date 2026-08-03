@@ -23,3 +23,14 @@ docs/design/private-*.md
 
 # git worktrees (isolated workspaces)
 .worktrees/
+
+# Navigator context markers + temp files (Navigator itself is committed;
+# per-session state is not).
+.context-markers/
+.agent/.nav-temp/
+.agent/.nav-read-counter.json
+.agent/.nav-workflow-state.json
+
+# graphify knowledge-graph output. Regenerable from the tree (`/graphify .`),
+# ~3MB of JSON/HTML, and stale the moment the code moves. Rebuild, don't commit.
+graphify-out/
