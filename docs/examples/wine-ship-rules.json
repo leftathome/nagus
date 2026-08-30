@@ -1,9 +1,26 @@
 {
   "destinations": {
-    "WA": {
-      "wineryDirect": true,
-      "inStateRetailer": true,
-      "outOfStateRetailer": false
+    "US-WA": {
+      "producer": { "sameSubdivision": true, "sameCountry": true },
+      "retailer": { "sameSubdivision": true }
+    },
+
+    "AU": {
+      "producer": { "sameSubdivision": true, "sameCountry": true, "foreign": true },
+      "retailer": { "sameSubdivision": true, "sameCountry": true, "foreign": true }
+    },
+
+    "NO": {
+      "producer": { "sameBloc": true, "foreign": true },
+      "retailer": { "foreign": true }
     }
+  },
+
+  "blocs": {
+    "EU": [
+      "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+      "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+      "PL", "PT", "RO", "SK", "SI", "ES", "SE"
+    ]
   }
 }

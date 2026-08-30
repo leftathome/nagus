@@ -40,11 +40,11 @@ type categoryOpts struct {
 	zillapiKey      string
 
 	// wine scoring/legality config (NAGUS_WINE_*). wineShipTo is the
-	// destination state offers must legally ship to (empty = no legality
-	// filter); wineShipRules optionally names a JSON rules-override file
-	// merged over shipping.DefaultRules; lwinCSV is the optional local path
-	// of the Liv-ex LWIN export (NAGUS_LWIN_CSV) enabling canonical-identity
-	// resolution at extract time.
+	// destination JURISDICTION offers must legally ship to -- "US-WA", "FR",
+	// "CA-BC" -- (empty = no legality filter); wineShipRules optionally names
+	// a JSON rules-override file merged over shipping.DefaultRules; lwinCSV
+	// is the optional local path of the Liv-ex LWIN export (NAGUS_LWIN_CSV)
+	// enabling canonical-identity resolution at extract time.
 	wineBudgetCents   int64
 	wineMinScore      float64
 	wineMinScoreCount int
@@ -126,12 +126,10 @@ func categoryConfigFromOpts(cat string, o categoryOpts) CategoryConfig {
 // a loud startup error -- a silently-empty legality filter would fail closed
 // into an inexplicably dark surface.
 func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.WineDeps, error) {
-	if cc.WineShipTo != "" && !shipping.IsState(cc.WineShipTo) {
-		return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q is not a USPS state code", cc.WineShipTo)
-	}
 	deps := category.WineDeps{
 		Store: st,
 		Logf:  o.logf,
+		Rates: cc.WineFXRates,
 		Score: category.WineScoreConfig{
 			BudgetCents:   cc.BudgetCents,
 			MinScore:      cc.MinWineScore,
@@ -151,6 +149,21 @@ func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.W
 		}
 		rules := shipping.DefaultRules().Override(override)
 		deps.Ship = &rules
+	}
+	// Validate the destination against the table that will actually be used:
+	// an unmodeled or malformed jurisdiction would fail closed on every item,
+	// darkening the surface for a reason no log line would explain.
+	if cc.WineShipTo != "" {
+		rules := shipping.DefaultRules()
+		if deps.Ship != nil {
+			rules = *deps.Ship
+		}
+		if _, ok := shipping.NormJurisdiction(cc.WineShipTo); !ok {
+			return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q is not an ISO 3166 jurisdiction code (want e.g. US-WA, CA-BC, FR)", cc.WineShipTo)
+		}
+		if !rules.Modeled(cc.WineShipTo) {
+			return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q has no shipping policy in the rules table, so nothing could ever surface for it; add one via a rules override file (NAGUS_WINE_SHIP_RULES)", cc.WineShipTo)
+		}
 	}
 	if o.lwinCSV != "" {
 		f, err := os.Open(o.lwinCSV)
@@ -323,12 +336,13 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		deps.Offers = o.offers
 		deps.OfferRetention = offerRetention
 		deps.OfferExpireAfter = expireAfter
-		ing, err := category.NewWineIngester(conn, shipping.Source{
-			Channel: shipping.Channel(s.WineChannel),
-			State:   s.State,
-		}, deps)
+		src, err := shipping.NewSource(s.WineChannel, s.Origin)
 		if err != nil {
-			return nil, fmt.Errorf("source %q: %w (declare wineChannel and state on the source; shipping legality is a conscious per-source declaration)", s.Name, err)
+			return nil, fmt.Errorf("source %q: %w (declare wineChannel and origin on the source; shipping legality is a conscious per-source declaration)", s.Name, err)
+		}
+		ing, err := category.NewWineIngester(conn, src, deps)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		return ing, nil
 	default:

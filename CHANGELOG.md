@@ -11,9 +11,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Wine category on a $0/mo data stack** (see
   `docs/design/2026-08-30-wine-category.md` for the full decision log,
   including the rejection of the paid Wine-Searcher API and its non-perpetual
-  "free trial"). The third fill of the category bundle abstraction, and it
-  needed exactly one generic-spine change (the `EqAttr` filter predicate
-  below):
+  "free trial"). The third fill of the category bundle abstraction, needing
+  only two generic-spine additions (the `EqAttr` and `HasToken` filter
+  predicates below) -- the abstraction held for a category as unlike land and
+  HDD as wine, including its international shipping constraints:
   - `internal/identity/lwin` -- entity resolution to the Creative-Commons
     LWIN identifier: CSV load of the Liv-ex export, accent-fold/alias
     normalization, token-blocked token-set-ratio scoring with Jaro-Winkler
@@ -38,34 +39,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     shorthand for The Wine Advocate is deliberately not recognized -- in
     this home market it is Washington state next to a number.
   - **`internal/shipping` -- ship-legality as a data-driven CONSTRAINT
-    LAYER, not a hardcoded Washington rule.** US DTC wine shipping law is
-    per-destination-state and per-channel, and the destination is config
-    (the operator's state today, a gift recipient's in CA or FL tomorrow).
-    A wine source declares HOW it ships (`wineChannel`: `winery_direct` |
-    `retailer`) and WHERE from (`state`, USPS code) -- both required, a
-    missing or unknown declaration is a startup error, never a default.
-    `shipping.Rules` maps every destination (50 states + DC) to a policy
-    {wineryDirect, inStateRetailer, outOfStateRetailer}; `DefaultRules` is
-    a documented baseline (winery-direct legal everywhere except MS/UT;
-    in-state retailer delivery everywhere; out-of-state retailer only into
-    a short permitted list -- WA deliberately absent, SB 5007 having died
-    in committee Jan 2024), and an operator overrides any destination from
-    a JSON file merged over the defaults, because these laws churn. The
-    channel tagger stamps each listing's computed legal-destination SET
-    (`ship_legal_to`, tokens validated at extract), so one corpus serves
-    watches for any destination; a surface's `wineShipTo` hard-filters to
-    it. Everything FAILS CLOSED: unknown destination/channel, unstamped
-    item, or empty legal set never passes as legal. Offers that cannot
-    reach the destination still ingest as informational price signal; they
-    can never surface as actionable.
-  - `internal/category/wine.go` + CLI wiring: `wine` joins `hdd`/`land` in
-    config.json (`minWineScore`, `minWineScoreCount`, `wineShipTo`,
-    `budgetCents`; per-source `wineChannel` + `state`) and env
-    (`NAGUS_WINE_*` incl. `NAGUS_WINE_SHIP_TO` and `NAGUS_WINE_SHIP_RULES`,
-    `NAGUS_LWIN_CSV`). Legacy single-source `ingest -category wine` errors
-    and points at the config path, like land. Shopify storefronts (many
-    retailers, wineries, and flash sites) work as wine sources today via
-    the existing connector.
+    LAYER over ~110 JURISDICTIONS worldwide**, not a hardcoded rule for any
+    one market. Direct-to-consumer wine law is per-destination and
+    per-channel, and the destination is config, not a home market: the
+    household buys for itself and buys gifts for people in Barcelona,
+    Toronto, or Melbourne. A jurisdiction is an ISO 3166 code -- a country
+    (`FR`, `AU`) optionally with a subdivision (`US-WA`, `CA-ON`) -- and a
+    source declares its channel (`producer` | `retailer`) plus its origin
+    jurisdiction; both required, a missing or malformed declaration is a
+    startup error. Each destination carries a policy saying, per channel,
+    which ORIGIN RELATIONS may ship to it: same subdivision (in-state), same
+    country (interstate), same trade bloc (the EU single market's excise
+    distance-selling regime), or foreign. That expresses what actually
+    differs -- a WA retailer ships within Washington while a California one
+    may not ship in (SB 5007 died in committee, Jan 2024); a French winery
+    distance-sells to a Spanish consumer but not a US one, whose imports must
+    clear a licensed importer; a BC winery reaches Manitoba but not Ontario.
+    `DefaultRules` covers the US per state, Canada per province, the EU-27
+    with the single market as a bloc, and other major wine markets (GB, CH,
+    AU, NZ, AR, BR, CL, MX, UY, ZA, JP) at country level, with per-region
+    confidence documented in `defaults.go`; it is an engineering baseline,
+    NOT legal advice, and every destination and bloc is overridable from a
+    JSON file merged over it.
+    Everything FAILS CLOSED -- unknown/malformed jurisdiction, unmodeled
+    destination, unknown channel, unstamped item, empty legal set. Two
+    deliberate consequences: the table OMITS destinations whose regime we
+    could not state (rather than encoding an all-false entry that would look
+    modeled), so `Rules.Modeled` can tell "unmodeled" from "prohibited" and a
+    watch configured for an unmodeled destination fails at startup naming the
+    override path instead of going silently dark; and the `foreign` dimension
+    is off almost everywhere, since markets with personal-import allowances
+    (AU, NZ, GB, JP) are a one-line override rather than a default.
+    The channel tagger stamps each listing's whole legal-destination SET
+    (`ship_legal_to`, tokens validated as ISO 3166 at extract), so one
+    ingested corpus serves watches for any destination and a rules change
+    converges on the next poll's re-stamp; a surface's `wineShipTo` filters
+    to it.
+  - **Currency handling, because an international corpus needs it.** The
+    hedonic model now declares the currency its coefficients were fit in
+    (USD by default) and the valuer takes operator-configured FX rates
+    (`wineFxRates`). A listing in an unrated foreign currency is reported
+    `unknown-no-reference` -- unplaceable, never mispriced -- because
+    comparing a EUR price against a USD-fit model would emit a confident
+    wrong verdict, the failure-looks-like-success shape this repo keeps
+    re-learning. An EMPTY currency reads as the model's own: a connector
+    omitting the field is a data gap, not evidence of a foreign price.
+    Rates are config rather than a live FX call, so the read path cannot
+    hang on a third party.
 - **`score.Filter.EqAttr` and `score.Filter.HasToken`** -- two generic
   attribute predicates (checked between the price bounds and MinAttr,
   deterministic reason order, missing attribute fails with a reason naming
@@ -74,7 +94,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   containing nothing -- so set-valued gates fail closed. The wine bundle
   uses HasToken to gate on the stamped legal-destination set; both stay
   category-agnostic data like every other Filter field.
-
 - **Inquiries: watches gain a duration and a principal** (nagus-7yq). A watch is
   the spec's *Inquiry* -- a standing want held by a principal -- and it now
   carries the two things it was missing: `expires_at`, so a want does not search

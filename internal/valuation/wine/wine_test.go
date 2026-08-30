@@ -178,7 +178,7 @@ func TestHedonicModel_MonotoneAbove85(t *testing.T) {
 
 func TestValue_UnknownNoPrice(t *testing.T) {
 	v := Valuer{}
-	val, err := v.Value(95, 5, 0)
+	val, err := v.Value(95, 5, 0, "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,14 +189,14 @@ func TestValue_UnknownNoPrice(t *testing.T) {
 
 func TestValue_NegativePriceIsError(t *testing.T) {
 	v := Valuer{}
-	if _, err := v.Value(95, 5, -100); err == nil {
+	if _, err := v.Value(95, 5, -100, "USD"); err == nil {
 		t.Fatalf("negative price should error")
 	}
 }
 
 func TestValue_MinScoresRuleGatesFlagging(t *testing.T) {
 	v := Valuer{} // default MinScores = 3
-	val, err := v.Value(95, 2, 2000)
+	val, err := v.Value(95, 2, 2000, "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestValue_MinScoresRuleGatesFlagging(t *testing.T) {
 
 	// An operator can lower the bar explicitly.
 	v = Valuer{MinScores: 1}
-	val, err = v.Value(95, 1, 2000)
+	val, err = v.Value(95, 1, 2000, "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestValue_MinScoresRuleGatesFlagging(t *testing.T) {
 
 func TestValue_ZeroScoreIsUnknown(t *testing.T) {
 	v := Valuer{MinScores: 1}
-	val, err := v.Value(0, 3, 2000)
+	val, err := v.Value(0, 3, 2000, "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestValue_VerdictTiers(t *testing.T) {
 		{"double the model price", int64(predicted * 2.0), VerdictPoor},
 	}
 	for _, c := range cases {
-		val, err := v.Value(95, 3, c.priceCents)
+		val, err := v.Value(95, 3, c.priceCents, "USD")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", c.name, err)
 		}
@@ -261,7 +261,7 @@ func TestValue_RatioAndPredictedPrice(t *testing.T) {
 	v := Valuer{}
 	m := DefaultModel()
 	predicted := math.Exp(m.PredictLogPriceCents(92))
-	val, err := v.Value(92, 4, int64(predicted))
+	val, err := v.Value(92, 4, int64(predicted), "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +278,126 @@ func TestValue_RatioAndPredictedPrice(t *testing.T) {
 
 func TestValue_InvalidModelRejected(t *testing.T) {
 	v := Valuer{Model: &HedonicModel{ResidualStd: 0}}
-	if _, err := v.Value(95, 3, 2000); err == nil {
+	if _, err := v.Value(95, 3, 2000, "USD"); err == nil {
 		t.Fatalf("a model with zero ResidualStd should error, not divide by zero")
+	}
+}
+
+// --- currency ---
+
+func TestValue_EmptyCurrencyReadsAsModelCurrency(t *testing.T) {
+	// A connector that omits the currency is a data gap, not evidence of a
+	// foreign price; darkening every such item would be worse.
+	v := Valuer{}
+	m := DefaultModel()
+	predicted := math.Exp(m.PredictLogPriceCents(95))
+	val, err := v.Value(95, 3, int64(predicted), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.HasReference || val.Verdict != VerdictMarket {
+		t.Fatalf("empty currency should be placed as the model currency, got %+v", val)
+	}
+}
+
+func TestValue_ForeignCurrencyWithoutRateIsUnplaceable(t *testing.T) {
+	// The internationalization trap: 30 EUR is not 30 USD. Without a rate
+	// the model must decline to place the listing rather than misprice it.
+	v := Valuer{}
+	val, err := v.Value(95, 3, 3000, "EUR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val.Verdict != VerdictUnknownNoReference || val.HasReference {
+		t.Fatalf("an unrated foreign currency must be unplaceable, got %+v", val)
+	}
+}
+
+func TestValue_ForeignCurrencyConvertsWithRate(t *testing.T) {
+	m := DefaultModel()
+	predictedUSD := math.Exp(m.PredictLogPriceCents(95))
+	// Price the same wine in EUR at a rate that lands exactly on the model's
+	// expectation: EUR price * 1.08 == predicted USD.
+	eurCents := int64(predictedUSD / 1.08)
+
+	v := Valuer{Rates: map[string]float64{"EUR": 1.08}}
+	val, err := v.Value(95, 3, eurCents, "EUR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.HasReference {
+		t.Fatalf("a rated currency should be placeable")
+	}
+	if math.Abs(val.Ratio-1.0) > 0.01 {
+		t.Errorf("converted price should sit at the model price, got ratio %v", val.Ratio)
+	}
+	if val.Verdict != VerdictMarket {
+		t.Errorf("expected market, got %v (z=%.2f)", val.Verdict, val.ResidualZ)
+	}
+
+	// The same nominal number in EUR without conversion would have looked
+	// like a better deal than it is -- pin that the rate actually moved the
+	// verdict rather than being ignored.
+	unconverted := Valuer{}
+	rawVal, err := unconverted.Value(95, 3, eurCents, "USD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rawVal.Ratio >= val.Ratio {
+		t.Errorf("conversion should raise the effective price: raw %.3f vs converted %.3f", rawVal.Ratio, val.Ratio)
+	}
+}
+
+func TestValue_CurrencyMatchingIsCaseInsensitive(t *testing.T) {
+	v := Valuer{Rates: map[string]float64{"eur": 1.08}}
+	val, err := v.Value(95, 3, 3000, " EUR ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.HasReference {
+		t.Fatalf("currency and rate keys should match case-insensitively")
+	}
+}
+
+func TestValue_NonPositiveRateIsUnplaceable(t *testing.T) {
+	for _, rate := range []float64{0, -1.08} {
+		v := Valuer{Rates: map[string]float64{"EUR": rate}}
+		val, err := v.Value(95, 3, 3000, "EUR")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if val.HasReference {
+			t.Errorf("rate %v must not be used", rate)
+		}
+	}
+}
+
+func TestValue_ModelInAnotherCurrency(t *testing.T) {
+	// A model refit on EUR data places EUR listings directly and needs a
+	// rate for USD ones.
+	m := DefaultModel()
+	m.Currency = "EUR"
+	v := Valuer{Model: &m}
+
+	if val, _ := v.Value(95, 3, 3000, "EUR"); !val.HasReference {
+		t.Errorf("an EUR model should place an EUR listing directly")
+	}
+	if val, _ := v.Value(95, 3, 3000, "USD"); val.HasReference {
+		t.Errorf("an EUR model must not place a USD listing without a rate")
+	}
+	v.Rates = map[string]float64{"USD": 0.93}
+	if val, _ := v.Value(95, 3, 3000, "USD"); !val.HasReference {
+		t.Errorf("an EUR model with a USD rate should place a USD listing")
+	}
+}
+
+func TestDefaultModelDeclaresItsCurrency(t *testing.T) {
+	if DefaultModel().Currency != DefaultCurrency {
+		t.Errorf("DefaultModel should declare its fit currency, got %q", DefaultModel().Currency)
+	}
+	// An unset Currency falls back rather than becoming an unmatchable "".
+	var m HedonicModel
+	if m.currency() != DefaultCurrency {
+		t.Errorf("a model with no declared currency should default, got %q", m.currency())
 	}
 }

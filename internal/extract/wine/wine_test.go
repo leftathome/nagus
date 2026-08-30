@@ -93,44 +93,64 @@ func TestExtract_ChannelAspectsLiftedAndValidated(t *testing.T) {
 	e := New()
 	s := sanitized("Wine 2020", "")
 	s.Aspects = map[string]string{
-		"wine_channel":  "winery_direct",
-		"source_state":  "wa",
-		"ship_legal_to": "CA OR WA",
+		"wine_channel":  "producer",
+		"source_origin": "us-wa",
+		"ship_legal_to": "US-CA US-OR US-WA",
 	}
 	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if it.Attributes["wine_channel"] != "winery_direct" {
+	if it.Attributes["wine_channel"] != "producer" {
 		t.Errorf("channel should be lifted, got %v", it.Attributes)
 	}
-	if it.Attributes["source_state"] != "WA" {
-		t.Errorf("source state should be lifted normalized, got %q", it.Attributes["source_state"])
+	if it.Attributes["source_origin"] != "US-WA" {
+		t.Errorf("source origin should be lifted normalized, got %q", it.Attributes["source_origin"])
 	}
-	if it.Attributes["ship_legal_to"] != "CA OR WA" {
+	if it.Attributes["ship_legal_to"] != "US-CA US-OR US-WA" {
 		t.Errorf("legal destinations should be lifted, got %q", it.Attributes["ship_legal_to"])
 	}
 }
 
-func TestExtract_ShipLegalToTokensValidated(t *testing.T) {
-	// Aspect values are untrusted: non-state garbage must never reach the
-	// destination filter's token space, and an invalid source_state is
-	// dropped rather than lifted.
+func TestExtract_InternationalJurisdictionsLifted(t *testing.T) {
 	e := New()
-	s := sanitized("Wine 2020", "")
+	s := sanitized("Chateau Something 2019", "")
 	s.Aspects = map[string]string{
-		"source_state":  "Cascadia",
-		"ship_legal_to": "CA ANYWHERE wa true XX",
+		"wine_channel":  "producer",
+		"source_origin": "fr",
+		"ship_legal_to": "AT BE FR ES IT",
 	}
 	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, present := it.Attributes["source_state"]; present {
-		t.Errorf("invalid source_state must be dropped, got %q", it.Attributes["source_state"])
+	if it.Attributes["source_origin"] != "FR" {
+		t.Errorf("country-level origin should lift, got %q", it.Attributes["source_origin"])
 	}
-	if it.Attributes["ship_legal_to"] != "CA WA" {
-		t.Errorf("only validated state tokens may survive, got %q", it.Attributes["ship_legal_to"])
+	if it.Attributes["ship_legal_to"] != "AT BE FR ES IT" {
+		t.Errorf("country-level destinations should lift, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_ShipLegalToTokensValidated(t *testing.T) {
+	// Aspect values are untrusted: malformed tokens must never reach the
+	// destination filter's token space, and an invalid source_origin is
+	// dropped rather than lifted.
+	e := New()
+	s := sanitized("Wine 2020", "")
+	s.Aspects = map[string]string{
+		"source_origin": "Cascadia",
+		"ship_legal_to": "US-CA ANYWHERE fr true US-WASH 12 CA-BC",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, present := it.Attributes["source_origin"]; present {
+		t.Errorf("invalid source_origin must be dropped, got %q", it.Attributes["source_origin"])
+	}
+	if it.Attributes["ship_legal_to"] != "US-CA FR CA-BC" {
+		t.Errorf("only well-formed jurisdiction tokens may survive, got %q", it.Attributes["ship_legal_to"])
 	}
 }
 

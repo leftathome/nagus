@@ -5,100 +5,265 @@ import (
 	"testing"
 )
 
-// --- Channel / Source validation ---
-
-func TestChannelValid(t *testing.T) {
-	if !ChannelWineryDirect.Valid() || !ChannelRetailer.Valid() {
-		t.Fatalf("declared channels must be valid")
+func mustSource(t *testing.T, channel, origin string) Source {
+	t.Helper()
+	s, err := NewSource(channel, origin)
+	if err != nil {
+		t.Fatalf("NewSource(%q,%q): %v", channel, origin, err)
 	}
-	for _, c := range []Channel{"", "wa_retailer", "out_of_state_retailer", "mail_fraud"} {
-		if c.Valid() {
-			t.Errorf("channel %q must not be valid", c)
+	return s
+}
+
+// --- Jurisdiction ---
+
+func TestParseJurisdiction(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"US-WA", "US-WA"},
+		{"us-wa", "US-WA"},
+		{" fr ", "FR"},
+		{"CA-ON", "CA-ON"},
+		{"AU", "AU"},
+		{"FR-75", "FR-75"}, // numeric subdivisions are valid ISO 3166-2
+	}
+	for _, c := range cases {
+		j, err := ParseJurisdiction(c.in)
+		if err != nil {
+			t.Errorf("ParseJurisdiction(%q): unexpected error %v", c.in, err)
+			continue
 		}
+		if j.Code() != c.want {
+			t.Errorf("ParseJurisdiction(%q).Code() = %q, want %q", c.in, j.Code(), c.want)
+		}
+	}
+}
+
+func TestParseJurisdictionRejectsMalformed(t *testing.T) {
+	for _, in := range []string{"", "   ", "USA", "U", "Washington", "US-WASH", "US-WA-X", "12", "US_WA"} {
+		if _, err := ParseJurisdiction(in); err == nil {
+			t.Errorf("ParseJurisdiction(%q) should have failed", in)
+		}
+	}
+}
+
+func TestNormJurisdiction(t *testing.T) {
+	if got, ok := NormJurisdiction("us-wa"); !ok || got != "US-WA" {
+		t.Errorf("NormJurisdiction(us-wa) = %q,%v", got, ok)
+	}
+	if _, ok := NormJurisdiction("Cascadia"); ok {
+		t.Errorf("NormJurisdiction should reject a non-code")
+	}
+}
+
+// --- Source ---
+
+func TestNewSourceValidates(t *testing.T) {
+	if _, err := NewSource("RETAILER", "us-wa"); err != nil {
+		t.Errorf("channel and origin should normalize: %v", err)
+	}
+	if _, err := NewSource("wa_retailer", "US-WA"); err == nil {
+		t.Errorf("the old US-only channel vocabulary must not be accepted")
+	}
+	if _, err := NewSource("retailer", "Cascadia"); err == nil {
+		t.Errorf("an unparseable origin must be rejected")
 	}
 }
 
 func TestSourceValidate(t *testing.T) {
-	if err := (Source{Channel: ChannelRetailer, State: "WA"}).Validate(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := (Source{Channel: ChannelProducer, Origin: Jurisdiction{Country: "FR"}}).Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
-	if err := (Source{Channel: "bogus", State: "WA"}).Validate(); err == nil || !strings.Contains(err.Error(), "channel") {
-		t.Errorf("unknown channel should error naming the channel, got %v", err)
+	if err := (Source{Channel: "bogus", Origin: Jurisdiction{Country: "FR"}}).Validate(); err == nil {
+		t.Errorf("unknown channel must be rejected")
 	}
-	if err := (Source{Channel: ChannelRetailer, State: "Washington"}).Validate(); err == nil || !strings.Contains(err.Error(), "state") {
-		t.Errorf("non-USPS state should error naming the state, got %v", err)
-	}
-	// Normalization: lowercase codes are fine.
-	if err := (Source{Channel: ChannelRetailer, State: "wa"}).Validate(); err != nil {
-		t.Errorf("lowercase state code should normalize, got %v", err)
+	if err := (Source{Channel: ChannelProducer}).Validate(); err == nil {
+		t.Errorf("missing origin must be rejected")
 	}
 }
 
-func TestIsState(t *testing.T) {
-	for _, s := range []string{"WA", "wa", " ca ", "DC"} {
-		if !IsState(s) {
-			t.Errorf("IsState(%q) should be true", s)
+// --- Relate ---
+
+func TestRelate(t *testing.T) {
+	r := DefaultRules()
+	j := func(s string) Jurisdiction {
+		out, err := ParseJurisdiction(s)
+		if err != nil {
+			t.Fatalf("bad test jurisdiction %q: %v", s, err)
+		}
+		return out
+	}
+	cases := []struct {
+		origin, dest string
+		want         Relation
+	}{
+		{"US-WA", "US-WA", RelSameSubdivision},
+		{"US-CA", "US-WA", RelSameCountry},
+		{"FR", "FR", RelSameCountry},    // country-level: no subdivision to prove
+		{"US", "US-WA", RelSameCountry}, // unstated origin subdivision cannot prove in-state
+		{"FR", "ES", RelSameBloc},
+		{"FR", "US-WA", RelForeign},
+		{"US-WA", "FR", RelForeign},
+		{"AU", "NZ", RelForeign}, // no modeled bloc between them
+	}
+	for _, c := range cases {
+		if got := r.Relate(j(c.origin), j(c.dest)); got != c.want {
+			t.Errorf("Relate(%s -> %s) = %s, want %s", c.origin, c.dest, got, c.want)
 		}
 	}
-	for _, s := range []string{"", "Washington", "XX", "PR"} {
-		if IsState(s) {
-			t.Errorf("IsState(%q) should be false", s)
-		}
+}
+
+func TestRelateSameSubdivisionNeedsBothSides(t *testing.T) {
+	// The asymmetric case matters: a source declared only as "US" must not
+	// be credited with being in-state anywhere, or an out-of-state retailer
+	// would sneak past a state that only permits in-state ones.
+	r := DefaultRules()
+	loose := mustSource(t, "retailer", "US")
+	if r.Legal(loose, "US-WA") {
+		t.Errorf("a retailer with an unstated subdivision must not count as in-state in WA")
 	}
 }
 
-// --- Default table shape ---
+// --- Legal: the US cases that motivated the layer ---
 
-func TestDefaultRulesCoversAllStatesPlusDC(t *testing.T) {
+func TestLegalUSRetailerInStateVsOutOfState(t *testing.T) {
 	r := DefaultRules()
-	if len(r.Destinations) != 51 {
-		t.Fatalf("expected 50 states + DC = 51 destinations, got %d", len(r.Destinations))
+	waShop := mustSource(t, "retailer", "US-WA")
+	caShop := mustSource(t, "retailer", "US-CA")
+
+	if !r.Legal(waShop, "US-WA") {
+		t.Errorf("a WA retailer should reach WA")
+	}
+	if r.Legal(caShop, "US-WA") {
+		t.Errorf("an out-of-state retailer must not reach WA (SB 5007 died in committee)")
+	}
+	// The same CA shop reaches CA (in-state) and OR (inbound-permitted).
+	if !r.Legal(caShop, "US-CA") || !r.Legal(caShop, "US-OR") {
+		t.Errorf("CA retailer should reach CA and OR")
+	}
+	// And not FL, which is not on the inbound list.
+	if r.Legal(waShop, "US-FL") {
+		t.Errorf("out-of-state retailer into FL must be closed by default")
 	}
 }
 
-func TestDefaultRulesWineryDirectBaseline(t *testing.T) {
+func TestLegalUSProducer(t *testing.T) {
 	r := DefaultRules()
-	winery := Source{Channel: ChannelWineryDirect, State: "CA"}
-	// Legal into WA (the original motivating case) and CA.
-	for _, dest := range []string{"WA", "CA", "FL", "NY"} {
+	winery := mustSource(t, "producer", "US-CA")
+	for _, dest := range []string{"US-WA", "US-CA", "US-FL", "US-NY"} {
 		if !r.Legal(winery, dest) {
-			t.Errorf("winery-direct should be legal into %s by default", dest)
+			t.Errorf("winery-direct should reach %s by default", dest)
 		}
 	}
-	// The two prohibition states.
-	for _, dest := range []string{"MS", "UT"} {
+	for _, dest := range []string{"US-MS", "US-UT", "US-DE", "US-RI"} {
 		if r.Legal(winery, dest) {
-			t.Errorf("winery-direct must be illegal into %s by default", dest)
+			t.Errorf("winery-direct must be closed into %s", dest)
 		}
 	}
 }
 
-func TestDefaultRulesRetailerBaseline(t *testing.T) {
-	r := DefaultRules()
+// --- Legal: international ---
 
-	// In-state retailer: legal within its own state.
-	waShop := Source{Channel: ChannelRetailer, State: "WA"}
-	if !r.Legal(waShop, "WA") {
-		t.Errorf("a WA retailer should be legal into WA")
+func TestLegalEUIntraBloc(t *testing.T) {
+	r := DefaultRules()
+	frWinery := mustSource(t, "producer", "FR")
+	frShop := mustSource(t, "retailer", "FR")
+
+	// Intra-EU distance selling: both channels reach other member states.
+	for _, dest := range []string{"ES", "IT", "DE", "NL", "FR"} {
+		if !r.Legal(frWinery, dest) {
+			t.Errorf("FR winery should reach %s", dest)
+		}
+		if !r.Legal(frShop, dest) {
+			t.Errorf("FR retailer should reach %s", dest)
+		}
 	}
-	// ...but out-of-state into WA is the motivating prohibition (SB 5007).
-	caShop := Source{Channel: ChannelRetailer, State: "CA"}
-	if r.Legal(caShop, "WA") {
-		t.Errorf("an out-of-state retailer must be illegal into WA by default")
+	// But NOT into the US: imports must clear a licensed importer.
+	if r.Legal(frWinery, "US-WA") || r.Legal(frShop, "US-CA") {
+		t.Errorf("an EU seller must not reach a US consumer by default")
 	}
-	// The same CA shop IS legal into CA (its own state) and into OR
-	// (out-of-state retailer permitted there).
-	if !r.Legal(caShop, "CA") || !r.Legal(caShop, "OR") {
-		t.Errorf("CA retailer should be legal into CA and OR")
-	}
-	// A WA shop shipping into FL: FL does not permit out-of-state retailers
-	// in the baseline.
-	if r.Legal(waShop, "FL") {
-		t.Errorf("out-of-state retailer into FL must be illegal by default")
+	// Nor into Canada, whose provinces route imports through the boards.
+	if r.Legal(frWinery, "CA-ON") {
+		t.Errorf("an EU winery must not reach an Ontario consumer by default")
 	}
 }
 
-// --- Fail-closed ---
+func TestLegalNordicMonopolyExceptions(t *testing.T) {
+	r := DefaultRules()
+	seShop := mustSource(t, "retailer", "SE")
+	frShop := mustSource(t, "retailer", "FR")
+
+	// Domestic retail is the monopoly's business...
+	if r.Legal(seShop, "SE") {
+		t.Errorf("a domestic SE retailer should be closed under the monopoly model")
+	}
+	// ...but intra-bloc private importation stays open.
+	if !r.Legal(frShop, "SE") {
+		t.Errorf("an FR retailer should reach an SE consumer (intra-EU distance selling)")
+	}
+	if !r.Legal(frShop, "FI") {
+		t.Errorf("an FR retailer should reach an FI consumer")
+	}
+}
+
+func TestLegalCanadaInterprovincial(t *testing.T) {
+	r := DefaultRules()
+	bcWinery := mustSource(t, "producer", "CA-BC")
+	onShop := mustSource(t, "retailer", "CA-ON")
+
+	if !r.Legal(bcWinery, "CA-BC") {
+		t.Errorf("a BC winery should reach BC")
+	}
+	if !r.Legal(bcWinery, "CA-MB") || !r.Legal(bcWinery, "CA-NS") {
+		t.Errorf("a BC winery should reach the provinces that admit interprovincial winery-direct")
+	}
+	if r.Legal(bcWinery, "CA-ON") || r.Legal(bcWinery, "CA-QC") {
+		t.Errorf("monopoly provinces must not admit interprovincial winery-direct by default")
+	}
+	if !r.Legal(onShop, "CA-ON") {
+		t.Errorf("an ON retailer should reach ON")
+	}
+	if r.Legal(onShop, "CA-BC") {
+		t.Errorf("interprovincial retail shipping must be closed by default")
+	}
+}
+
+func TestLegalOtherMarketsAreDomesticOnly(t *testing.T) {
+	r := DefaultRules()
+	auShop := mustSource(t, "retailer", "AU")
+	nzShop := mustSource(t, "retailer", "NZ")
+
+	if !r.Legal(auShop, "AU") {
+		t.Errorf("an AU retailer should reach AU")
+	}
+	// Subdivision destinations fall back to the country entry.
+	if !r.Legal(auShop, "AU-NSW") {
+		t.Errorf("AU-NSW should resolve through the AU country policy")
+	}
+	if r.Legal(nzShop, "AU") || r.Legal(auShop, "NZ") {
+		t.Errorf("cross-border DTC is not modeled for AU/NZ by default")
+	}
+}
+
+func TestDefaultRulesCoverage(t *testing.T) {
+	r := DefaultRules()
+	// The four regions are all present.
+	for _, code := range []string{"US-WA", "US-DC", "CA-QC", "FR", "ES", "IT", "AU", "NZ", "ZA", "CL", "AR", "JP", "GB"} {
+		if _, ok := r.Destinations[code]; !ok {
+			t.Errorf("default table should model %s", code)
+		}
+	}
+	if got := len(r.Destinations); got < 100 {
+		t.Errorf("expected ~110 modeled destinations, got %d", got)
+	}
+	// The EU bloc must be populated, or RelSameBloc could never fire.
+	if len(r.Blocs["EU"]) != 27 {
+		t.Errorf("EU bloc should list 27 members, got %d", len(r.Blocs["EU"]))
+	}
+}
+
+// --- Fail closed ---
 
 func TestLegalFailsClosed(t *testing.T) {
 	r := DefaultRules()
@@ -107,116 +272,213 @@ func TestLegalFailsClosed(t *testing.T) {
 		src  Source
 		dest string
 	}{
-		{"unknown destination", Source{Channel: ChannelRetailer, State: "WA"}, "XX"},
-		{"empty destination", Source{Channel: ChannelRetailer, State: "WA"}, ""},
-		{"unknown channel", Source{Channel: "bogus", State: "WA"}, "WA"},
-		{"retailer with invalid home state", Source{Channel: ChannelRetailer, State: "??"}, "CA"},
+		{"unparseable destination", mustSource(t, "retailer", "US-WA"), "Cascadia"},
+		{"empty destination", mustSource(t, "retailer", "US-WA"), ""},
+		{"unmodeled destination", mustSource(t, "retailer", "US-WA"), "NO"},
+		{"unmodeled subdivision falls back to unmodeled country", mustSource(t, "retailer", "US-WA"), "NO-03"},
+		{"unknown channel", Source{Channel: "bogus", Origin: Jurisdiction{Country: "US", Subdivision: "WA"}}, "US-WA"},
+		{"source with no origin", Source{Channel: ChannelRetailer}, "US-WA"},
 	}
 	for _, c := range cases {
 		if r.Legal(c.src, c.dest) {
 			t.Errorf("%s: must fail closed", c.name)
 		}
 	}
-	// An empty Rules table is illegal everywhere.
-	empty := Rules{}
-	if empty.Legal(Source{Channel: ChannelWineryDirect, State: "CA"}, "CA") {
+
+	// An empty table is illegal everywhere.
+	if (Rules{}).Legal(mustSource(t, "producer", "FR"), "FR") {
 		t.Errorf("empty rules must be illegal everywhere")
 	}
 }
 
-func TestLegalNormalizesCase(t *testing.T) {
+func TestUnmodeledIsDistinctFromProhibited(t *testing.T) {
 	r := DefaultRules()
-	src := Source{Channel: ChannelRetailer, State: "wa"}
-	if !r.Legal(src, "wa") {
-		t.Errorf("lowercase source and destination codes should normalize")
+	// Norway is OMITTED (unmodeled), Utah is present-but-closed. Both are
+	// illegal, but only one is claimed as modeled -- config paths use
+	// Modeled to tell an operator which is which.
+	if r.Modeled("NO") {
+		t.Errorf("NO should be unmodeled in the default table")
+	}
+	if !r.Modeled("US-UT") {
+		t.Errorf("US-UT should be modeled (and closed), not unmodeled")
+	}
+	if r.Legal(mustSource(t, "producer", "US-CA"), "US-UT") {
+		t.Errorf("US-UT must still be illegal")
+	}
+	if r.Modeled("Cascadia") {
+		t.Errorf("an unparseable destination is never modeled")
+	}
+	// A subdivision of a modeled country is modeled via fallback.
+	if !r.Modeled("AU-VIC") {
+		t.Errorf("AU-VIC should resolve through AU")
 	}
 }
 
 // --- LegalDestinations ---
 
-func TestLegalDestinationsSortedAndConsistent(t *testing.T) {
+func TestLegalDestinationsAgreesWithLegal(t *testing.T) {
 	r := DefaultRules()
-	winery := Source{Channel: ChannelWineryDirect, State: "WA"}
-	dests := r.LegalDestinations(winery)
-	if len(dests) != 49 { // 51 - MS - UT
-		t.Fatalf("winery-direct should reach 49 destinations, got %d", len(dests))
-	}
-	for i := 1; i < len(dests); i++ {
-		if dests[i-1] >= dests[i] {
-			t.Fatalf("destinations must be sorted: %v", dests)
+	for _, src := range []Source{
+		mustSource(t, "retailer", "US-WA"),
+		mustSource(t, "producer", "US-CA"),
+		mustSource(t, "producer", "FR"),
+		mustSource(t, "retailer", "CA-ON"),
+	} {
+		dests := r.LegalDestinations(src)
+		for i := 1; i < len(dests); i++ {
+			if dests[i-1] >= dests[i] {
+				t.Fatalf("%v: destinations must be sorted and unique: %v", src, dests)
+			}
+		}
+		got := map[string]bool{}
+		for _, d := range dests {
+			got[d] = true
+			if !r.Legal(src, d) {
+				t.Errorf("%v: LegalDestinations includes %s but Legal disagrees", src, d)
+			}
+		}
+		for code := range r.Destinations {
+			if r.Legal(src, code) && !got[code] {
+				t.Errorf("%v: Legal allows %s but LegalDestinations omits it", src, code)
+			}
 		}
 	}
-	// Every listed destination must agree with Legal (the tagger stamps
-	// this set; disagreement would corrupt the filter).
-	for _, d := range dests {
-		if !r.Legal(winery, d) {
-			t.Errorf("LegalDestinations includes %s but Legal disagrees", d)
+}
+
+func TestLegalDestinationsShape(t *testing.T) {
+	r := DefaultRules()
+
+	// A French winery reaches the EU-27 and nothing else by default.
+	frDests := r.LegalDestinations(mustSource(t, "producer", "FR"))
+	if len(frDests) != 27 {
+		t.Errorf("an FR winery should reach the 27 EU members, got %d: %v", len(frDests), frDests)
+	}
+	for _, d := range frDests {
+		if strings.HasPrefix(d, "US-") || strings.HasPrefix(d, "CA-") {
+			t.Errorf("an FR winery must not reach %s", d)
 		}
 	}
 
-	// An in-state retailer in a no-out-of-state destination reaches its own
-	// state plus the permitted out-of-state list.
-	waShop := Source{Channel: ChannelRetailer, State: "WA"}
-	got := map[string]bool{}
-	for _, d := range r.LegalDestinations(waShop) {
-		got[d] = true
-	}
-	if !got["WA"] {
-		t.Errorf("a WA retailer must reach WA")
-	}
-	if got["FL"] {
-		t.Errorf("a WA retailer must not reach FL by default")
-	}
-	if !got["CA"] {
-		t.Errorf("a WA retailer should reach CA (out-of-state retailer permitted there)")
+	// A WA retailer reaches WA plus the inbound-permitting states only.
+	waDests := r.LegalDestinations(mustSource(t, "retailer", "US-WA"))
+	want := len(usRetailerInbound) + 1 // the inbound list plus its own state
+	if len(waDests) != want {
+		t.Errorf("a WA retailer should reach %d destinations, got %d: %v", want, len(waDests), waDests)
 	}
 }
 
 // --- LoadRules / Override ---
 
 func TestLoadRulesAndOverride(t *testing.T) {
-	// Suppose WA passes an SB-5007-style law: the operator overrides one
-	// destination without restating the other 50.
-	doc := `{"destinations": {"wa": {"wineryDirect": true, "inStateRetailer": true, "outOfStateRetailer": true}}}`
+	// Suppose WA passes an SB-5007-style law: one destination overridden,
+	// the other ~110 untouched.
+	doc := `{"destinations": {"us-wa": {
+		"producer": {"sameSubdivision": true, "sameCountry": true},
+		"retailer": {"sameSubdivision": true, "sameCountry": true}}}}`
 	loaded, err := LoadRules(strings.NewReader(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	r := DefaultRules().Override(loaded)
 
-	caShop := Source{Channel: ChannelRetailer, State: "CA"}
-	if !r.Legal(caShop, "WA") {
-		t.Errorf("override should make out-of-state retailer legal into WA")
+	caShop := mustSource(t, "retailer", "US-CA")
+	if !r.Legal(caShop, "US-WA") {
+		t.Errorf("the override should open WA to out-of-state retailers")
 	}
-	// Untouched destinations keep the baseline.
-	if r.Legal(caShop, "FL") {
-		t.Errorf("override must not disturb other destinations")
+	if r.Legal(caShop, "US-FL") {
+		t.Errorf("the override must not disturb other destinations")
 	}
-	if len(r.Destinations) != 51 {
-		t.Errorf("override must keep the full table, got %d", len(r.Destinations))
-	}
-}
-
-func TestLoadRulesRejectsUnknownDestination(t *testing.T) {
-	doc := `{"destinations": {"Wash": {"wineryDirect": true}}}`
-	if _, err := LoadRules(strings.NewReader(doc)); err == nil {
-		t.Fatalf("an unknown destination code must be a load error, not a silent unreachable entry")
+	if len(r.Destinations) != len(DefaultRules().Destinations) {
+		t.Errorf("override should keep the full table")
 	}
 }
 
-func TestLoadRulesRejectsUnknownFields(t *testing.T) {
-	doc := `{"destinations": {"WA": {"wineryDirect": true, "retailShipping": true}}}`
-	if _, err := LoadRules(strings.NewReader(doc)); err == nil {
-		t.Fatalf("a misspelled policy field must be a load error (it would silently fail closed otherwise)")
+func TestLoadRulesOverrideOpensForeignImports(t *testing.T) {
+	// The documented personal-import case: an operator in Australia decides
+	// third-country retailers may ship in.
+	doc := `{"destinations": {"AU": {
+		"producer": {"sameSubdivision": true, "sameCountry": true, "foreign": true},
+		"retailer": {"sameSubdivision": true, "sameCountry": true, "foreign": true}}}}`
+	loaded, err := LoadRules(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := DefaultRules().Override(loaded)
+
+	frShop := mustSource(t, "retailer", "FR")
+	if !r.Legal(frShop, "AU") {
+		t.Errorf("with foreign enabled, an FR retailer should reach AU")
+	}
+	if !r.Legal(frShop, "AU-NSW") {
+		t.Errorf("the AU override should apply to subdivisions via fallback")
+	}
+	// Other destinations keep the conservative default.
+	if r.Legal(frShop, "NZ") {
+		t.Errorf("overriding AU must not open NZ")
 	}
 }
 
-func TestOverrideDoesNotMutateBase(t *testing.T) {
+func TestLoadRulesBlocOverride(t *testing.T) {
+	// A bloc can be redefined as data too -- e.g. modeling a customs union
+	// the baseline does not carry.
+	doc := `{"destinations": {"AU": {"retailer": {"sameCountry": true, "sameBloc": true}},
+	                          "NZ": {"retailer": {"sameCountry": true, "sameBloc": true}}},
+	         "blocs": {"ANZ": ["au", "nz"]}}`
+	loaded, err := LoadRules(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := DefaultRules().Override(loaded)
+
+	if got := r.Blocs["ANZ"]; len(got) != 2 || got[0] != "AU" || got[1] != "NZ" {
+		t.Fatalf("bloc members should be canonicalized and sorted, got %v", got)
+	}
+	nzShop := mustSource(t, "retailer", "NZ")
+	if !r.Legal(nzShop, "AU") {
+		t.Errorf("an NZ retailer should reach AU once they share a modeled bloc")
+	}
+	// The EU bloc survives the merge.
+	if len(r.Blocs["EU"]) != 27 {
+		t.Errorf("overriding one bloc must not drop the others")
+	}
+}
+
+func TestLoadRulesRejectsBadInput(t *testing.T) {
+	cases := map[string]string{
+		"unknown destination code":   `{"destinations": {"Wash": {"producer": {}}}}`,
+		"subdivision as bloc member": `{"blocs": {"EU": ["US-WA"]}}`,
+		"unknown bloc member code":   `{"blocs": {"EU": ["France"]}}`,
+		"misspelled policy field":    `{"destinations": {"US-WA": {"producer": {"sameStateish": true}}}}`,
+		"misspelled channel":         `{"destinations": {"US-WA": {"vintner": {"sameCountry": true}}}}`,
+		"not json":                   `nope`,
+	}
+	for name, doc := range cases {
+		if _, err := LoadRules(strings.NewReader(doc)); err == nil {
+			t.Errorf("%s: expected a load error", name)
+		}
+	}
+}
+
+func TestOverrideDoesNotMutateInputs(t *testing.T) {
 	base := DefaultRules()
-	before := base.Destinations["WA"]
-	loaded := Rules{Destinations: map[string]Policy{"WA": {OutOfStateRetailer: true}}}
-	_ = base.Override(loaded)
-	if base.Destinations["WA"] != before {
-		t.Fatalf("Override must return a copy, not mutate the base")
+	before := base.Destinations["US-WA"]
+	beforeBloc := len(base.Blocs["EU"])
+
+	o := Rules{
+		Destinations: map[string]Policy{"US-WA": {Retailer: ChannelPolicy{SameCountry: true}}},
+		Blocs:        map[string][]string{"EU": {"FR"}},
+	}
+	merged := base.Override(o)
+
+	if base.Destinations["US-WA"] != before {
+		t.Errorf("Override must not mutate the base table")
+	}
+	if len(base.Blocs["EU"]) != beforeBloc {
+		t.Errorf("Override must not mutate the base blocs")
+	}
+	// And the merged copy's slices must not alias the override's.
+	merged.Blocs["EU"][0] = "ZZ"
+	if o.Blocs["EU"][0] != "FR" {
+		t.Errorf("Override must copy bloc slices, not alias them")
 	}
 }

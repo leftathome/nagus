@@ -59,13 +59,16 @@ type SourceConfig struct {
 	MaxPages    int      `json:"maxPages,omitempty"`
 
 	// wine (per-source). WineChannel declares HOW the source ships
-	// ("winery_direct" | "retailer") and State WHERE it ships from (USPS
-	// code, e.g. "WA"). Both are REQUIRED on a wine source -- the
-	// internal/shipping constraint layer derives which destination states
-	// the source may legally reach from this declaration, and legality is a
-	// conscious per-source declaration, never a default.
+	// ("producer" | "retailer") and Origin WHERE it ships from, as an ISO
+	// 3166 jurisdiction: "US-WA", "CA-BC", "FR". Both are REQUIRED on a wine
+	// source -- the internal/shipping constraint layer derives which
+	// destinations the source may legally reach from this declaration, and
+	// legality is a conscious per-source declaration, never a default.
+	// Declare a subdivision wherever the law turns on one (US states,
+	// Canadian provinces); a bare country is right elsewhere, and is treated
+	// as unable to prove in-subdivision standing.
 	WineChannel string `json:"wineChannel,omitempty"`
-	State       string `json:"state,omitempty"`
+	Origin      string `json:"origin,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`
@@ -90,13 +93,20 @@ type CategoryConfig struct {
 	// wine. MinWineScore hard-filters on the aggregated normalized critic
 	// score; MinWineScoreCount is the valuation's minimum independent-critic
 	// count before flagging value (0 = the default minimum-3 rule);
-	// WineShipTo, when set to a USPS state code, drops offers whose source
-	// cannot legally ship wine to a consumer in that state (the destination
-	// is CONFIG, not a hardcoded home state -- set it to a gift recipient's
-	// state to shop for them). Empty = no legality filter.
-	MinWineScore      float64 `json:"minWineScore,omitempty"`
-	MinWineScoreCount int     `json:"minWineScoreCount,omitempty"`
-	WineShipTo        string  `json:"wineShipTo,omitempty"`
+	// WineShipTo, when set to an ISO 3166 jurisdiction ("US-WA", "FR",
+	// "CA-BC"), drops offers whose source cannot legally ship wine to a
+	// consumer THERE. The destination is CONFIG, not a hardcoded home
+	// market -- set it to a gift recipient's jurisdiction to shop for them.
+	// Empty = no legality filter.
+	//
+	// WineFXRates converts listing currencies into the hedonic model's
+	// currency (USD by default), e.g. {"EUR": 1.08, "CAD": 0.74}. A listing
+	// in an unrated foreign currency is reported unplaceable rather than
+	// mispriced, so international sources need this set to be scored.
+	MinWineScore      float64            `json:"minWineScore,omitempty"`
+	MinWineScoreCount int                `json:"minWineScoreCount,omitempty"`
+	WineShipTo        string             `json:"wineShipTo,omitempty"`
+	WineFXRates       map[string]float64 `json:"wineFxRates,omitempty"`
 }
 
 // RunConfig is the whole deployment declaration: what to ingest and what to

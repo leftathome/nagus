@@ -3,7 +3,13 @@
     "wine": {
       "budgetCents": 10000,
       "minWineScore": 92,
-      "wineShipTo": "WA"
+      "wineShipTo": "US-WA",
+      "wineFxRates": {
+        "EUR": 1.08,
+        "GBP": 1.27,
+        "CAD": 0.74,
+        "AUD": 0.66
+      }
     }
   },
   "defaultCategory": "wine",
@@ -14,26 +20,44 @@
       "type": "shopify",
       "baseUrl": "https://example-seattle-wine-shop.test",
       "wineChannel": "retailer",
-      "state": "WA",
+      "origin": "US-WA",
       "intervalMinutes": 360
     },
     {
-      "name": "example-winery-direct",
+      "name": "example-walla-walla-winery",
       "category": "wine",
       "type": "shopify",
       "baseUrl": "https://example-walla-walla-winery.test",
-      "wineChannel": "winery_direct",
-      "state": "WA",
+      "wineChannel": "producer",
+      "origin": "US-WA",
       "intervalMinutes": 720
     },
     {
-      "name": "example-ca-wine-shop",
+      "name": "example-napa-winery",
       "category": "wine",
       "type": "shopify",
-      "baseUrl": "https://example-berkeley-wine-shop.test",
-      "wineChannel": "retailer",
-      "state": "CA",
+      "baseUrl": "https://example-napa-winery.test",
+      "wineChannel": "producer",
+      "origin": "US-CA",
       "intervalMinutes": 720
+    },
+    {
+      "name": "example-bc-winery",
+      "category": "wine",
+      "type": "shopify",
+      "baseUrl": "https://example-okanagan-winery.test",
+      "wineChannel": "producer",
+      "origin": "CA-BC",
+      "intervalMinutes": 1440
+    },
+    {
+      "name": "example-rioja-bodega",
+      "category": "wine",
+      "type": "shopify",
+      "baseUrl": "https://example-rioja-bodega.test",
+      "wineChannel": "producer",
+      "origin": "ES",
+      "intervalMinutes": 1440
     }
   ]
 }
