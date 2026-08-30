@@ -40,28 +40,44 @@ exposes no ratings). Paywalled critic sites (Wine Spectator app, Suckling,
 Vinous, Decanter) are not fetched; their scores reach us legitimately via
 retailer attributions and GWS aggregation.
 
-### 1.3 Washington legality is the binding constraint, not the API budget
+### 1.3 Shipping legality is a CONSTRAINT LAYER, not a hardcoded WA rule
 
-Per WSLCB / RCW 66.20: out-of-state **wineries** with a WA wine shipper
-permit ($150 since 2025-07-27) may ship to WA consumers; **in-state licensed
-retailers** may ship/deliver within WA; out-of-state **retailers may NOT**
-(SB 5007, which would have permitted them, died in committee Jan 2024).
+US direct-to-consumer wine shipping law is per-destination-state and
+per-channel, and the household's destination is not always Washington --
+buying a gift for someone in CA or FL is a first-class use. So legality
+lives in `internal/shipping` as a data-driven rules table, with WA merely
+the motivating worked example (out-of-state retailers may not ship into WA;
+SB 5007, which would have permitted them, died in committee Jan 2024;
+permitted wineries and in-state retailers may, per WSLCB / RCW 66.20).
 
-Engineering consequences, all implemented:
+The model, all implemented:
 
-- Legality is a property of the SOURCE's channel, never derivable from
-  listing text, so it is DECLARED per source (`wineChannel` in config:
-  `wa_retailer` | `winery_direct` | `out_of_state_retailer`) and stamped
-  onto every listing by the channel tagger at the connector seam.
-- `ship_legal_wa` is a typed item attribute; the filter can hard-require it
-  (`requireShipLegalWA`), and the gate FAILS CLOSED: an unstamped or
-  unknown-channel item never passes as legal. A wine source without a
-  declared channel is a startup error, not a default.
-- Out-of-state retailer offers still ingest (informational -- price signal
-  for the corpus) but can never surface as actionable when the legality
-  filter is on. Winery-direct and in-state retailers are the first-class
-  offer channels.
-- Re-verify a source's channel when onboarding it (a flash site's
+- A source DECLARES how and from where it ships: `wineChannel`
+  (`winery_direct` | `retailer`) + `state` (USPS code) in config. Both are
+  required -- legality is a conscious per-source declaration, never a
+  default, and a missing/unknown declaration is a startup error.
+- `shipping.Rules` maps every destination state (50 + DC) to a `Policy`
+  {wineryDirect, inStateRetailer, outOfStateRetailer}. `DefaultRules()` is
+  a documented engineering baseline (winery-direct legal everywhere except
+  MS/UT; in-state retailer delivery legal everywhere; out-of-state retailer
+  legal into a short list -- NOT legal advice: verify a destination before
+  relying on it). An operator overrides any destination from a JSON file
+  (`NAGUS_WINE_SHIP_RULES`, merged over the defaults), because these laws
+  churn with legislation and litigation.
+- The channel tagger stamps each listing with the source's declaration and
+  its computed legal-destination SET (`ship_legal_to`, a token set of state
+  codes, tokens validated at extract). Stamping the whole set -- not one
+  state's boolean -- means one ingested corpus serves watches for ANY
+  destination; a rules change converges on the next poll's re-stamp.
+- A surface/watch picks its destination: `wineShipTo` in category config
+  (env `NAGUS_WINE_SHIP_TO`). The filter then hard-requires the destination
+  token via the generic `score.Filter.HasToken` predicate, and the gate
+  FAILS CLOSED at every layer: unknown destination, unknown channel,
+  unstamped item, empty legal set -- all illegal, never default-legal.
+  Empty `wineShipTo` = no legality filter (all offers informational).
+- Offers that cannot reach the configured destination still ingest
+  (price signal for the corpus) but never surface as actionable.
+- Re-verify a source's declaration when onboarding it (a flash site's
   fulfillment model can change); the config declaration records that
   verification.
 
@@ -69,13 +85,15 @@ Engineering consequences, all implemented:
 
 ```
 shopify/other connector
-  -> TagWineChannel (stamps wine_channel + ship_legal_wa aspects)
+  -> TagWineChannel (stamps wine_channel + source_state + the computed
+       ship_legal_to destination set from the shipping rules table)
   -> sanitize (boundary marker; production path = glovebox)
   -> extract/wine: vintage, bottle_ml, varietal, colour,
        critic attributions -> normalized wine_score + wine_score_count,
        LWIN resolution -> CanonicalID (auto-route only)
   -> store
-  -> hard-filter: priced, budget, min wine_score, ship_legal_wa == true
+  -> hard-filter: priced, budget, min wine_score,
+       ship_legal_to contains the configured destination (wineShipTo)
   -> valuation/wine: hedonic log-price residual -> verdict
   -> score -> rank -> surface / watches
 ```

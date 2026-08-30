@@ -93,26 +93,70 @@ func TestExtract_ChannelAspectsLiftedAndValidated(t *testing.T) {
 	e := New()
 	s := sanitized("Wine 2020", "")
 	s.Aspects = map[string]string{
-		"ship_legal_wa": "true",
 		"wine_channel":  "winery_direct",
+		"source_state":  "wa",
+		"ship_legal_to": "CA OR WA",
 	}
 	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if it.Attributes["ship_legal_wa"] != "true" || it.Attributes["wine_channel"] != "winery_direct" {
-		t.Errorf("channel aspects should be lifted, got %v", it.Attributes)
+	if it.Attributes["wine_channel"] != "winery_direct" {
+		t.Errorf("channel should be lifted, got %v", it.Attributes)
+	}
+	if it.Attributes["source_state"] != "WA" {
+		t.Errorf("source state should be lifted normalized, got %q", it.Attributes["source_state"])
+	}
+	if it.Attributes["ship_legal_to"] != "CA OR WA" {
+		t.Errorf("legal destinations should be lifted, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_ShipLegalToTokensValidated(t *testing.T) {
+	// Aspect values are untrusted: non-state garbage must never reach the
+	// destination filter's token space, and an invalid source_state is
+	// dropped rather than lifted.
+	e := New()
+	s := sanitized("Wine 2020", "")
+	s.Aspects = map[string]string{
+		"source_state":  "Cascadia",
+		"ship_legal_to": "CA ANYWHERE wa true XX",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, present := it.Attributes["source_state"]; present {
+		t.Errorf("invalid source_state must be dropped, got %q", it.Attributes["source_state"])
+	}
+	if it.Attributes["ship_legal_to"] != "CA WA" {
+		t.Errorf("only validated state tokens may survive, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_EmptyShipLegalToIsStampedNotDropped(t *testing.T) {
+	// "Ships nowhere legally" is a real fail-closed fact, distinct from an
+	// untagged source (no aspect at all).
+	e := New()
+	s := sanitized("Wine 2020", "")
+	s.Aspects = map[string]string{"ship_legal_to": ""}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, present := it.Attributes["ship_legal_to"]
+	if !present || v != "" {
+		t.Errorf("empty legal set should be stamped as empty, got present=%v value=%q", present, v)
 	}
 
-	// An unrecognized legality value (untrusted aspect) must NOT pass
-	// through: only the boolean vocabulary is lifted.
-	s.Aspects["ship_legal_wa"] = "yes please"
+	// No aspect -> no attribute.
+	s.Aspects = nil
 	it, err = e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, present := it.Attributes["ship_legal_wa"]; present {
-		t.Errorf("non-boolean ship_legal_wa must be dropped, got %q", it.Attributes["ship_legal_wa"])
+	if _, present := it.Attributes["ship_legal_to"]; present {
+		t.Errorf("untagged source must carry no ship_legal_to attribute")
 	}
 }
 

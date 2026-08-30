@@ -20,9 +20,14 @@
 //     deliberately NOT recognized -- in this project's home market "WA" is
 //     Washington state and appears next to numbers (zip codes, "WA 98362")
 //     far too often; The Wine Advocate is matched as "RP" or by full name.
-//   - ship_legal_wa / wine_channel -- lifted from connector aspects, where
-//     the per-source channel tagger stamped them (legality is a property of
-//     the SOURCE's shipping channel, not derivable from listing text).
+//   - wine_channel / source_state / ship_legal_to -- lifted from connector
+//     aspects, where the per-source channel tagger stamped them (legality is
+//     a property of the SOURCE's shipping channel and home state under the
+//     internal/shipping rules table, not derivable from listing text).
+//     ship_legal_to is the token SET of destination states the source may
+//     legally ship to; each token is validated as a USPS code so an
+//     untrusted aspect can never smuggle a non-state token past the
+//     destination filter.
 //   - CanonicalID -- when an LWIN resolver is injected, a HIGH-CONFIDENCE
 //     (RouteAuto) match stamps the LWIN-11. Lower-confidence routes leave
 //     CanonicalID empty and record lwin_route so the adjudication tier can
@@ -43,6 +48,7 @@ import (
 	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/shipping"
 	valwine "github.com/leftathome/nagus/internal/valuation/wine"
 )
 
@@ -120,12 +126,18 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	}
 
 	// Per-source channel/legality stamps (aspect values are untrusted like
-	// any other: only the recognized vocabulary passes through).
-	if v := s.Aspects["ship_legal_wa"]; v == "true" || v == "false" {
-		it.Attributes["ship_legal_wa"] = v
-	}
+	// any other: only the recognized vocabulary passes through). The
+	// legal-destination set is re-rendered from its VALIDATED tokens, and is
+	// stamped even when empty -- an empty set is a real, fail-closed fact
+	// ("ships nowhere legally"), distinct from an untagged source.
 	if ch := strings.TrimSpace(s.Aspects["wine_channel"]); ch != "" {
 		it.Attributes["wine_channel"] = ch
+	}
+	if st, ok := stateToken(s.Aspects["source_state"]); ok {
+		it.Attributes["source_state"] = st
+	}
+	if raw, present := s.Aspects["ship_legal_to"]; present {
+		it.Attributes["ship_legal_to"] = strings.Join(stateTokens(raw), " ")
 	}
 
 	// LWIN identity resolution (optional).
@@ -141,6 +153,28 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		return item.Item{}, fmt.Errorf("wine: extract: %w", err)
 	}
 	return it, nil
+}
+
+// stateToken validates one untrusted state-code token via the shipping
+// layer's canonical table, returning it normalized.
+func stateToken(raw string) (string, bool) {
+	if !shipping.IsState(raw) {
+		return "", false
+	}
+	return shipping.NormState(raw), true
+}
+
+// stateTokens validates and normalizes a space-separated set of state codes,
+// dropping anything that is not a known state (an untrusted aspect must not
+// inject arbitrary tokens into the destination filter's search space).
+func stateTokens(raw string) []string {
+	var out []string
+	for _, tok := range strings.Fields(raw) {
+		if st, ok := stateToken(tok); ok {
+			out = append(out, st)
+		}
+	}
+	return out
 }
 
 // deterministicID derives a stable nagus id from source identity + key, with

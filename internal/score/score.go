@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/leftathome/nagus/internal/item"
 )
@@ -51,10 +52,17 @@ type Filter struct {
 	// EqAttr requires string-valued item.Attributes to match exactly. A
 	// required attribute that is missing FAILS the filter with a reason naming
 	// it (same policy as MinAttr/MaxAttr: a missing required signal must be
-	// explainable in the ingestion log, never silently skipped). The wine
-	// bundle uses this to gate on ship_legal_wa == "true" -- a legality
-	// predicate, which is exactly the kind of thing that must fail closed.
+	// explainable in the ingestion log, never silently skipped).
 	EqAttr map[string]string
+
+	// HasToken requires the named attribute -- read as a space-separated
+	// token SET -- to contain the given token (exact string compare; callers
+	// normalize case before building the filter). Missing attribute fails
+	// with a reason naming it, and an empty value contains nothing, so
+	// set-membership predicates built on this fail closed. The wine bundle
+	// uses it to gate on the stamped legal-destination set (ship_legal_to
+	// contains the watch's destination state).
+	HasToken map[string]string
 
 	// MinAttr/MaxAttr bound numeric-valued item.Attributes. Attribute values
 	// are strings in item.Item; each is parsed with strconv.ParseFloat. A
@@ -76,8 +84,8 @@ type Filter struct {
 // so ingestion logs can explain drops without re-deriving the logic.
 //
 // Predicates are checked in a fixed order (category, priced, max price, eq
-// attrs, min attrs, max attrs, condition) so the reason for a given
-// Filter+Item pair is deterministic and stable across runs.
+// attrs, token attrs, min attrs, max attrs, condition) so the reason for a
+// given Filter+Item pair is deterministic and stable across runs.
 func (f Filter) Pass(it item.Item) (bool, string) {
 	if f.Category != "" && it.Category != f.Category {
 		return false, fmt.Sprintf("category %q does not match filter category %q", it.Category, f.Category)
@@ -94,6 +102,9 @@ func (f Filter) Pass(it item.Item) (bool, string) {
 	}
 
 	if ok, reason := checkEq(it, f.EqAttr); !ok {
+		return false, reason
+	}
+	if ok, reason := checkToken(it, f.HasToken); !ok {
 		return false, reason
 	}
 	if ok, reason := checkMin(it, f.MinAttr); !ok {
@@ -127,6 +138,36 @@ func checkEq(it item.Item, eqs map[string]string) (bool, string) {
 		}
 		if got != want {
 			return false, fmt.Sprintf("attribute %q value %q does not equal required %q", name, got, want)
+		}
+	}
+	return true, ""
+}
+
+// checkToken validates every required token-membership predicate in toks, in
+// deterministic (sorted) key order. The attribute value is read as a
+// space-separated token set; missing attributes fail with a reason naming
+// them, and an empty set contains nothing (fail closed).
+func checkToken(it item.Item, toks map[string]string) (bool, string) {
+	keys := make([]string, 0, len(toks))
+	for k := range toks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, name := range keys {
+		want := toks[name]
+		raw, present := it.Attributes[name]
+		if !present {
+			return false, fmt.Sprintf("attribute %q is required (must contain token %q) but missing", name, want)
+		}
+		found := false
+		for _, tok := range strings.Fields(raw) {
+			if tok == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, fmt.Sprintf("attribute %q value %q does not contain required token %q", name, raw, want)
 		}
 	}
 	return true, ""

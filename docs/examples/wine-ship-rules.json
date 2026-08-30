@@ -1,0 +1,9 @@
+{
+  "destinations": {
+    "WA": {
+      "wineryDirect": true,
+      "inStateRetailer": true,
+      "outOfStateRetailer": false
+    }
+  }
+}

@@ -58,12 +58,14 @@ type SourceConfig struct {
 	SKUSuffixes []string `json:"skuSuffixes,omitempty"`
 	MaxPages    int      `json:"maxPages,omitempty"`
 
-	// wine (per-source). WineChannel declares the source's shipping channel
-	// for Washington legality: "wa_retailer" | "winery_direct" |
-	// "out_of_state_retailer". REQUIRED on a wine source -- legality is a
-	// conscious per-source declaration, never a default (see
-	// category.WineChannel).
+	// wine (per-source). WineChannel declares HOW the source ships
+	// ("winery_direct" | "retailer") and State WHERE it ships from (USPS
+	// code, e.g. "WA"). Both are REQUIRED on a wine source -- the
+	// internal/shipping constraint layer derives which destination states
+	// the source may legally reach from this declaration, and legality is a
+	// conscious per-source declaration, never a default.
 	WineChannel string `json:"wineChannel,omitempty"`
+	State       string `json:"state,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`
@@ -88,11 +90,13 @@ type CategoryConfig struct {
 	// wine. MinWineScore hard-filters on the aggregated normalized critic
 	// score; MinWineScoreCount is the valuation's minimum independent-critic
 	// count before flagging value (0 = the default minimum-3 rule);
-	// RequireShipLegalWA drops offers whose source channel cannot legally
-	// ship wine to a WA consumer.
-	MinWineScore       float64 `json:"minWineScore,omitempty"`
-	MinWineScoreCount  int     `json:"minWineScoreCount,omitempty"`
-	RequireShipLegalWA bool    `json:"requireShipLegalWA,omitempty"`
+	// WineShipTo, when set to a USPS state code, drops offers whose source
+	// cannot legally ship wine to a consumer in that state (the destination
+	// is CONFIG, not a hardcoded home state -- set it to a gift recipient's
+	// state to shop for them). Empty = no legality filter.
+	MinWineScore      float64 `json:"minWineScore,omitempty"`
+	MinWineScoreCount int     `json:"minWineScoreCount,omitempty"`
+	WineShipTo        string  `json:"wineShipTo,omitempty"`
 }
 
 // RunConfig is the whole deployment declaration: what to ingest and what to

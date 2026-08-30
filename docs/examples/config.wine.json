@@ -3,7 +3,7 @@
     "wine": {
       "budgetCents": 10000,
       "minWineScore": 92,
-      "requireShipLegalWA": true
+      "wineShipTo": "WA"
     }
   },
   "defaultCategory": "wine",
@@ -13,7 +13,8 @@
       "category": "wine",
       "type": "shopify",
       "baseUrl": "https://example-seattle-wine-shop.test",
-      "wineChannel": "wa_retailer",
+      "wineChannel": "retailer",
+      "state": "WA",
       "intervalMinutes": 360
     },
     {
@@ -22,6 +23,16 @@
       "type": "shopify",
       "baseUrl": "https://example-walla-walla-winery.test",
       "wineChannel": "winery_direct",
+      "state": "WA",
+      "intervalMinutes": 720
+    },
+    {
+      "name": "example-ca-wine-shop",
+      "category": "wine",
+      "type": "shopify",
+      "baseUrl": "https://example-berkeley-wine-shop.test",
+      "wineChannel": "retailer",
+      "state": "CA",
       "intervalMinutes": 720
     }
   ]

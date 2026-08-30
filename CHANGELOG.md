@@ -37,27 +37,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     "Wine Spectator 92", "JR 17.5") parsed into typed scores. The "WA"
     shorthand for The Wine Advocate is deliberately not recognized -- in
     this home market it is Washington state next to a number.
-  - **Washington ship-legality as a fail-closed, per-source declaration.**
-    Out-of-state retailers may not ship wine to WA consumers (SB 5007 died
-    in committee, Jan 2024); wineries with a shipper permit and in-state
-    retailers may. A wine source therefore MUST declare `wineChannel`
-    (`wa_retailer` | `winery_direct` | `out_of_state_retailer`) -- a missing
-    or unknown channel is a startup error, never a default -- and the
-    channel tagger stamps `ship_legal_wa` onto every listing. With
-    `requireShipLegalWA` on, unstamped items are dropped: legality never
-    passes by omission. Out-of-state offers still ingest as informational
-    price signal; they can never surface as actionable.
+  - **`internal/shipping` -- ship-legality as a data-driven CONSTRAINT
+    LAYER, not a hardcoded Washington rule.** US DTC wine shipping law is
+    per-destination-state and per-channel, and the destination is config
+    (the operator's state today, a gift recipient's in CA or FL tomorrow).
+    A wine source declares HOW it ships (`wineChannel`: `winery_direct` |
+    `retailer`) and WHERE from (`state`, USPS code) -- both required, a
+    missing or unknown declaration is a startup error, never a default.
+    `shipping.Rules` maps every destination (50 states + DC) to a policy
+    {wineryDirect, inStateRetailer, outOfStateRetailer}; `DefaultRules` is
+    a documented baseline (winery-direct legal everywhere except MS/UT;
+    in-state retailer delivery everywhere; out-of-state retailer only into
+    a short permitted list -- WA deliberately absent, SB 5007 having died
+    in committee Jan 2024), and an operator overrides any destination from
+    a JSON file merged over the defaults, because these laws churn. The
+    channel tagger stamps each listing's computed legal-destination SET
+    (`ship_legal_to`, tokens validated at extract), so one corpus serves
+    watches for any destination; a surface's `wineShipTo` hard-filters to
+    it. Everything FAILS CLOSED: unknown destination/channel, unstamped
+    item, or empty legal set never passes as legal. Offers that cannot
+    reach the destination still ingest as informational price signal; they
+    can never surface as actionable.
   - `internal/category/wine.go` + CLI wiring: `wine` joins `hdd`/`land` in
-    config.json (`minWineScore`, `minWineScoreCount`, `requireShipLegalWA`,
-    `budgetCents`) and env (`NAGUS_WINE_*`, `NAGUS_LWIN_CSV`). Legacy
-    single-source `ingest -category wine` errors and points at the config
-    path, like land. Shopify storefronts (many WA retailers, wineries, and
-    flash sites) work as wine sources today via the existing connector.
-- **`score.Filter.EqAttr`** -- a generic exact-match attribute predicate
-  (checked between the price bounds and MinAttr, deterministic reason
-  order, missing attribute fails with a reason naming it). The wine bundle
-  uses it to gate on `ship_legal_wa == "true"`; it stays category-agnostic
-  data like every other Filter field.
+    config.json (`minWineScore`, `minWineScoreCount`, `wineShipTo`,
+    `budgetCents`; per-source `wineChannel` + `state`) and env
+    (`NAGUS_WINE_*` incl. `NAGUS_WINE_SHIP_TO` and `NAGUS_WINE_SHIP_RULES`,
+    `NAGUS_LWIN_CSV`). Legacy single-source `ingest -category wine` errors
+    and points at the config path, like land. Shopify storefronts (many
+    retailers, wineries, and flash sites) work as wine sources today via
+    the existing connector.
+- **`score.Filter.EqAttr` and `score.Filter.HasToken`** -- two generic
+  attribute predicates (checked between the price bounds and MinAttr,
+  deterministic reason order, missing attribute fails with a reason naming
+  it). EqAttr requires exact equality; HasToken reads the attribute as a
+  space-separated token SET and requires membership, with an empty set
+  containing nothing -- so set-valued gates fail closed. The wine bundle
+  uses HasToken to gate on the stamped legal-destination set; both stay
+  category-agnostic data like every other Filter field.
 
 - **Inquiries: watches gain a duration and a principal** (nagus-7yq). A watch is
   the spec's *Inquiry* -- a standing want held by a principal -- and it now

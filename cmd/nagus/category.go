@@ -14,6 +14,7 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
+	"github.com/leftathome/nagus/internal/shipping"
 	"github.com/leftathome/nagus/internal/store"
 )
 
@@ -38,14 +39,18 @@ type categoryOpts struct {
 	rentcastKey     string
 	zillapiKey      string
 
-	// wine scoring/legality config (NAGUS_WINE_*); lwinCSV is the optional
-	// local path of the Liv-ex LWIN export (NAGUS_LWIN_CSV) enabling
-	// canonical-identity resolution at extract time.
-	wineBudgetCents    int64
-	wineMinScore       float64
-	wineMinScoreCount  int
-	wineRequireWALegal bool
-	lwinCSV            string
+	// wine scoring/legality config (NAGUS_WINE_*). wineShipTo is the
+	// destination state offers must legally ship to (empty = no legality
+	// filter); wineShipRules optionally names a JSON rules-override file
+	// merged over shipping.DefaultRules; lwinCSV is the optional local path
+	// of the Liv-ex LWIN export (NAGUS_LWIN_CSV) enabling canonical-identity
+	// resolution at extract time.
+	wineBudgetCents   int64
+	wineMinScore      float64
+	wineMinScoreCount int
+	wineShipTo        string
+	wineShipRules     string
+	lwinCSV           string
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
 
@@ -67,11 +72,12 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		ebayClientID:    envOr("NAGUS_EBAY_CLIENT_ID", ""),
 		ebaySecret:      envOr("NAGUS_EBAY_CLIENT_SECRET", ""),
 
-		wineBudgetCents:    envInt64("NAGUS_WINE_BUDGET_CENTS", 0),
-		wineMinScore:       envFloat("NAGUS_WINE_MIN_SCORE", 0),
-		wineMinScoreCount:  int(envInt64("NAGUS_WINE_MIN_SCORE_COUNT", 0)),
-		wineRequireWALegal: envBool("NAGUS_WINE_REQUIRE_WA_LEGAL"),
-		lwinCSV:            envOr("NAGUS_LWIN_CSV", ""),
+		wineBudgetCents:   envInt64("NAGUS_WINE_BUDGET_CENTS", 0),
+		wineMinScore:      envFloat("NAGUS_WINE_MIN_SCORE", 0),
+		wineMinScoreCount: int(envInt64("NAGUS_WINE_MIN_SCORE_COUNT", 0)),
+		wineShipTo:        envOr("NAGUS_WINE_SHIP_TO", ""),
+		wineShipRules:     envOr("NAGUS_WINE_SHIP_RULES", ""),
+		lwinCSV:           envOr("NAGUS_LWIN_CSV", ""),
 	}
 }
 
@@ -108,25 +114,43 @@ func categoryConfigFromOpts(cat string, o categoryOpts) CategoryConfig {
 		cc.BudgetCents = o.wineBudgetCents
 		cc.MinWineScore = o.wineMinScore
 		cc.MinWineScoreCount = o.wineMinScoreCount
-		cc.RequireShipLegalWA = o.wineRequireWALegal
+		cc.WineShipTo = o.wineShipTo
 	}
 	return cc
 }
 
 // wineDepsFrom assembles the wine bundle deps from category config + env
-// opts. The LWIN export is loaded per call, which only happens at startup
-// (one surface + one ingester per wine source); a missing or malformed file
-// is a loud startup error, not a silent identity-less run.
+// opts. The LWIN export and the shipping rules override are loaded per call,
+// which only happens at startup (one surface + one ingester per wine
+// source); a missing or malformed file, or an invalid destination state, is
+// a loud startup error -- a silently-empty legality filter would fail closed
+// into an inexplicably dark surface.
 func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.WineDeps, error) {
+	if cc.WineShipTo != "" && !shipping.IsState(cc.WineShipTo) {
+		return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q is not a USPS state code", cc.WineShipTo)
+	}
 	deps := category.WineDeps{
 		Store: st,
 		Logf:  o.logf,
 		Score: category.WineScoreConfig{
-			BudgetCents:        cc.BudgetCents,
-			MinScore:           cc.MinWineScore,
-			MinScoreCount:      cc.MinWineScoreCount,
-			RequireShipLegalWA: cc.RequireShipLegalWA,
+			BudgetCents:   cc.BudgetCents,
+			MinScore:      cc.MinWineScore,
+			MinScoreCount: cc.MinWineScoreCount,
+			ShipTo:        cc.WineShipTo,
 		},
+	}
+	if o.wineShipRules != "" {
+		f, err := os.Open(o.wineShipRules)
+		if err != nil {
+			return category.WineDeps{}, fmt.Errorf("wine: opening shipping rules override: %w", err)
+		}
+		defer f.Close()
+		override, err := shipping.LoadRules(f)
+		if err != nil {
+			return category.WineDeps{}, fmt.Errorf("wine: loading shipping rules %q: %w", o.wineShipRules, err)
+		}
+		rules := shipping.DefaultRules().Override(override)
+		deps.Ship = &rules
 	}
 	if o.lwinCSV != "" {
 		f, err := os.Open(o.lwinCSV)
@@ -299,9 +323,12 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		deps.Offers = o.offers
 		deps.OfferRetention = offerRetention
 		deps.OfferExpireAfter = expireAfter
-		ing, err := category.NewWineIngester(conn, category.WineChannel(s.WineChannel), deps)
+		ing, err := category.NewWineIngester(conn, shipping.Source{
+			Channel: shipping.Channel(s.WineChannel),
+			State:   s.State,
+		}, deps)
 		if err != nil {
-			return nil, fmt.Errorf("source %q: %w (declare wineChannel on the source; WA shipping legality is a conscious per-source decision)", s.Name, err)
+			return nil, fmt.Errorf("source %q: %w (declare wineChannel and state on the source; shipping legality is a conscious per-source declaration)", s.Name, err)
 		}
 		return ing, nil
 	default:
