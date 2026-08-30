@@ -23,8 +23,8 @@
 # under an arm64 platform declaration -- an index that passes a platform check
 # while being wrong, which is far worse than a red pipeline.
 ARG TARGETARCH
-FROM docker.io/golang:1.26@sha256:dbb10bd1b3400ba0858e2f7c354fd4556b782c187feeff52789d4ee156a84db8 AS build-amd64
-FROM docker.io/golang:1.26@sha256:d86488d9077169d6dd4fa32e954e8b68a41e94e32c0ec3d3fefdcc017ac9a759 AS build-arm64
+FROM docker.io/golang:1.26@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0 AS build-amd64
+FROM docker.io/golang:1.26@sha256:a0c0dd6888e2a1df54a00fcafe855e3035dcf9b5733cdf803d6ccf70a56df809 AS build-arm64
 
 FROM build-${TARGETARCH} AS build
 WORKDIR /src

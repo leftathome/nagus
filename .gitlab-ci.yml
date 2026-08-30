@@ -21,6 +21,7 @@ include:
 
 stages:
   - test
+  - vulncheck
   - build
   - chart
   - release
@@ -47,6 +48,38 @@ cache:
     when: never
   - if: '$CI_COMMIT_BRANCH == "main"'
   - if: '$CI_COMMIT_TAG'
+
+# ---------------------------------------------------------------------------
+# vulncheck -- govulncheck against the Go vulnerability database. A SEPARATE
+# stage on purpose, matching homelab/go-service-template: a new CVE disclosure
+# is then distinguishable at a glance from a broken test, and it fails the
+# pipeline rather than shipping quietly.
+#
+# WHY THIS EXISTS HERE (added 2026-08-19). nagus had no vulncheck at all, and
+# the gap had the most dangerous possible shape: the gates ran on the FLOATING
+# `golang:1.26` (so already 1.26.6) while the Dockerfile pinned 1.26.5 by
+# digest. Green pipelines, shipping a binary built on a stdlib the gates never
+# tested. govulncheck against the pinned builder found 7 vulnerabilities --
+# 6 stdlib, plus GO-2026-5970 (infinite loop in golang.org/x/text) reachable
+# via pgoffer.New -> pgxpool.New -> norm.Form. Fixed in the same commit that
+# added this stage; the gate is what stops it recurring silently.
+#
+# Pinned govulncheck version, matching go-service-kit and the template: an
+# unpinned @latest makes the gate's verdict depend on when it ran.
+# ---------------------------------------------------------------------------
+vulncheck:
+  stage: vulncheck
+  image: golang:1.26
+  before_script:
+    - "go version"
+  script:
+    - "go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./..."
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
 
 # ---------------------------------------------------------------------------
 # test -- the MR/main unit gate (vet + race). Node selector / pod sizing come
