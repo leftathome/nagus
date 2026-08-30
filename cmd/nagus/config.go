@@ -58,6 +58,13 @@ type SourceConfig struct {
 	SKUSuffixes []string `json:"skuSuffixes,omitempty"`
 	MaxPages    int      `json:"maxPages,omitempty"`
 
+	// wine (per-source). WineChannel declares the source's shipping channel
+	// for Washington legality: "wa_retailer" | "winery_direct" |
+	// "out_of_state_retailer". REQUIRED on a wine source -- legality is a
+	// conscious per-source declaration, never a default (see
+	// category.WineChannel).
+	WineChannel string `json:"wineChannel,omitempty"`
+
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`
 }
@@ -77,6 +84,15 @@ type CategoryConfig struct {
 	MinAcreageAcres float64 `json:"minAcreageAcres,omitempty"`
 	MaxAcreageAcres float64 `json:"maxAcreageAcres,omitempty"`
 	BudgetCents     int64   `json:"budgetCents,omitempty"`
+
+	// wine. MinWineScore hard-filters on the aggregated normalized critic
+	// score; MinWineScoreCount is the valuation's minimum independent-critic
+	// count before flagging value (0 = the default minimum-3 rule);
+	// RequireShipLegalWA drops offers whose source channel cannot legally
+	// ship wine to a WA consumer.
+	MinWineScore       float64 `json:"minWineScore,omitempty"`
+	MinWineScoreCount  int     `json:"minWineScoreCount,omitempty"`
+	RequireShipLegalWA bool    `json:"requireShipLegalWA,omitempty"`
 }
 
 // RunConfig is the whole deployment declaration: what to ingest and what to

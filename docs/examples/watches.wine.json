@@ -1,0 +1,20 @@
+{
+  "watches": [
+    {
+      "name": "wa-shippable-92plus-under-100",
+      "category": "wine",
+      "text": "",
+      "limit": 25,
+      "audience": "steve",
+      "strong_verdicts": ["great"]
+    },
+    {
+      "name": "walla-walla-cab",
+      "category": "wine",
+      "text": "cabernet",
+      "limit": 25,
+      "audience": "household",
+      "min_score": 80
+    }
+  ]
+}

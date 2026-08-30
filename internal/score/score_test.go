@@ -191,6 +191,50 @@ func TestFilterPass_MaxAttr(t *testing.T) {
 	}
 }
 
+func TestFilterPass_EqAttr(t *testing.T) {
+	f := Filter{EqAttr: map[string]string{"ship_legal_wa": "true"}}
+
+	legal := baseItem()
+	legal.Attributes["ship_legal_wa"] = "true"
+	if ok, reason := f.Pass(legal); !ok {
+		t.Fatalf("matching eq attribute should pass, got reason %q", reason)
+	}
+
+	illegal := baseItem()
+	illegal.Attributes["ship_legal_wa"] = "false"
+	ok, reason := f.Pass(illegal)
+	if ok {
+		t.Fatalf("mismatched eq attribute should fail")
+	}
+	if !strings.Contains(reason, "ship_legal_wa") || !strings.Contains(reason, "does not equal") {
+		t.Errorf("reason should explain the mismatch, got %q", reason)
+	}
+
+	// A missing required attribute fails CLOSED (legality must never pass by
+	// omission), with a reason naming the attribute.
+	missing := baseItem()
+	ok, reason = f.Pass(missing)
+	if ok {
+		t.Fatalf("missing eq attribute should fail closed")
+	}
+	if !strings.Contains(reason, "ship_legal_wa") || !strings.Contains(reason, "missing") {
+		t.Errorf("reason should explain the missing attribute, got %q", reason)
+	}
+}
+
+func TestFilterPass_EqAttr_DeterministicReasonOrder(t *testing.T) {
+	f := Filter{EqAttr: map[string]string{"b_attr": "x", "a_attr": "y"}}
+	it := baseItem() // has neither
+	_, reason1 := f.Pass(it)
+	_, reason2 := f.Pass(it)
+	if reason1 != reason2 {
+		t.Fatalf("reason should be deterministic, got %q then %q", reason1, reason2)
+	}
+	if !strings.Contains(reason1, "a_attr") {
+		t.Errorf("sorted key order should report a_attr first, got %q", reason1)
+	}
+}
+
 func TestFilterPass_AllowedConditions(t *testing.T) {
 	f := Filter{AllowedConditions: []string{"new", "refurb"}}
 
