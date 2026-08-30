@@ -84,10 +84,22 @@ vulncheck:
 # ---------------------------------------------------------------------------
 # test -- the MR/main unit gate (vet + race). Node selector / pod sizing come
 # from the included homelab/ci-templates global variables.
+#
+# The postgresstore/pgoffer contract tests are gated on
+# NAGUS_TEST_POSTGRES_DSN and skip themselves when it is unset, so without a
+# real Postgres here they ran at 0% coverage. The postgres service below gives
+# them one; GitLab resolves the service hostname as "postgres".
 # ---------------------------------------------------------------------------
 test:
   stage: test
   image: golang:1.26
+  services:
+    - postgres:16-alpine
+  variables:
+    POSTGRES_USER: nagus
+    POSTGRES_PASSWORD: nagus
+    POSTGRES_DB: nagus_test
+    NAGUS_TEST_POSTGRES_DSN: "postgres://nagus:nagus@postgres:5432/nagus_test?sslmode=disable"
   before_script:
     - "go version"
     - "go env GOPATH GOMODCACHE GOCACHE"

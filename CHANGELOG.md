@@ -8,6 +8,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Wine category on a $0/mo data stack** (see
+  `docs/design/2026-08-30-wine-category.md` for the full decision log,
+  including the rejection of the paid Wine-Searcher API and its non-perpetual
+  "free trial"). The third fill of the category bundle abstraction, and it
+  needed exactly one generic-spine change (the `EqAttr` filter predicate
+  below):
+  - `internal/identity/lwin` -- entity resolution to the Creative-Commons
+    LWIN identifier: CSV load of the Liv-ex export, accent-fold/alias
+    normalization, token-blocked token-set-ratio scoring with Jaro-Winkler
+    tiebreak, and confidence routing (auto >= 92 / adjudicate >= 80 /
+    review). Only auto-route matches ever stamp `CanonicalID` (LWIN-11): a
+    wrong canonical identity corrupts every downstream quality join, which
+    is worse than none.
+  - `internal/valuation/wine` -- critic-score normalization (100-point
+    passthrough with plausibility bounds; 20-point Jancis-Robinson-style
+    scores through piecewise-linear anchors, deliberately not linear 5x) and
+    aggregation with per-critic dedupe and the GWS minimum-3 rule (value is
+    never flagged on fewer than 3 independent scores unless the operator
+    lowers the bar). Value comes from a hedonic log-price model with a
+    quadratic score term plus a 90-point superstar indicator -- the premium
+    is non-linear (JWE superstar study; Ali/Lecocq/Visser 2008), so a naive
+    points-per-dollar ratio would misprice both tails. Verdicts are
+    residual-z tiers; default coefficients are documented cold-start priors.
+  - `internal/extract/wine` -- deterministic extractor: vintage, bottle size
+    (750ml default; prices are scaled to 750ml-equivalent before valuation),
+    varietal/colour dictionaries, and critic attributions ("WS 92",
+    "Wine Spectator 92", "JR 17.5") parsed into typed scores. The "WA"
+    shorthand for The Wine Advocate is deliberately not recognized -- in
+    this home market it is Washington state next to a number.
+  - **Washington ship-legality as a fail-closed, per-source declaration.**
+    Out-of-state retailers may not ship wine to WA consumers (SB 5007 died
+    in committee, Jan 2024); wineries with a shipper permit and in-state
+    retailers may. A wine source therefore MUST declare `wineChannel`
+    (`wa_retailer` | `winery_direct` | `out_of_state_retailer`) -- a missing
+    or unknown channel is a startup error, never a default -- and the
+    channel tagger stamps `ship_legal_wa` onto every listing. With
+    `requireShipLegalWA` on, unstamped items are dropped: legality never
+    passes by omission. Out-of-state offers still ingest as informational
+    price signal; they can never surface as actionable.
+  - `internal/category/wine.go` + CLI wiring: `wine` joins `hdd`/`land` in
+    config.json (`minWineScore`, `minWineScoreCount`, `requireShipLegalWA`,
+    `budgetCents`) and env (`NAGUS_WINE_*`, `NAGUS_LWIN_CSV`). Legacy
+    single-source `ingest -category wine` errors and points at the config
+    path, like land. Shopify storefronts (many WA retailers, wineries, and
+    flash sites) work as wine sources today via the existing connector.
+- **`score.Filter.EqAttr`** -- a generic exact-match attribute predicate
+  (checked between the price bounds and MinAttr, deterministic reason
+  order, missing attribute fails with a reason naming it). The wine bundle
+  uses it to gate on `ship_legal_wa == "true"`; it stays category-agnostic
+  data like every other Filter field.
+
 - **Inquiries: watches gain a duration and a principal** (nagus-7yq). A watch is
   the spec's *Inquiry* -- a standing want held by a principal -- and it now
   carries the two things it was missing: `expires_at`, so a want does not search

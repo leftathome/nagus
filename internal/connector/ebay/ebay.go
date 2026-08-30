@@ -151,9 +151,27 @@ type Connector struct {
 	cfg    Config
 	budget *callBudget
 
-	mu          sync.Mutex
-	accessToken string
-	tokenExpiry time.Time
+	mu           sync.Mutex
+	accessToken  string
+	tokenExpiry  time.Time
+	lastComplete bool
+}
+
+// FetchComplete reports whether the most recent Fetch retrieved every item
+// the Browse API reported matching the query, rather than stopping short at
+// Config.Limit with more results still behind it.
+//
+// It exists because CALLERS MUST NOT DRAW ABSENCE CONCLUSIONS FROM A PARTIAL
+// FETCH. "This offer did not appear, so it is gone" is only sound if we
+// actually looked at everything; unlike Shopify's connector, this one issues
+// a single search call capped at Config.Limit rather than walking pages, so
+// a query matching more items than Limit is inherently a partial fetch. After
+// such a page this reports false, and acting on it (expiring offers that
+// merely fell outside the page) would expire live, purchasable listings.
+func (c *Connector) FetchComplete() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastComplete
 }
 
 // NewConnector builds a Connector from cfg, filling in defaults for any
@@ -230,6 +248,16 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			return nil, fmt.Errorf("ebay: search: %w", err)
 		}
 	}
+
+	// The Browse API's reported total is the ONLY signal that this single,
+	// unpaginated call saw everything: total<=0 means eBay did not report a
+	// bound (nothing to compare against, so treat it as complete -- this
+	// matches the connector's prior behavior of trusting whatever came
+	// back), otherwise complete only if the page returned at least that many
+	// summaries.
+	c.mu.Lock()
+	c.lastComplete = resp.Total <= 0 || len(resp.ItemSummaries) >= resp.Total
+	c.mu.Unlock()
 
 	now := c.cfg.Now()
 	// Second-call seller enrichment runs only on the network path (never in the

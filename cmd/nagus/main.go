@@ -75,10 +75,11 @@ usage:
   nagus search -category hdd|land -db nagus.db [-text STR] [-limit 20] [-min-capacity 6] [-offline] [-json]
   nagus serve  -category hdd|land -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-offline]
 
-Categories: hdd ($/TB deal-watch, eBay) and land (structure-first + free gov geo
-enrichment; land scoring/enrichment configured via NAGUS_LAND_* and
-NAGUS_RENTCAST_KEY env). ingest collects + stores; search/serve surface ranked
-candidates read-only (eyes, not hands).
+Categories: hdd ($/TB deal-watch, eBay), land (structure-first + free gov geo
+enrichment; NAGUS_LAND_* and NAGUS_RENTCAST_KEY env), and wine (critic-score
+quality + hedonic value + WA ship-legality; NAGUS_WINE_* and NAGUS_LWIN_CSV
+env). ingest collects + stores; search/serve surface ranked candidates
+read-only (eyes, not hands).
 
 land acquisition (zillapi) is anchored on a bounding box, which these legacy
 single-source flags cannot express, so "ingest -category land" errors and directs
@@ -89,7 +90,7 @@ run "nagus serve -config FILE". land still surfaces normally from stored items.
 
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	cat := fs.String("category", "hdd", "category bundle to ingest (hdd|land)")
+	cat := fs.String("category", "hdd", "category bundle to ingest (hdd|land|wine)")
 	sflags := registerStoreFlags(fs)
 	fixture := fs.String("ebay-fixture", "", "eBay Browse JSON fixture (offline hdd ingest)")
 	clientID := fs.String("client-id", "", "eBay OAuth client id (live hdd ingest)")
@@ -110,6 +111,12 @@ func runIngest(args []string) error {
 	// collected nothing; land still SURFACES from stored items either way.
 	if *cat == "land" {
 		return fmt.Errorf("land ingest is not available from these legacy flags: the land connector (zillapi) needs a bounding box, so configure it as a source in a config.json and run `nagus serve -config ...`; land can still be searched/served from stored items")
+	}
+	// wine ingest likewise: a wine source must declare its shipping channel
+	// (wineChannel) for the WA-legality stamp, which these flags cannot
+	// express -- and defaulting a legality field is exactly the wrong move.
+	if *cat == "wine" {
+		return fmt.Errorf("wine ingest is not available from these legacy flags: a wine source must declare wineChannel (wa_retailer|winery_direct|out_of_state_retailer) in a config.json and run `nagus serve -config ...`; wine can still be searched/served from stored items")
 	}
 
 	sc := SourceConfig{
@@ -193,7 +200,7 @@ var demoReference = category.StaticReference{CentsPerTB: map[string]int64{
 
 func runSearch(args []string) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
-	cat := fs.String("category", "hdd", "category to search (hdd|land)")
+	cat := fs.String("category", "hdd", "category to search (hdd|land|wine)")
 	sflags := registerStoreFlags(fs)
 	text := fs.String("text", "", "case-insensitive text match over title/tokens")
 	minCap := fs.Float64("min-capacity", category.DefaultMinCapacityTB, "hdd hard-filter capacity floor in TB")
@@ -214,12 +221,7 @@ func runSearch(args []string) error {
 	defer closeSt()
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, nil)
 	opts.hddMinCapacity = *minCap
-	cc := CategoryConfig{
-		MinCapacityTB:   *minCap,
-		MinAcreageAcres: opts.landMinAcreage,
-		MaxAcreageAcres: opts.landMaxAcreage,
-		BudgetCents:     opts.landBudgetCents,
-	}
+	cc := categoryConfigFromOpts(*cat, opts)
 	sf, err := buildSurface(*cat, cc, st, opts)
 	if err != nil {
 		return err

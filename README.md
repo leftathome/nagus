@@ -36,6 +36,13 @@ after Craigslist retired that feed. Zillapi bills per RESULT returned, so a land
 source polls daily with a bounded result cap -- see
 `docs/design/2026-07-29-zillapi-land-connector.md`.
 
+A third adapter, **wine**, runs on a $0/month data stack: LWIN (Creative
+Commons) for canonical identity, critic-score normalization + a hedonic
+log-price value model for quality/value, and per-source Washington
+ship-legality as a fail-closed gate (out-of-state retailers may not ship wine
+to WA consumers). See
+[`docs/design/2026-08-30-wine-category.md`](docs/design/2026-08-30-wine-category.md).
+
 ## Design
 
 See [`docs/design/2026-07-01-nagus-design.md`](docs/design/2026-07-01-nagus-design.md)

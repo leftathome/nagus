@@ -74,6 +74,10 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("GroupsByProvisionalKey", func(t *testing.T) { groupsByProvisionalKey(t, newStore(t)) })
 	t.Run("Validation", func(t *testing.T) { validation(t, newStore(t)) })
 	t.Run("FiltersAndOrdering", func(t *testing.T) { filtersAndOrdering(t, newStore(t)) })
+	t.Run("SellerFilter", func(t *testing.T) { sellerFilter(t, newStore(t)) })
+	t.Run("SellerFilterCombinedWithSource", func(t *testing.T) { sellerFilterCombinedWithSource(t, newStore(t)) })
+	t.Run("SellerFilterNoMatchIsEmptyNotError", func(t *testing.T) { sellerFilterNoMatchIsEmptyNotError(t, newStore(t)) })
+	t.Run("SellerFilterIsCaseSensitive", func(t *testing.T) { sellerFilterIsCaseSensitive(t, newStore(t)) })
 	t.Run("AspectsRoundTrip", func(t *testing.T) { aspectsRoundTrip(t, newStore(t)) })
 	t.Run("ConcurrentWritesFromManySources", func(t *testing.T) { concurrentWrites(t, newStore(t)) })
 }
@@ -349,6 +353,98 @@ func filtersAndOrdering(t *testing.T, s offer.Store) {
 	all, _ := s.Query(context.Background(), offer.Query{})
 	if len(all) != 3 || all[0].SourceKey != "k3" {
 		t.Errorf("ordering: want most-recently-seen k3 first, got %d rows", len(all))
+	}
+}
+
+func sellerFilter(t *testing.T, s offer.Store) {
+	a1 := Offer("shopify:a", "k1", 100, T0)
+	a1.Seller = "vendor-a"
+	a2 := Offer("shopify:a", "k2", 100, T1)
+	a2.Seller = "vendor-a"
+	b1 := Offer("shopify:b", "k3", 100, T2)
+	b1.Seller = "vendor-b"
+	put(t, s, a1)
+	put(t, s, a2)
+	put(t, s, b1)
+
+	got, err := s.Query(context.Background(), offer.Query{Seller: "vendor-a"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Seller filter returned %d, want exactly vendor-a's 2 offers", len(got))
+	}
+	for _, o := range got {
+		if o.Seller != "vendor-a" {
+			t.Errorf("Seller filter leaked offer from %q", o.Seller)
+		}
+	}
+	// Ordering still holds under the filter: most-recently-seen first, as in
+	// FiltersAndOrdering.
+	if got[0].SourceKey != "k2" || got[1].SourceKey != "k1" {
+		t.Errorf("Seller filter ordering = [%s, %s], want [k2, k1]", got[0].SourceKey, got[1].SourceKey)
+	}
+}
+
+// Seller combines with another filter as a conjunction (AND), not an OR: a
+// matching seller at the wrong source, or the wrong seller at the right
+// source, must both be excluded.
+func sellerFilterCombinedWithSource(t *testing.T, s offer.Store) {
+	a := Offer("shopify:a", "k1", 100, T0)
+	a.Seller = "vendor-a"
+	sameSellerOtherSource := Offer("shopify:b", "k2", 100, T1)
+	sameSellerOtherSource.Seller = "vendor-a"
+	sameSourceOtherSeller := Offer("shopify:a", "k3", 100, T2)
+	sameSourceOtherSeller.Seller = "vendor-c"
+	put(t, s, a)
+	put(t, s, sameSellerOtherSource)
+	put(t, s, sameSourceOtherSeller)
+
+	got, err := s.Query(context.Background(), offer.Query{SourceID: "shopify:a", Seller: "vendor-a"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 1 || got[0].SourceKey != "k1" {
+		t.Fatalf("SourceID+Seller conjunction returned %d rows, want exactly k1", len(got))
+	}
+}
+
+func sellerFilterNoMatchIsEmptyNotError(t *testing.T, s offer.Store) {
+	put(t, s, Offer("shopify:a", "k1", 100, T0))
+	got, err := s.Query(context.Background(), offer.Query{Seller: "no-such-vendor"})
+	if err != nil {
+		t.Fatalf("Query: %v, want nil error for a non-matching seller", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Query returned %d rows for a non-matching seller, want 0", len(got))
+	}
+}
+
+// Query.Seller's doc comment ("Seller limits to one vendor") does not say
+// whether matching is case-insensitive. This pins the actual contract: it is
+// exact-match. Both the reference MemoryStore (Go string equality) and
+// sqliteoffer (`seller = ?` under SQLite's default BINARY collation) already
+// compare bytes exactly, so this nails that behavior down rather than
+// changing it.
+func sellerFilterIsCaseSensitive(t *testing.T, s offer.Store) {
+	o := Offer("shopify:a", "k1", 100, T0)
+	o.Seller = "Vendor-X"
+	put(t, s, o)
+
+	got, err := s.Query(context.Background(), offer.Query{Seller: "vendor-x"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Seller filter matched case-insensitively (%d rows), want 0 -- Seller is exact-match", len(got))
+	}
+
+	got, err = s.Query(context.Background(), offer.Query{Seller: "Vendor-X"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("exact-match Seller query returned %d, want 1", len(got))
 	}
 }
 

@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
+	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -16,7 +18,7 @@ import (
 )
 
 // supportedCategory reports whether a category bundle is wired into the CLI.
-func supportedCategory(cat string) bool { return cat == "hdd" || cat == "land" }
+func supportedCategory(cat string) bool { return cat == "hdd" || cat == "land" || cat == "wine" }
 
 // categoryOpts is the per-category runtime config. hdd fields come from the
 // -offline flag; land scoring/enrichment config comes from env (NAGUS_LAND_*,
@@ -35,6 +37,15 @@ type categoryOpts struct {
 	landMaxAcreage  float64
 	rentcastKey     string
 	zillapiKey      string
+
+	// wine scoring/legality config (NAGUS_WINE_*); lwinCSV is the optional
+	// local path of the Liv-ex LWIN export (NAGUS_LWIN_CSV) enabling
+	// canonical-identity resolution at extract time.
+	wineBudgetCents    int64
+	wineMinScore       float64
+	wineMinScoreCount  int
+	wineRequireWALegal bool
+	lwinCSV            string
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
 
@@ -55,6 +66,12 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		zillapiKey:      envOr("NAGUS_ZILLAPI_KEY", ""),
 		ebayClientID:    envOr("NAGUS_EBAY_CLIENT_ID", ""),
 		ebaySecret:      envOr("NAGUS_EBAY_CLIENT_SECRET", ""),
+
+		wineBudgetCents:    envInt64("NAGUS_WINE_BUDGET_CENTS", 0),
+		wineMinScore:       envFloat("NAGUS_WINE_MIN_SCORE", 0),
+		wineMinScoreCount:  int(envInt64("NAGUS_WINE_MIN_SCORE_COUNT", 0)),
+		wineRequireWALegal: envBool("NAGUS_WINE_REQUIRE_WA_LEGAL"),
+		lwinCSV:            envOr("NAGUS_LWIN_CSV", ""),
 	}
 }
 
@@ -87,8 +104,43 @@ func categoryConfigFromOpts(cat string, o categoryOpts) CategoryConfig {
 		cc.MinAcreageAcres = o.landMinAcreage
 		cc.MaxAcreageAcres = o.landMaxAcreage
 		cc.BudgetCents = o.landBudgetCents
+	case "wine":
+		cc.BudgetCents = o.wineBudgetCents
+		cc.MinWineScore = o.wineMinScore
+		cc.MinWineScoreCount = o.wineMinScoreCount
+		cc.RequireShipLegalWA = o.wineRequireWALegal
 	}
 	return cc
+}
+
+// wineDepsFrom assembles the wine bundle deps from category config + env
+// opts. The LWIN export is loaded per call, which only happens at startup
+// (one surface + one ingester per wine source); a missing or malformed file
+// is a loud startup error, not a silent identity-less run.
+func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.WineDeps, error) {
+	deps := category.WineDeps{
+		Store: st,
+		Logf:  o.logf,
+		Score: category.WineScoreConfig{
+			BudgetCents:        cc.BudgetCents,
+			MinScore:           cc.MinWineScore,
+			MinScoreCount:      cc.MinWineScoreCount,
+			RequireShipLegalWA: cc.RequireShipLegalWA,
+		},
+	}
+	if o.lwinCSV != "" {
+		f, err := os.Open(o.lwinCSV)
+		if err != nil {
+			return category.WineDeps{}, fmt.Errorf("wine: opening LWIN export: %w", err)
+		}
+		defer f.Close()
+		db, err := lwin.LoadCSV(f)
+		if err != nil {
+			return category.WineDeps{}, fmt.Errorf("wine: loading LWIN export %q: %w", o.lwinCSV, err)
+		}
+		deps.LWIN = &lwin.Resolver{DB: db}
+	}
+	return deps, nil
 }
 
 // buildConnectorForSource builds the collection connector for one source by type.
@@ -238,6 +290,20 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		}), nil
+	case "wine":
+		deps, err := wineDepsFrom(cc, st, o)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
+		}
+		deps.StaleAfter = staleAfter
+		deps.Offers = o.offers
+		deps.OfferRetention = offerRetention
+		deps.OfferExpireAfter = expireAfter
+		ing, err := category.NewWineIngester(conn, category.WineChannel(s.WineChannel), deps)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w (declare wineChannel on the source; WA shipping legality is a conscious per-source decision)", s.Name, err)
+		}
+		return ing, nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 	}
@@ -261,6 +327,12 @@ func buildSurface(cat string, cc CategoryConfig, st store.Store, o categoryOpts)
 			deps.Parcel = parcel.NewRentcastProvider(o.http, o.rentcastKey)
 		}
 		return category.NewLandSurface(deps), nil
+	case "wine":
+		deps, err := wineDepsFrom(cc, st, o)
+		if err != nil {
+			return nil, err
+		}
+		return category.NewWineSurface(deps), nil
 	default:
 		return nil, fmt.Errorf("unsupported category %q", cat)
 	}

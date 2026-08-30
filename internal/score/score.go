@@ -48,6 +48,14 @@ type Filter struct {
 	// its own -- pair with RequirePriced to also reject unpriced items.
 	MaxPriceCents int64
 
+	// EqAttr requires string-valued item.Attributes to match exactly. A
+	// required attribute that is missing FAILS the filter with a reason naming
+	// it (same policy as MinAttr/MaxAttr: a missing required signal must be
+	// explainable in the ingestion log, never silently skipped). The wine
+	// bundle uses this to gate on ship_legal_wa == "true" -- a legality
+	// predicate, which is exactly the kind of thing that must fail closed.
+	EqAttr map[string]string
+
 	// MinAttr/MaxAttr bound numeric-valued item.Attributes. Attribute values
 	// are strings in item.Item; each is parsed with strconv.ParseFloat. A
 	// required attribute that is missing, or present but not parseable as a
@@ -67,9 +75,9 @@ type Filter struct {
 // short, human-readable reason identifying which predicate rejected the item,
 // so ingestion logs can explain drops without re-deriving the logic.
 //
-// Predicates are checked in a fixed order (category, priced, max price, min
-// attrs, max attrs, condition) so the reason for a given Filter+Item pair is
-// deterministic and stable across runs.
+// Predicates are checked in a fixed order (category, priced, max price, eq
+// attrs, min attrs, max attrs, condition) so the reason for a given
+// Filter+Item pair is deterministic and stable across runs.
 func (f Filter) Pass(it item.Item) (bool, string) {
 	if f.Category != "" && it.Category != f.Category {
 		return false, fmt.Sprintf("category %q does not match filter category %q", it.Category, f.Category)
@@ -85,6 +93,9 @@ func (f Filter) Pass(it item.Item) (bool, string) {
 		return false, fmt.Sprintf("price %d cents exceeds max %d cents", it.PriceCents, f.MaxPriceCents)
 	}
 
+	if ok, reason := checkEq(it, f.EqAttr); !ok {
+		return false, reason
+	}
 	if ok, reason := checkMin(it, f.MinAttr); !ok {
 		return false, reason
 	}
@@ -96,6 +107,28 @@ func (f Filter) Pass(it item.Item) (bool, string) {
 		return false, fmt.Sprintf("condition %q not in allowed list %v", it.Condition, f.AllowedConditions)
 	}
 
+	return true, ""
+}
+
+// checkEq validates every required exact-match attribute in eqs, in
+// deterministic (sorted) key order so the reason string is stable when
+// multiple attributes mismatch.
+func checkEq(it item.Item, eqs map[string]string) (bool, string) {
+	keys := make([]string, 0, len(eqs))
+	for k := range eqs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, name := range keys {
+		want := eqs[name]
+		got, present := it.Attributes[name]
+		if !present {
+			return false, fmt.Sprintf("attribute %q is required (must equal %q) but missing", name, want)
+		}
+		if got != want {
+			return false, fmt.Sprintf("attribute %q value %q does not equal required %q", name, got, want)
+		}
+	}
 	return true, ""
 }
 
