@@ -22,6 +22,24 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # The postgresstore/pgoffer contract tests are gated on
+    # NAGUS_TEST_POSTGRES_DSN and skip themselves when it is unset, so without
+    # a real Postgres here they ran at 0% coverage. This service container
+    # gives them one.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nagus
+          POSTGRES_PASSWORD: nagus
+          POSTGRES_DB: nagus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -36,6 +54,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
+        env:
+          NAGUS_TEST_POSTGRES_DSN: postgres://nagus:nagus@localhost:5432/nagus_test?sslmode=disable
         run: go test ./... -count=1 -race
 
   build:
