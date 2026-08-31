@@ -27,6 +27,22 @@ stages:
   - release
 
 variables:
+  # The Go toolchain for the GATES (test + vulncheck). Pinned to an explicit
+  # patch version, and it MUST equal the version the Dockerfile's digest-pinned
+  # builder resolves to -- golang:1.26.6 amd64 is
+  # sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0,
+  # which is exactly the Dockerfile's build-amd64 pin. Bump both together.
+  #
+  # WHY PINNED (nagus-ghb, 2026-08-30). This was the floating tag `golang:1.26`,
+  # and a floating tag does NOT mean current: the GitLab Kubernetes executor logs
+  # "Using effective pull policy of []", so a node that cached golang:1.26 months
+  # ago keeps serving it. The gates were measured running go1.26.4 while the
+  # shipped image built on 1.26.6 -- the gates tested an OLDER stdlib than the
+  # artifact. govulncheck then failed main for 11 days on seven stdlib CVEs that
+  # were already fixed in the binary we ship. Same reasoning as the pinned
+  # govulncheck version below: a gate whose verdict depends on what a node
+  # happened to cache is not a gate.
+  GO_IMAGE: "golang:1.26.6"
   GOPATH: "$CI_PROJECT_DIR/.cache/go"
   GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
   GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
@@ -43,6 +59,41 @@ cache:
 # Build/publish only on main and tags. The leading never-guard keeps scheduled
 # (nightly) or manual (web) pipelines from rebuilding on a main ref -- matches
 # glovebox even though nagus has no scheduled pipeline yet.
+# Retry policy (nagus-sc5, 2026-08-30). Pipeline #2203 failed build-arm64 with
+# "fatal: unable to access 'https://gitlab.orac.local/...': The requested URL
+# returned error: 500" -- a transient 500 from GitLab itself during get_sources.
+# It never reached kaniko. One infrastructure hiccup reddened the pipeline and
+# skipped the downstream build/chart jobs, and because it was indistinguishable
+# at a glance from a real break, main sat red for 11 days.
+#
+# TWO POLICIES ON PURPOSE, because retrying is not free of risk:
+#   *infra_retry  -- infrastructure classes only. Safe everywhere: none of these
+#                    can be caused by the code under test.
+#   *build_retry  -- adds script_failure, for the image-build legs ONLY. A
+#                    get_sources clone failure surfaces as script_failure, so
+#                    excluding it would not have caught the actual incident.
+# The gates (test, vulncheck) deliberately get *infra_retry and NOT
+# script_failure: a failing test or a real CVE must not be re-rolled until it
+# passes. That would be exactly the "failure looks like success" pattern this
+# repo keeps getting bitten by. A genuinely broken build still fails after its
+# retries -- retry delays the report, it never suppresses it.
+.infra_retry: &infra_retry
+  max: 2
+  when:
+    - runner_system_failure
+    - stuck_or_timeout_failure
+    - api_failure
+    - scheduler_failure
+
+.build_retry: &build_retry
+  max: 2
+  when:
+    - runner_system_failure
+    - stuck_or_timeout_failure
+    - api_failure
+    - scheduler_failure
+    - script_failure
+
 .build_rules: &build_rules
   - if: '$CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web"'
     when: never
@@ -56,20 +107,35 @@ cache:
 # pipeline rather than shipping quietly.
 #
 # WHY THIS EXISTS HERE (added 2026-08-19). nagus had no vulncheck at all, and
-# the gap had the most dangerous possible shape: the gates ran on the FLOATING
-# `golang:1.26` (so already 1.26.6) while the Dockerfile pinned 1.26.5 by
-# digest. Green pipelines, shipping a binary built on a stdlib the gates never
-# tested. govulncheck against the pinned builder found 7 vulnerabilities --
-# 6 stdlib, plus GO-2026-5970 (infinite loop in golang.org/x/text) reachable
-# via pgoffer.New -> pgxpool.New -> norm.Form. Fixed in the same commit that
-# added this stage; the gate is what stops it recurring silently.
+# the gates could disagree with the artifact about which stdlib was in play.
+# govulncheck against the pinned builder found 7 vulnerabilities -- 6 stdlib,
+# plus GO-2026-5970 (infinite loop in golang.org/x/text) reachable via
+# pgoffer.New -> pgxpool.New -> norm.Form. Fixed in the same commit that added
+# this stage; the gate is what stops it recurring silently.
+#
+# CORRECTION (2026-08-30, nagus-ghb). This comment used to claim the skew ran
+# one way -- that the gates were on a floating tag "so already 1.26.6" while the
+# Dockerfile pinned 1.26.5. That was backwards, and it kept main red for 11 days
+# because the failure was read as a real CVE report. Measured: the gates were
+# running go1.26.4 (pipeline #2275 job 19027 printed it) while the Dockerfile's
+# digest builds 1.26.6. The gates were OLDER than the artifact, so govulncheck
+# was reporting stdlib CVEs -- "Found in: crypto/tls@go1.26.4, Fixed in:
+# go1.26.5" -- that are absent from the binary we actually ship. A floating tag
+# is not a version: with the k8s executor's default pull policy, whatever the
+# node cached is what you get. Hence GO_IMAGE is pinned at the top of this file
+# and must be bumped together with the Dockerfile's builder digests.
+#
+# The lesson generalizes: a gate is only evidence if it runs against the thing
+# that ships. Compare the repo's other traps in CLAUDE.md -- each one is a case
+# of a green signal that was measuring the wrong object.
 #
 # Pinned govulncheck version, matching go-service-kit and the template: an
 # unpinned @latest makes the gate's verdict depend on when it ran.
 # ---------------------------------------------------------------------------
 vulncheck:
   stage: vulncheck
-  image: golang:1.26
+  image: $GO_IMAGE
+  retry: *infra_retry
   before_script:
     - "go version"
   script:
@@ -92,7 +158,8 @@ vulncheck:
 # ---------------------------------------------------------------------------
 test:
   stage: test
-  image: golang:1.26
+  image: $GO_IMAGE
+  retry: *infra_retry
   services:
     - postgres:16-alpine
   variables:
@@ -136,6 +203,7 @@ build-amd64:
   extends: .kaniko-build-amd64
   stage: build
   needs: ["test"]
+  retry: *build_retry
   rules: *build_rules
   variables:
     IMAGE: nagus
@@ -145,6 +213,7 @@ build-arm64:
   extends: .kaniko-build-arm64
   stage: build
   needs: ["test"]
+  retry: *build_retry
   rules: *build_rules
   variables:
     IMAGE: nagus
