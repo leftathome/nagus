@@ -3,7 +3,7 @@ package category
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	extwine "github.com/leftathome/nagus/internal/extract/wine"
@@ -14,6 +14,7 @@ import (
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
+	"github.com/leftathome/nagus/internal/shipping"
 	"github.com/leftathome/nagus/internal/store"
 	valwine "github.com/leftathome/nagus/internal/valuation/wine"
 )
@@ -22,70 +23,35 @@ import (
 // QUALITY-RELATIVE-TO-PRICE: critic attributions parsed at extract time are
 // normalized onto a common 100-point scale, and a hedonic log-price model
 // places each listing's price against its quality cohort -- negative residual
-// = cheap for the quality. Washington shipping legality is a first-class,
-// fail-closed gate (see WineChannel): an offer that cannot legally ship to a
-// WA consumer must never be surfaced as actionable.
+// = cheap for the quality. Shipping legality is a first-class, fail-closed
+// CONSTRAINT LAYER (internal/shipping), not a hardcoded rule for any one
+// market: each source declares its channel + origin JURISDICTION ("US-WA",
+// "FR", "CA-BC"), the data-driven rules table computes which destinations it
+// may legally ship to anywhere in the world, and a surface configured with a
+// destination (ShipTo -- the operator's own jurisdiction, or a gift
+// recipient's) hard-filters to offers legal for THAT destination. An offer
+// that cannot legally ship to the destination must never surface as
+// actionable.
 
-// WineChannel classifies a wine source's shipping channel for Washington
-// legality. This is a property of the SOURCE (who ships, from where, under
-// what license), not derivable from listing text -- so it is declared in the
-// source config and stamped onto every listing by TagWineChannel.
-//
-// The legal background (RCW 66.20): out-of-state WINERIES holding a WA wine
-// shipper permit may ship to WA consumers; IN-STATE licensed retailers may
-// ship/deliver within WA; out-of-state RETAILERS may NOT (SB 5007, which
-// would have created such a permit, died in committee Jan 2024). nagus only
-// surfaces -- it never buys -- but surfacing an un-shippable offer as
-// actionable would be a standing footgun, so legality is carried on every
-// item and the filter can hard-require it.
-type WineChannel string
-
-const (
-	// WineChannelWARetailer: an in-state (WA) licensed retailer. Legal.
-	WineChannelWARetailer WineChannel = "wa_retailer"
-	// WineChannelWineryDirect: a winery shipping under a WA wine shipper
-	// permit (in- or out-of-state). Legal -- verify the permit per source
-	// before enabling it (the permit is the source's, not nagus's, problem;
-	// the config declaration records the operator's verification).
-	WineChannelWineryDirect WineChannel = "winery_direct"
-	// WineChannelOutOfStateRetailer: an out-of-state retailer. NOT legal to
-	// ship to WA consumers; offers remain informational-only.
-	WineChannelOutOfStateRetailer WineChannel = "out_of_state_retailer"
-)
-
-// ShipLegalWA reports whether this channel may legally ship wine to a WA
-// consumer. Unknown channels are illegal by construction (fail closed).
-func (c WineChannel) ShipLegalWA() bool {
-	switch c {
-	case WineChannelWARetailer, WineChannelWineryDirect:
-		return true
-	}
-	return false
-}
-
-// Valid reports whether c is a declared channel value.
-func (c WineChannel) Valid() bool {
-	switch c {
-	case WineChannelWARetailer, WineChannelWineryDirect, WineChannelOutOfStateRetailer:
-		return true
-	}
-	return false
-}
-
-// channelTagger wraps a connector and stamps the source's wine channel and
-// its derived WA-legality onto every Raw's aspects, where the wine extractor
-// lifts them into typed attributes. Stamping at the connector seam keeps the
-// extractor source-agnostic and makes the legality provenance auditable per
-// listing.
+// channelTagger wraps a connector and stamps the source's shipping
+// declaration (channel + origin jurisdiction) and its computed legal-destination set
+// onto every Raw's aspects, where the wine extractor lifts them into typed
+// attributes. Stamping at the connector seam keeps the extractor
+// source-agnostic and makes the legality provenance auditable per listing.
+// The whole destination SET is stamped (not one destination's boolean) so a
+// single ingested corpus serves watches for any destination; a rules-table
+// change converges on the next poll's re-stamp.
 type channelTagger struct {
-	inner   listing.Connector
-	channel WineChannel
+	inner listing.Connector
+	src   shipping.Source
+	rules shipping.Rules
 }
 
 // TagWineChannel wraps conn so every listing it emits carries the source's
-// declared channel and WA ship-legality.
-func TagWineChannel(conn listing.Connector, channel WineChannel) listing.Connector {
-	return &channelTagger{inner: conn, channel: channel}
+// declared channel, origin jurisdiction, and the destination jurisdictions it
+// may legally ship to under rules.
+func TagWineChannel(conn listing.Connector, src shipping.Source, rules shipping.Rules) listing.Connector {
+	return &channelTagger{inner: conn, src: src, rules: rules}
 }
 
 func (t *channelTagger) SourceID() string { return t.inner.SourceID() }
@@ -95,12 +61,14 @@ func (t *channelTagger) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	if err != nil {
 		return nil, err
 	}
+	legalTo := strings.Join(t.rules.LegalDestinations(t.src), " ")
 	for i := range raws {
 		if raws[i].Aspects == nil {
 			raws[i].Aspects = map[string]string{}
 		}
-		raws[i].Aspects["wine_channel"] = string(t.channel)
-		raws[i].Aspects["ship_legal_wa"] = strconv.FormatBool(t.channel.ShipLegalWA())
+		raws[i].Aspects["wine_channel"] = string(t.src.Channel)
+		raws[i].Aspects["source_origin"] = t.src.Origin.Code()
+		raws[i].Aspects["ship_legal_to"] = legalTo
 	}
 	return raws, nil
 }
@@ -121,10 +89,14 @@ type WineScoreConfig struct {
 	// rule (never flag a deal on one critic's opinion). Lowering it is an
 	// explicit operator decision.
 	MinScoreCount int
-	// RequireShipLegalWA, when true, hard-filters to offers whose source
-	// channel may legally ship to a WA consumer (fail closed: unstamped
-	// items are dropped).
-	RequireShipLegalWA bool
+	// ShipTo, when set to a jurisdiction code ("US-WA", "FR", "CA-BC"),
+	// hard-filters to offers whose source may legally ship wine to a consumer
+	// THERE (per the shipping rules the items were stamped with). It is the
+	// buyer's jurisdiction, not the operator's home: set it to a gift
+	// recipient's to shop for them. Fail closed: items with no stamped
+	// legal-destination set are dropped. Empty = no legality filter (every
+	// offer is informational).
+	ShipTo string
 }
 
 // WineDeps are the injectable dependencies of the wine bundle.
@@ -138,6 +110,16 @@ type WineDeps struct {
 	// Model overrides the hedonic value model; nil = valwine.DefaultModel
 	// (the documented cold-start bootstrap priors).
 	Model *valwine.HedonicModel
+	// Rates converts a listing's currency into the model's (see
+	// valwine.Valuer.Rates). Without a rate, a foreign-currency listing is
+	// reported unplaceable rather than mispriced -- which matters as soon as
+	// sources are international.
+	Rates map[string]float64
+	// Ship is the shipping-legality rules table used to stamp each source's
+	// legal destinations at ingest. Nil = shipping.DefaultRules (the
+	// documented baseline); inject an operator override (DefaultRules +
+	// LoadRules + Override) when a destination's law has drifted.
+	Ship  *shipping.Rules
 	Score WineScoreConfig
 	Logf  func(format string, args ...any)
 	// --- per-source retention (same contract as the other bundles) ---
@@ -160,8 +142,12 @@ func WineFilter(cfg WineScoreConfig) score.Filter {
 	if cfg.MinScore > 0 {
 		f.MinAttr = map[string]float64{"wine_score": cfg.MinScore}
 	}
-	if cfg.RequireShipLegalWA {
-		f.EqAttr = map[string]string{"ship_legal_wa": "true"}
+	if cfg.ShipTo != "" {
+		// An unparseable destination normalizes to a token nothing can carry,
+		// so the filter surfaces nothing rather than everything. Config paths
+		// reject it at startup (Rules.Modeled) so it never gets this far.
+		dest, _ := shipping.NormJurisdiction(cfg.ShipTo)
+		f.HasToken = map[string]string{"ship_legal_to": dest}
 	}
 	return f
 }
@@ -169,14 +155,14 @@ func WineFilter(cfg WineScoreConfig) score.Filter {
 // NewWineSurface builds the wine surface (read half): hard-filter + hedonic
 // quality/value scoring.
 func NewWineSurface(deps WineDeps) *pipeline.Surface {
-	valuer := valwine.Valuer{Model: deps.Model, MinScores: deps.Score.MinScoreCount}
+	valuer := valwine.Valuer{Model: deps.Model, MinScores: deps.Score.MinScoreCount, Rates: deps.Rates}
 	valuate := func(_ context.Context, it item.Item) (score.DealSignal, error) {
 		wineScore, _ := parseFloatAttr(it, "wine_score")
 		scoreCount := 0
 		if n, ok := parseFloatAttr(it, "wine_score_count"); ok {
 			scoreCount = int(n)
 		}
-		val, err := valuer.Value(wineScore, scoreCount, price750Equivalent(it))
+		val, err := valuer.Value(wineScore, scoreCount, price750Equivalent(it), it.Currency)
 		if err != nil {
 			return score.DealSignal{}, err
 		}
@@ -194,6 +180,15 @@ func NewWineSurface(deps WineDeps) *pipeline.Surface {
 	}
 }
 
+// shipRules resolves the deps' rules table, defaulting to the documented
+// baseline.
+func (d WineDeps) shipRules() shipping.Rules {
+	if d.Ship != nil {
+		return *d.Ship
+	}
+	return shipping.DefaultRules()
+}
+
 // price750Equivalent scales the listing price to a standard-bottle
 // equivalent so a magnum is not flagged "expensive for the quality" (the
 // hedonic model predicts 750ml prices). A missing/invalid bottle_ml is
@@ -206,17 +201,16 @@ func price750Equivalent(it item.Item) int64 {
 	return int64(float64(it.PriceCents) * extwine.DefaultBottleML / ml)
 }
 
-// NewWineIngester builds the wine ingest half for one source connector.
-// channel is the source's declared shipping channel; it must be a Valid
-// WineChannel (legality must be a conscious per-source declaration, so an
-// unknown value is a startup error, not a default).
-func NewWineIngester(conn listing.Connector, channel WineChannel, deps WineDeps) (*pipeline.Ingester, error) {
-	if !channel.Valid() {
-		return nil, fmt.Errorf("wine: unknown channel %q (want %s|%s|%s)",
-			channel, WineChannelWARetailer, WineChannelWineryDirect, WineChannelOutOfStateRetailer)
+// NewWineIngester builds the wine ingest half for one source connector. src
+// is the source's shipping declaration (channel + origin jurisdiction); it
+// must validate (legality must be a conscious per-source declaration, so an
+// unknown channel or a malformed origin is a startup error, not a default).
+func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps) (*pipeline.Ingester, error) {
+	if err := src.Validate(); err != nil {
+		return nil, fmt.Errorf("wine: %w", err)
 	}
 	return &pipeline.Ingester{
-		Connector:        TagWineChannel(conn, channel),
+		Connector:        TagWineChannel(conn, src, deps.shipRules()),
 		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(wine)"},
 		Extractor:        &extwine.Extractor{Resolver: deps.LWIN},
 		Store:            deps.Store,

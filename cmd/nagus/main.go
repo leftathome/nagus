@@ -77,9 +77,11 @@ usage:
 
 Categories: hdd ($/TB deal-watch, eBay), land (structure-first + free gov geo
 enrichment; NAGUS_LAND_* and NAGUS_RENTCAST_KEY env), and wine (critic-score
-quality + hedonic value + WA ship-legality; NAGUS_WINE_* and NAGUS_LWIN_CSV
-env). ingest collects + stores; search/serve surface ranked candidates
-read-only (eyes, not hands).
+quality + hedonic value + per-destination ship-legality worldwide;
+NAGUS_WINE_* incl. NAGUS_WINE_SHIP_TO (an ISO 3166 jurisdiction such as
+US-WA, CA-BC or FR), NAGUS_WINE_SHIP_RULES, and NAGUS_LWIN_CSV env). ingest
+collects + stores; search/serve surface ranked candidates read-only (eyes,
+not hands).
 
 land acquisition (zillapi) is anchored on a bounding box, which these legacy
 single-source flags cannot express, so "ingest -category land" errors and directs
@@ -113,10 +115,11 @@ func runIngest(args []string) error {
 		return fmt.Errorf("land ingest is not available from these legacy flags: the land connector (zillapi) needs a bounding box, so configure it as a source in a config.json and run `nagus serve -config ...`; land can still be searched/served from stored items")
 	}
 	// wine ingest likewise: a wine source must declare its shipping channel
-	// (wineChannel) for the WA-legality stamp, which these flags cannot
-	// express -- and defaulting a legality field is exactly the wrong move.
+	// and origin jurisdiction for the legal-destination stamp, which these
+	// flags cannot express -- and defaulting a legality field is exactly the
+	// wrong move.
 	if *cat == "wine" {
-		return fmt.Errorf("wine ingest is not available from these legacy flags: a wine source must declare wineChannel (wa_retailer|winery_direct|out_of_state_retailer) in a config.json and run `nagus serve -config ...`; wine can still be searched/served from stored items")
+		return fmt.Errorf("wine ingest is not available from these legacy flags: a wine source must declare wineChannel (producer|retailer) and origin (an ISO 3166 jurisdiction, e.g. US-WA or FR) in a config.json and run `nagus serve -config ...`; wine can still be searched/served from stored items")
 	}
 
 	sc := SourceConfig{

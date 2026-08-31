@@ -5,7 +5,8 @@
 - **Implements:** the wine category bundle (`internal/category/wine.go`), the
   LWIN identity resolver (`internal/identity/lwin`), critic-score
   normalization + hedonic value (`internal/valuation/wine`), the wine
-  extractor (`internal/extract/wine`), and the WA ship-legality model.
+  extractor (`internal/extract/wine`), and the per-jurisdiction
+  ship-legality constraint layer (`internal/shipping`).
 - **Parent:** `2026-07-01-nagus-design.md` (the spine, category = plugin
   bundle). Read that first; this document only fills the wine bundle and
   records the source decisions.
@@ -33,49 +34,101 @@ wanting a one-off aggregated look-up uses the website by hand.
 | Quality (crowd + critics) | **CellarTracker** `xlquery.asp` export | free account, documented personal export | Poll daily at most; use the maintained `cellartracker` wrapper semantics (User/Password/Format/Table params). |
 | Quality (per-listing) | **Retailer-published critic scores** ("WS 92", "JS 94") | parsed from the offer fetch itself | Implemented in this slice: deterministic regex first; the local-LLM structuring fallback is a follow-on. |
 | Cold-start value prior | Kaggle Wine Enthusiast 130k reviews | free, static (~2017) | Fits the hedonic prior offline; the UCI "Wine Quality" physicochemical set is NOT a quality signal -- do not use it. |
-| Offers | WA retailers / winery-direct / flash sites on **Shopify** (`products.json`), Total Wine + Wine.com JSON-LD, Wine.com Rakuten feed | free; per-site verification required | The existing shopify connector already covers Shopify storefronts. JSON-LD and IMAP digest connectors are follow-ons (JSON-LD parsing likely belongs in glovebox -- connectors are its lane). |
+| Offers | Retailers / winery-direct / flash sites on **Shopify** (`products.json`), worldwide, Total Wine + Wine.com JSON-LD, Wine.com Rakuten feed | free; per-site verification required | The existing shopify connector already covers Shopify storefronts. JSON-LD and IMAP digest connectors are follow-ons (JSON-LD parsing likely belongs in glovebox -- connectors are its lane). |
 
 **Vivino is a NO-GO** (no API, anti-scraping posture, affiliate program
 exposes no ratings). Paywalled critic sites (Wine Spectator app, Suckling,
 Vinous, Decanter) are not fetched; their scores reach us legitimately via
 retailer attributions and GWS aggregation.
 
-### 1.3 Washington legality is the binding constraint, not the API budget
+### 1.3 Shipping legality is a CONSTRAINT LAYER, not a US rule
 
-Per WSLCB / RCW 66.20: out-of-state **wineries** with a WA wine shipper
-permit ($150 since 2025-07-27) may ship to WA consumers; **in-state licensed
-retailers** may ship/deliver within WA; out-of-state **retailers may NOT**
-(SB 5007, which would have permitted them, died in committee Jan 2024).
+Direct-to-consumer wine law is per-destination and per-channel, and the
+destination is not always Washington -- or even the US. A household buys for
+itself, and buys gifts for people in Barcelona, Toronto, or Melbourne. So
+legality lives in `internal/shipping` as a data-driven rules table over
+JURISDICTIONS, with the US case as one region of it rather than the schema.
 
-Engineering consequences, all implemented:
+**The model.** A jurisdiction is an ISO 3166 code: a country (`FR`, `AU`)
+optionally with a subdivision (`US-WA`, `CA-ON`). Both a source's origin and a
+watch's destination are jurisdictions. Law turns on two things, and the table
+is indexed by exactly those:
 
-- Legality is a property of the SOURCE's channel, never derivable from
-  listing text, so it is DECLARED per source (`wineChannel` in config:
-  `wa_retailer` | `winery_direct` | `out_of_state_retailer`) and stamped
-  onto every listing by the channel tagger at the connector seam.
-- `ship_legal_wa` is a typed item attribute; the filter can hard-require it
-  (`requireShipLegalWA`), and the gate FAILS CLOSED: an unstamped or
-  unknown-channel item never passes as legal. A wine source without a
-  declared channel is a startup error, not a default.
-- Out-of-state retailer offers still ingest (informational -- price signal
-  for the corpus) but can never surface as actionable when the legality
-  filter is on. Winery-direct and in-state retailers are the first-class
-  offer channels.
-- Re-verify a source's channel when onboarding it (a flash site's
-  fulfillment model can change); the config declaration records that
-  verification.
+- the **channel**: `producer` (the winery shipping its own wine) or
+  `retailer` (a licensed reseller). Nearly every market treats these
+  differently.
+- the **origin relation**: same subdivision (an in-state/in-province seller),
+  same country (interstate/interprovincial), same trade bloc (the EU single
+  market's excise distance-selling regime), or foreign (a third country).
+
+Each destination therefore carries a `Policy`: per channel, which relations
+may ship to it. That expresses the cases that actually differ -- a WA retailer
+may ship within Washington while a California retailer may not ship in (SB
+5007 died in committee, Jan 2024); a French winery may distance-sell to a
+Spanish consumer but not to a US one, because US imports must clear a licensed
+importer; a BC winery reaches Manitoba but not Ontario.
+
+**The baseline table** (`DefaultRules`) covers ~110 destinations: the US per
+state, Canada per province, the EU-27 at country level with the single market
+as a bloc, and other major wine markets (GB, CH, AU, NZ, AR, BR, CL, MX, UY,
+ZA, JP) at country level. Confidence is documented per region in
+`internal/shipping/defaults.go`. It is a good-faith engineering baseline, NOT
+legal advice.
+
+**Everything fails closed**, at every layer: an unknown or malformed
+jurisdiction, an unmodeled destination, an unknown channel, an unstamped item,
+or an empty legal set is illegal -- never default-legal. Two deliberate
+consequences:
+
+- The table OMITS destinations whose regime we could not state (Norway,
+  Iceland, several Asian markets) rather than encoding an all-false entry that
+  would look modeled. "Unmodeled" and "prohibited" are different facts, and
+  `Rules.Modeled` distinguishes them: configuring an unmodeled destination is
+  a startup error naming the override path, not a silently dark surface.
+- The `foreign` dimension is off almost everywhere by default. Several markets
+  (AU, NZ, GB, JP) do permit personal importation subject to duty; that is a
+  one-line override, deliberately not a default.
+
+**Mechanics.** A source declares `wineChannel` + `origin`; both required, and
+a missing or malformed declaration is a startup error. The channel tagger
+stamps each listing with the declaration and its computed legal-destination
+SET (`ship_legal_to`, e.g. `US-WA US-CA FR`), tokens validated as ISO 3166 at
+extract. Stamping the whole set -- not one destination's boolean -- means one
+ingested corpus serves watches for ANY destination, and a rules change
+converges on the next poll's re-stamp. A surface picks `wineShipTo` and the
+generic `score.Filter.HasToken` predicate enforces it.
+
+### 1.4 Currency: an international corpus needs FX or an honest "unknown"
+
+Going international introduces a trap this codebase has hit before in other
+forms -- the failure looks like success. The hedonic model is fit in one
+currency (USD by default); a EUR listing whose price is compared against it
+directly would be mispriced by whatever the exchange rate is, and would emit a
+confident verdict rather than an error.
+
+So `HedonicModel` declares its `Currency`, and the `Valuer` takes optional
+`Rates` (operator config, not a live FX call: a stale rate nudges a verdict,
+whereas a live dependency on the read path could fail or hang a surface, and
+wine prices do not move on intraday FX). A listing in an unrated foreign
+currency yields `unknown-no-reference` -- unplaceable, never mispriced. An
+EMPTY currency reads as the model's own, because a connector omitting the
+field is a data gap rather than evidence of a foreign price, and darkening
+every such item would be the worse error.
 
 ## 2. What this slice implements (and the algorithms)
 
 ```
 shopify/other connector
-  -> TagWineChannel (stamps wine_channel + ship_legal_wa aspects)
+  -> TagWineChannel (stamps wine_channel + source_origin + the computed
+       ship_legal_to jurisdiction set from the shipping rules table)
   -> sanitize (boundary marker; production path = glovebox)
   -> extract/wine: vintage, bottle_ml, varietal, colour,
        critic attributions -> normalized wine_score + wine_score_count,
        LWIN resolution -> CanonicalID (auto-route only)
   -> store
-  -> hard-filter: priced, budget, min wine_score, ship_legal_wa == true
+  -> hard-filter: priced, budget, min wine_score,
+       ship_legal_to contains the configured destination jurisdiction
+       (wineShipTo: US-WA | FR | CA-BC | ...)
   -> valuation/wine: hedonic log-price residual -> verdict
   -> score -> rank -> surface / watches
 ```
@@ -96,8 +149,8 @@ The "WA" shorthand for The Wine Advocate is deliberately not recognized (in
 this home market "WA" is Washington and sits next to numbers constantly);
 The Wine Advocate parses as "RP" or by full name.
 
-**Value model**: `log(price_cents) = a + b*(s-80) + c*(s-80)^2 +
-d*1[s>=90]`, because the superstar premium is real and non-linear -- the JWE
+**Value model** (in the model's own currency; see 1.4):
+`log(price_cents) = a + b*(s-80) + c*(s-80)^2 + d*1[s>=90]`, because the superstar premium is real and non-linear -- the JWE
 superstar study (266k Wine Spectator reviews) found the price premium
 significant only above 90 points, and Ali/Lecocq/Visser (2008) found the
 critic effect absent for low scores. A naive points-per-dollar ratio is
