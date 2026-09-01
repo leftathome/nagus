@@ -38,9 +38,12 @@ source polls daily with a bounded result cap -- see
 
 A third adapter, **wine**, runs on a $0/month data stack: LWIN (Creative
 Commons) for canonical identity, critic-score normalization + a hedonic
-log-price value model for quality/value, and per-source Washington
-ship-legality as a fail-closed gate (out-of-state retailers may not ship wine
-to WA consumers). See
+log-price value model for quality/value, and a data-driven ship-legality
+constraint layer covering ~110 jurisdictions worldwide -- each source declares
+its channel (producer/retailer) and origin (`US-WA`, `CA-BC`, `FR`), a
+per-destination rules table computes where it may legally ship, and a watch
+picks its destination jurisdiction: the household's own, or a gift
+recipient's abroad (fail closed throughout). See
 [`docs/design/2026-08-30-wine-category.md`](docs/design/2026-08-30-wine-category.md).
 
 ## Design

@@ -192,33 +192,90 @@ func TestFilterPass_MaxAttr(t *testing.T) {
 }
 
 func TestFilterPass_EqAttr(t *testing.T) {
-	f := Filter{EqAttr: map[string]string{"ship_legal_wa": "true"}}
+	f := Filter{EqAttr: map[string]string{"some_flag": "true"}}
 
-	legal := baseItem()
-	legal.Attributes["ship_legal_wa"] = "true"
-	if ok, reason := f.Pass(legal); !ok {
+	match := baseItem()
+	match.Attributes["some_flag"] = "true"
+	if ok, reason := f.Pass(match); !ok {
 		t.Fatalf("matching eq attribute should pass, got reason %q", reason)
 	}
 
-	illegal := baseItem()
-	illegal.Attributes["ship_legal_wa"] = "false"
-	ok, reason := f.Pass(illegal)
+	mismatch := baseItem()
+	mismatch.Attributes["some_flag"] = "false"
+	ok, reason := f.Pass(mismatch)
 	if ok {
 		t.Fatalf("mismatched eq attribute should fail")
 	}
-	if !strings.Contains(reason, "ship_legal_wa") || !strings.Contains(reason, "does not equal") {
+	if !strings.Contains(reason, "some_flag") || !strings.Contains(reason, "does not equal") {
 		t.Errorf("reason should explain the mismatch, got %q", reason)
 	}
 
-	// A missing required attribute fails CLOSED (legality must never pass by
-	// omission), with a reason naming the attribute.
+	// A missing required attribute fails CLOSED, with a reason naming the
+	// attribute.
 	missing := baseItem()
 	ok, reason = f.Pass(missing)
 	if ok {
 		t.Fatalf("missing eq attribute should fail closed")
 	}
-	if !strings.Contains(reason, "ship_legal_wa") || !strings.Contains(reason, "missing") {
+	if !strings.Contains(reason, "some_flag") || !strings.Contains(reason, "missing") {
 		t.Errorf("reason should explain the missing attribute, got %q", reason)
+	}
+}
+
+func TestFilterPass_HasToken(t *testing.T) {
+	f := Filter{HasToken: map[string]string{"ship_legal_to": "WA"}}
+
+	legal := baseItem()
+	legal.Attributes["ship_legal_to"] = "CA OR WA"
+	if ok, reason := f.Pass(legal); !ok {
+		t.Fatalf("token present should pass, got reason %q", reason)
+	}
+
+	illegal := baseItem()
+	illegal.Attributes["ship_legal_to"] = "CA OR"
+	ok, reason := f.Pass(illegal)
+	if ok {
+		t.Fatalf("absent token should fail")
+	}
+	if !strings.Contains(reason, "ship_legal_to") || !strings.Contains(reason, "WA") {
+		t.Errorf("reason should name the attribute and token, got %q", reason)
+	}
+
+	// Substrings are not tokens: "WA" must not match inside "WASH" or "IOWA".
+	sneaky := baseItem()
+	sneaky.Attributes["ship_legal_to"] = "IOWA WASH"
+	if ok, _ := f.Pass(sneaky); ok {
+		t.Fatalf("substring must not satisfy a token predicate")
+	}
+
+	// An empty set contains nothing (fail closed).
+	empty := baseItem()
+	empty.Attributes["ship_legal_to"] = ""
+	if ok, _ := f.Pass(empty); ok {
+		t.Fatalf("empty token set must fail closed")
+	}
+
+	// A missing attribute fails closed with a reason naming it.
+	missing := baseItem()
+	ok, reason = f.Pass(missing)
+	if ok {
+		t.Fatalf("missing token attribute must fail closed")
+	}
+	if !strings.Contains(reason, "ship_legal_to") || !strings.Contains(reason, "missing") {
+		t.Errorf("reason should explain the missing attribute, got %q", reason)
+	}
+}
+
+func TestFilterPass_HasToken_DeterministicReasonOrder(t *testing.T) {
+	f := Filter{HasToken: map[string]string{"b_set": "X", "a_set": "Y"}}
+	it := baseItem() // has neither
+	_, reason1 := f.Pass(it)
+	_, reason2 := f.Pass(it)
+	if reason1 != reason2 {
+		t.Fatalf("reason should be deterministic, got %q then %q", reason1, reason2)
+	}
+	if !strings.Contains(reason1, "a_set") {
+		t.Errorf("sorted key order should report a_set first, got %q", reason1)
 	}
 }
 

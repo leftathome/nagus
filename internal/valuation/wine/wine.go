@@ -29,6 +29,18 @@
 // public Wine Enthusiast 130k review set (cold start, spec Stage 3): they are
 // documented, tunable data -- not a fit performed in this package -- and are
 // expected to be refit offline as live offer observations accrue.
+//
+// # Currency
+//
+// A hedonic model is fit in ONE currency (HedonicModel.Currency, default
+// USD), so a listing priced in another currency cannot be compared against it
+// directly. Once offers can come from outside that currency's market -- which
+// they can, since sources are international -- silently treating 30 EUR as
+// 30 USD would produce a confidently wrong verdict, the exact failure mode
+// this codebase keeps re-learning. Valuer therefore converts using a
+// configured rate, and where no rate is configured it returns
+// VerdictUnknownNoReference: "we cannot place this" is a first-class answer,
+// a mispriced deal flag is not.
 package wine
 
 import (
@@ -198,6 +210,9 @@ type HedonicModel struct {
 	ScoreCoef       float64 // per point above 80
 	ScoreSqCoef     float64 // per squared point above 80
 	Superstar90Coef float64 // step premium at >= 90 points
+	// Currency is the ISO 4217 code the coefficients were fit in; "" means
+	// DefaultCurrency. A listing in any other currency needs a Valuer rate.
+	Currency string
 	// ResidualStd is the spread of log-price residuals the model was fit
 	// with; residual z-scores (the verdict input) are residual/ResidualStd.
 	ResidualStd float64
@@ -214,7 +229,16 @@ func DefaultModel() HedonicModel {
 		ScoreSqCoef:     0.008,
 		Superstar90Coef: 0.15,
 		ResidualStd:     0.45,
+		Currency:        DefaultCurrency,
 	}
+}
+
+// currency returns the model's currency, defaulting to DefaultCurrency.
+func (m HedonicModel) currency() string {
+	if c := normCurrency(m.Currency); c != "" {
+		return c
+	}
+	return DefaultCurrency
 }
 
 // PredictLogPriceCents returns the model's predicted log(price in cents) for
@@ -260,6 +284,19 @@ type Valuer struct {
 	// "deal" on one critic's opinion (package doc).
 	MinScores int
 
+	// Rates converts a listing currency into the MODEL's currency: the value
+	// is how many units of the model currency one unit of the listing
+	// currency buys (e.g. with a USD model, {"EUR": 1.08, "GBP": 1.27}).
+	// A listing already in the model currency needs no entry. A listing in
+	// any other currency with no rate is UNPLACEABLE, not assumed 1:1 --
+	// see the package doc's currency section.
+	//
+	// Rates are operator config, deliberately not fetched: a stale rate
+	// shifts a verdict slightly, whereas a live FX dependency on the read
+	// path could fail or hang a surface. Wine prices do not move on FX
+	// intraday, so periodic config is the right granularity.
+	Rates map[string]float64
+
 	// Residual-z upper bounds per verdict tier; zero values take defaults.
 	// Negative z = cheap for the quality.
 	GreatMaxZ  float64 // default -1.5 (the spec's flag threshold)
@@ -295,10 +332,16 @@ func (v Valuer) minScores() int {
 }
 
 // Value places one listing: its aggregated normalized score, how many critic
-// scores contributed, and its price in cents (0 == unknown). Price should be
-// normalized to a 750ml-equivalent bottle by the caller when the size is
-// known and differs.
-func (v Valuer) Value(score float64, scoreCount int, priceCents int64) (Valuation, error) {
+// scores contributed, and its price in minor units of currency (0 == unknown
+// price). Price should be normalized to a 750ml-equivalent bottle by the
+// caller when the size is known and differs.
+//
+// currency is the listing's ISO 4217 code. An EMPTY currency is read as the
+// model's own -- a connector that omits the field is a data gap, not evidence
+// of a foreign currency, and darkening every such item would be worse than
+// the assumption. A named currency that is neither the model's nor in Rates
+// yields VerdictUnknownNoReference rather than a wrong verdict.
+func (v Valuer) Value(score float64, scoreCount int, priceCents int64, currency string) (Valuation, error) {
 	if priceCents < 0 {
 		return Valuation{}, fmt.Errorf("wine: price_cents must be >= 0, got %d", priceCents)
 	}
@@ -317,8 +360,15 @@ func (v Valuer) Value(score float64, scoreCount int, priceCents int64) (Valuatio
 		return Valuation{}, ErrInvalidModel
 	}
 
+	priceInModelCurrency, ok := v.convert(priceCents, currency, model.currency())
+	if !ok {
+		// A foreign-currency listing with no configured rate cannot be
+		// placed against this model. Unplaceable, never mispriced.
+		return Valuation{Verdict: VerdictUnknownNoReference}, nil
+	}
+
 	predictedLog := model.PredictLogPriceCents(score)
-	residual := math.Log(float64(priceCents)) - predictedLog
+	residual := math.Log(priceInModelCurrency) - predictedLog
 	z := residual / model.ResidualStd
 
 	great, good, market := v.thresholds()
@@ -338,8 +388,42 @@ func (v Valuer) Value(score float64, scoreCount int, priceCents int64) (Valuatio
 	return Valuation{
 		Verdict:             verdict,
 		ResidualZ:           z,
-		Ratio:               float64(priceCents) / predicted,
+		Ratio:               priceInModelCurrency / predicted,
 		PredictedPriceCents: int64(math.Round(predicted)),
 		HasReference:        true,
 	}, nil
+}
+
+// DefaultCurrency is the currency DefaultModel's coefficients are fit in.
+const DefaultCurrency = "USD"
+
+// normCurrency canonicalizes an ISO 4217 code for comparison.
+func normCurrency(c string) string {
+	return strings.ToUpper(strings.TrimSpace(c))
+}
+
+// convert restates priceCents in the model's currency. ok=false means the
+// listing's currency is neither the model's nor rated, so the listing cannot
+// be placed. The returned value is a float because an FX conversion has no
+// business pretending to minor-unit exactness; it feeds a log() immediately.
+func (v Valuer) convert(priceCents int64, listingCurrency, modelCurrency string) (float64, bool) {
+	lc := normCurrency(listingCurrency)
+	if lc == "" || lc == modelCurrency {
+		return float64(priceCents), true
+	}
+	rate, ok := v.Rates[lc]
+	if !ok {
+		// Try the canonicalized key too, so a config written as {"eur": ...}
+		// still works.
+		for k, r := range v.Rates {
+			if normCurrency(k) == lc {
+				rate, ok = r, true
+				break
+			}
+		}
+	}
+	if !ok || rate <= 0 {
+		return 0, false
+	}
+	return float64(priceCents) * rate, true
 }

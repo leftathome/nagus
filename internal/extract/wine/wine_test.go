@@ -93,26 +93,90 @@ func TestExtract_ChannelAspectsLiftedAndValidated(t *testing.T) {
 	e := New()
 	s := sanitized("Wine 2020", "")
 	s.Aspects = map[string]string{
-		"ship_legal_wa": "true",
-		"wine_channel":  "winery_direct",
+		"wine_channel":  "producer",
+		"source_origin": "us-wa",
+		"ship_legal_to": "US-CA US-OR US-WA",
 	}
 	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if it.Attributes["ship_legal_wa"] != "true" || it.Attributes["wine_channel"] != "winery_direct" {
-		t.Errorf("channel aspects should be lifted, got %v", it.Attributes)
+	if it.Attributes["wine_channel"] != "producer" {
+		t.Errorf("channel should be lifted, got %v", it.Attributes)
+	}
+	if it.Attributes["source_origin"] != "US-WA" {
+		t.Errorf("source origin should be lifted normalized, got %q", it.Attributes["source_origin"])
+	}
+	if it.Attributes["ship_legal_to"] != "US-CA US-OR US-WA" {
+		t.Errorf("legal destinations should be lifted, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_InternationalJurisdictionsLifted(t *testing.T) {
+	e := New()
+	s := sanitized("Chateau Something 2019", "")
+	s.Aspects = map[string]string{
+		"wine_channel":  "producer",
+		"source_origin": "fr",
+		"ship_legal_to": "AT BE FR ES IT",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if it.Attributes["source_origin"] != "FR" {
+		t.Errorf("country-level origin should lift, got %q", it.Attributes["source_origin"])
+	}
+	if it.Attributes["ship_legal_to"] != "AT BE FR ES IT" {
+		t.Errorf("country-level destinations should lift, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_ShipLegalToTokensValidated(t *testing.T) {
+	// Aspect values are untrusted: malformed tokens must never reach the
+	// destination filter's token space, and an invalid source_origin is
+	// dropped rather than lifted.
+	e := New()
+	s := sanitized("Wine 2020", "")
+	s.Aspects = map[string]string{
+		"source_origin": "Cascadia",
+		"ship_legal_to": "US-CA ANYWHERE fr true US-WASH 12 CA-BC",
+	}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, present := it.Attributes["source_origin"]; present {
+		t.Errorf("invalid source_origin must be dropped, got %q", it.Attributes["source_origin"])
+	}
+	if it.Attributes["ship_legal_to"] != "US-CA FR CA-BC" {
+		t.Errorf("only well-formed jurisdiction tokens may survive, got %q", it.Attributes["ship_legal_to"])
+	}
+}
+
+func TestExtract_EmptyShipLegalToIsStampedNotDropped(t *testing.T) {
+	// "Ships nowhere legally" is a real fail-closed fact, distinct from an
+	// untagged source (no aspect at all).
+	e := New()
+	s := sanitized("Wine 2020", "")
+	s.Aspects = map[string]string{"ship_legal_to": ""}
+	it, err := e.Extract(context.Background(), s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, present := it.Attributes["ship_legal_to"]
+	if !present || v != "" {
+		t.Errorf("empty legal set should be stamped as empty, got present=%v value=%q", present, v)
 	}
 
-	// An unrecognized legality value (untrusted aspect) must NOT pass
-	// through: only the boolean vocabulary is lifted.
-	s.Aspects["ship_legal_wa"] = "yes please"
+	// No aspect -> no attribute.
+	s.Aspects = nil
 	it, err = e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, present := it.Attributes["ship_legal_wa"]; present {
-		t.Errorf("non-boolean ship_legal_wa must be dropped, got %q", it.Attributes["ship_legal_wa"])
+	if _, present := it.Attributes["ship_legal_to"]; present {
+		t.Errorf("untagged source must carry no ship_legal_to attribute")
 	}
 }
 
