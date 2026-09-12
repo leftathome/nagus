@@ -42,7 +42,48 @@ variables:
   # were already fixed in the binary we ship. Same reasoning as the pinned
   # govulncheck version below: a gate whose verdict depends on what a node
   # happened to cache is not a gate.
-  GO_IMAGE: "golang:1.26.6"
+  #
+  # PINNED BY DIGEST, NOT BY TAG (2026-09-12). The version tag was right and the
+  # REFERENCE FORM was wrong, and the reference form is what kept main red from
+  # 2026-08-19 to 2026-09-12 -- through #2203, #2206, #2275, #2279 and #2285.
+  # Every one failed identically, before running a line of Go:
+  #
+  #   ERROR: Job failed (system failure): prepare environment: waiting for pod
+  #   running: timed out waiting for pod to start
+  #
+  # recorded as failure_reason=runner_system_failure, which reads like flaky
+  # infrastructure and is not. `golang:1.26.6` is an OCI index of SIXTEEN
+  # entries: 7 real linux platforms, 7 unknown/unknown attestation manifests,
+  # and 2 windows/amd64 manifests in the older Docker media type. The
+  # in-cluster zot mirror on-demand-syncs whatever is requested, copies every
+  # blob in that index, and then fails to commit it --
+  #   "couldn't upload manifest" error="invalid manifest content"
+  #   "failed to commit image" repo=library/golang
+  # It then falls through to ghcr.io / registry.k8s.io / quay.io /
+  # registry.orac.local, none of which host library/golang, and answers
+  # containerd 404 after a 9m44s HEAD. containerd reports
+  #   docker.io/library/golang:1.26.6: not found
+  # so the job pod never leaves ContainerCreating and the runner times out.
+  #
+  # This is the SAME trap nagus-c4p already fixed for the image build, and the
+  # Dockerfile says so at its head: reference a SINGLE-PLATFORM manifest by
+  # digest and zot syncs only that (~312MB), never the ~3GB index. The gates
+  # were simply never given the fix the build legs got.
+  #
+  # Sibling evidence, same runner and same cluster: agentic/quark and agentic/rom
+  # both pin `docker.io/golang:1.26@sha256:...` by digest and both are green;
+  # only nagus used the tag, and only nagus was red.
+  #
+  # The digest below IS golang 1.26.6 linux/amd64 -- verified by reading its
+  # config blob (GOLANG_VERSION=1.26.6) -- and is byte-identical to the
+  # Dockerfile's build-amd64 pin. So this does not merely restore the gate, it
+  # makes "the gate runs what ships" structural instead of a comment two humans
+  # have to keep in sync. The gates run amd64 (ci-templates defaults
+  # KUBERNETES_NODE_SELECTOR_ARCH to amd64), so the amd64 pin is the correct one.
+  #
+  # Refresh together with the Dockerfile when bumping the base:
+  #   crane digest --platform linux/amd64 docker.io/library/golang:1.26
+  GO_IMAGE: "docker.io/golang:1.26@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
   GOPATH: "$CI_PROJECT_DIR/.cache/go"
   GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
   GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
