@@ -17,6 +17,19 @@ import (
 // id well before the next ingest of its store, without polling quark hard.
 const defaultQuarkInterval = 10 * time.Minute
 
+// defaultQuarkBatch and defaultQuarkTimeout are sized from MEASURED production
+// latency, not from quark's schema cap. quark commits each hint on replicated
+// block storage; on orac it served ~270ms per hint (2026-09-13, 105 hints over
+// four calls, 42s). At the schema cap of 500 a call takes minutes, so with the
+// old 30s client timeout every large call failed -- AFTER quark had applied it
+// -- and the same offers were re-sent every pass without ever being recorded.
+// 100 hints at 270ms is ~27s, inside a 2m timeout with 4x headroom. Both are
+// env-tunable so a slower or faster store is a values edit, not a release.
+const (
+	defaultQuarkBatch   = 100
+	defaultQuarkTimeout = 2 * time.Minute
+)
+
 // buildEnricher wires the asynchronous quark resolution pass from env, or
 // returns nil with the reason it is off.
 //
@@ -47,8 +60,9 @@ func buildEnricher(offers offer.Store, cfg RunConfig, ingesters []*pipeline.Inge
 	}
 	return &enrich.Enricher{
 		Offers:      offers,
-		Quark:       &quark.Client{BaseURL: url, Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}},
+		Quark:       &quark.Client{BaseURL: url, Token: token, HTTP: &http.Client{Timeout: envDuration("NAGUS_QUARK_TIMEOUT", defaultQuarkTimeout)}},
 		Interval:    envDuration("NAGUS_QUARK_INTERVAL", defaultQuarkInterval),
+		BatchSize:   int(envInt64("NAGUS_QUARK_BATCH_SIZE", defaultQuarkBatch)),
 		CategoryFor: func(src string) string { return cats[src] },
 		Logf:        logf,
 	}, ""

@@ -9,6 +9,7 @@ import (
 	"github.com/leftathome/nagus/internal/enrich"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
+	"github.com/leftathome/nagus/internal/quark"
 )
 
 func quarkEnv(t *testing.T, url, token, interval string) {
@@ -72,6 +73,42 @@ func TestBuildEnricherMapsSourceToCategory(t *testing.T) {
 	}
 	if e.Interval != 3*time.Minute {
 		t.Errorf("interval = %s, want 3m from NAGUS_QUARK_INTERVAL", e.Interval)
+	}
+}
+
+// The batch and timeout defaults are what keep a large backlog draining: a call
+// that outlives the client timeout is applied by quark but discarded here, and
+// is re-sent forever. See defaultQuarkBatch.
+func TestBuildEnricherBatchAndTimeoutDefaultsAndOverrides(t *testing.T) {
+	ings, cfg := testIngesters()
+	timeoutOf := func(t *testing.T, e *enrich.Enricher) time.Duration {
+		t.Helper()
+		c, ok := e.Quark.(*quark.Client)
+		if !ok || c.HTTP == nil {
+			t.Fatalf("quark client = %T, want *quark.Client with an HTTP client", e.Quark)
+		}
+		return c.HTTP.Timeout
+	}
+
+	quarkEnv(t, "http://quark", "tok", "")
+	e, why := buildEnricher(offer.NewMemoryStore(), cfg, ings, nil)
+	if e == nil {
+		t.Fatalf("enricher off: %s", why)
+	}
+	if e.BatchSize != defaultQuarkBatch || timeoutOf(t, e) != defaultQuarkTimeout {
+		t.Errorf("defaults: batch %d timeout %s, want %d and %s",
+			e.BatchSize, timeoutOf(t, e), defaultQuarkBatch, defaultQuarkTimeout)
+	}
+	// A batch this size at the measured per-hint latency must fit the timeout.
+	if measured := time.Duration(defaultQuarkBatch) * 270 * time.Millisecond; measured*2 > defaultQuarkTimeout {
+		t.Errorf("default batch at 270ms/hint = %s, under 2x headroom of the %s timeout", measured, defaultQuarkTimeout)
+	}
+
+	t.Setenv("NAGUS_QUARK_BATCH_SIZE", "25")
+	t.Setenv("NAGUS_QUARK_TIMEOUT", "45s")
+	e, _ = buildEnricher(offer.NewMemoryStore(), cfg, ings, nil)
+	if e.BatchSize != 25 || timeoutOf(t, e) != 45*time.Second {
+		t.Errorf("overrides: batch %d timeout %s, want 25 and 45s", e.BatchSize, timeoutOf(t, e))
 	}
 }
 
