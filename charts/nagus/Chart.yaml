@@ -7,6 +7,9 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
+# 0.6.0: quark resolution pass (nagus-6r6) -- quark.url / quark.interval /
+# quark.tokenExternalSecret render NAGUS_QUARK_URL, NAGUS_QUARK_INTERVAL and an
+# optional NAGUS_QUARK_TOKEN from an ExternalSecret. Off while quark.url is empty.
 # 0.5.1: roll the Deployment on a config change (checksum annotations). nagus
 # reads its config once at startup, so a values-only edit previously left the
 # running pod on the old config while rollout status reported success.
@@ -23,7 +26,7 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.5.1
+version: 0.6.0
 appVersion: "0.4.0"
 kubeVersion: ">=1.27.0-0"
 keywords:

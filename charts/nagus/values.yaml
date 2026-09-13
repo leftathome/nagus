@@ -135,6 +135,27 @@ offers:
   # Ignored when storage.backend is postgres.
   sqlitePath: /data/nagus-offers.db
 
+# quark: asynchronous product-identity resolution (nagus-6r6). nagus asks quark
+# what product each offer's hint names and stamps the answer on the offer. It
+# runs outside ingest: quark down or slow leaves offers unattempted and never
+# fails an ingest. Requires offers.enabled. OFF while url is empty.
+quark:
+  # quark's API root, e.g. http://quark.quark.svc.cluster.local:8080
+  url: ""
+  # How often the pass runs, as a Go duration. Empty = the binary default (10m).
+  interval: ""
+  # nagus's bearer token, as NAGUS_QUARK_TOKEN. The Vault property is shared
+  # with quark's own consumer ExternalSecret.
+  tokenExternalSecret:
+    enabled: false
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    remoteRef:
+      key: eso/quark/consumers
+      property: nagus_bearer_token
+
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
 # strong matches -> ping; audience is routed by openclaw's household resolver).

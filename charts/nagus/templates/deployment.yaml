@@ -140,6 +140,27 @@ spec:
               value: {{ .Values.offers.sqlitePath | quote }}
             {{- end }}
             {{- end }}
+            {{- if .Values.quark.url }}
+            # quark resolution pass (nagus-6r6). Off unless all of URL, token
+            # and the offer layer are present; the binary logs which is missing.
+            - name: NAGUS_QUARK_URL
+              value: {{ .Values.quark.url | quote }}
+            {{- with .Values.quark.interval }}
+            - name: NAGUS_QUARK_INTERVAL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.quark.tokenExternalSecret.enabled }}
+            - name: NAGUS_QUARK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-quark" (include "nagus.fullname" .) }}
+                  key: NAGUS_QUARK_TOKEN
+                  # Optional: a missing token turns the pass off; it must never
+                  # hold the pod in CreateContainerConfigError (Recreate strategy
+                  # makes that an outage of every nagus surface).
+                  optional: true
+            {{- end }}
+            {{- end }}
             {{- $zillapi := include "nagus.zillapiSecretName" . }}
             {{- if $zillapi }}
             - name: NAGUS_ZILLAPI_KEY
