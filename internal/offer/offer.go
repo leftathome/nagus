@@ -103,6 +103,63 @@ type ProductHint struct {
 	Model string
 }
 
+// Fingerprint identifies the exact hint an offer carried when it was resolved.
+//
+// It is the RAW values, deliberately not normalized: any change to what the
+// source says about the product -- including a change normalization would
+// erase -- is a reason to ask quark again, because quark's gates, not nagus,
+// decide what counts as the same identifier. The separator cannot occur in a
+// single field's meaning, and the empty hint has a stable fingerprint of its
+// own ("|||"), because "the source says nothing" is also a hint.
+func (h ProductHint) Fingerprint() string {
+	return h.Brand + "|" + h.MPN + "|" + h.GTIN + "|" + h.Model
+}
+
+// Empty reports whether the hint states nothing at all.
+func (h ProductHint) Empty() bool {
+	return h.Brand == "" && h.MPN == "" && h.GTIN == "" && h.Model == ""
+}
+
+// ResolutionState is where an offer stands with quark, the service that owns
+// product identity (spec: quark design section 5, "Coupling (D4)").
+type ResolutionState string
+
+const (
+	// ResolutionUnattempted: quark has not been asked about this offer's
+	// current hint. Distinct from Refused on purpose -- "not yet asked" and
+	// "quark declined" are different facts, and only the second is worth
+	// re-offering when quark's catalog generation advances.
+	ResolutionUnattempted ResolutionState = "unattempted"
+	// ResolutionResolved: quark returned a product id (route exact or minted).
+	ResolutionResolved ResolutionState = "resolved"
+	// ResolutionRefused: quark could not identify the product from this hint.
+	ResolutionRefused ResolutionState = "refused"
+	// ResolutionQuarantined: quark flagged the hint as bad-faith. Not retried
+	// by generation advance; that is a review-queue decision on quark's side.
+	ResolutionQuarantined ResolutionState = "quarantined"
+	// ResolutionUnidentifiable: the offer's hint is entirely EMPTY, so there is
+	// nothing for quark to identify and nagus never asks. Recorded locally
+	// rather than sent, for two reasons: a guaranteed refusal is wasted work on
+	// every generation advance, and -- because nagus relays every store as ONE
+	// authenticated principal -- counting hint-less stores as refusals would
+	// pin quark's refused-ratio alert above its threshold forever. The state is
+	// never pending, and resets to Unattempted as soon as the source starts
+	// stating a hint (Put resets resolution on any hint change).
+	ResolutionUnidentifiable ResolutionState = "unidentifiable"
+)
+
+// Resolution is quark's answer for an offer's current hint.
+type Resolution struct {
+	State ResolutionState
+	// ProductID is quark's product id; set only when State is Resolved.
+	ProductID string
+	// Generation is the catalog generation quark resolved under. A refusal
+	// under generation N is worth re-offering once quark reports N+1.
+	Generation int64
+	// At is when the answer was recorded.
+	At time.Time
+}
+
 // Offer is one listing at one source.
 type Offer struct {
 	// ID is deterministic from SourceID+SourceKey so re-ingesting the same
@@ -136,6 +193,12 @@ type Offer struct {
 	// authoritative productID -- see ComputeProvisionalKey.
 	ProvisionalKey string
 	ProductHint    ProductHint
+
+	// Resolution is quark's answer for ProductHint. It is READ-ONLY to Put:
+	// adapters ignore any value supplied there, preserve the stored one while
+	// the hint is unchanged, and reset it to Unattempted when the hint changes.
+	// Only RecordResolution writes it.
+	Resolution Resolution
 
 	// --- lifecycle ---------------------------------------------------------
 	// FirstSeen is when this offer was first observed.
@@ -299,6 +362,8 @@ type Query struct {
 	SourceID string
 	// ProvisionalKey limits to one provisional product group; "" = any.
 	ProvisionalKey string
+	// ProductID limits to offers quark resolved to this product; "" = any.
+	ProductID string
 	// Seller limits to one vendor; "" = any.
 	Seller string
 	// Since limits to offers last seen at or after this time; zero = no bound.
@@ -332,4 +397,16 @@ type Store interface {
 	// ApplyRetention enforces a source's retention policy, returning how many
 	// offers it removed. This is the ONLY operation that deletes.
 	ApplyRetention(ctx context.Context, sourceID string, r Retention, now time.Time) (int, error)
+	// PendingResolution returns up to limit offers that need a quark call:
+	// every Unattempted offer, then Refused offers recorded under a catalog
+	// generation BELOW retryBelowGeneration (retryBelowGeneration <= 0 disables
+	// retries). Resolved and Quarantined offers are never returned. Expired
+	// offers are included: identity matters for price history too.
+	PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]Offer, error)
+	// RecordResolution stamps quark's answer on an offer, but ONLY if the
+	// offer still carries the hint with this fingerprint. It reports whether
+	// the stamp applied: false means the offer is gone or its hint changed
+	// while quark was answering, so the answer is about a hint nagus no longer
+	// holds and must be discarded, not written.
+	RecordResolution(ctx context.Context, offerID, hintFingerprint string, r Resolution) (bool, error)
 }

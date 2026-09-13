@@ -53,7 +53,13 @@ func (m *MemoryStore) Put(ctx context.Context, o Offer) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Resolution is never taken from the caller: only RecordResolution writes
+	// it. It survives a re-ingest of the SAME hint and resets on a changed one.
+	o.Resolution = Resolution{State: ResolutionUnattempted}
 	if prev, ok := m.offers[o.ID]; ok {
+		if prev.ProductHint.Fingerprint() == o.ProductHint.Fingerprint() {
+			o.Resolution = prev.Resolution
+		}
 		if !prev.FirstSeen.IsZero() && (o.FirstSeen.IsZero() || prev.FirstSeen.Before(o.FirstSeen)) {
 			o.FirstSeen = prev.FirstSeen
 		}
@@ -101,6 +107,9 @@ func (m *MemoryStore) Query(ctx context.Context, q Query) ([]Offer, error) {
 			continue
 		}
 		if q.ProvisionalKey != "" && o.ProvisionalKey != q.ProvisionalKey {
+			continue
+		}
+		if q.ProductID != "" && o.Resolution.ProductID != q.ProductID {
 			continue
 		}
 		if q.Seller != "" && o.Seller != q.Seller {
@@ -188,4 +197,52 @@ func (m *MemoryStore) Len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.offers)
+}
+
+// PendingResolution returns never-asked offers first, then refusals recorded
+// under a catalog generation below retryBelowGeneration, each group in id
+// order, capped at limit (0 = no cap). Unattempted offers come first so a
+// generation advance can never starve offers quark has not seen at all.
+func (m *MemoryStore) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]Offer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var fresh, retry []Offer
+	for _, o := range m.offers {
+		switch {
+		case o.Resolution.State == ResolutionUnattempted || o.Resolution.State == "":
+			fresh = append(fresh, o)
+		case o.Resolution.State == ResolutionRefused && retryBelowGeneration > 0 && o.Resolution.Generation < retryBelowGeneration:
+			retry = append(retry, o)
+		}
+	}
+	byID := func(s []Offer) {
+		sort.Slice(s, func(i, j int) bool { return s[i].ID < s[j].ID })
+	}
+	byID(fresh)
+	byID(retry)
+	out := append(fresh, retry...)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// RecordResolution stamps r only while the offer still carries the hint whose
+// fingerprint is given.
+func (m *MemoryStore) RecordResolution(ctx context.Context, offerID, hintFingerprint string, r Resolution) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.offers[offerID]
+	if !ok || o.ProductHint.Fingerprint() != hintFingerprint {
+		return false, nil
+	}
+	o.Resolution = r
+	m.offers[offerID] = o
+	return true, nil
 }

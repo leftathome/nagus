@@ -17,6 +17,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
+	"github.com/leftathome/nagus/internal/enrich"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -27,6 +28,8 @@ import (
 // and serves search_items / get_item. It is READ-ONLY over the store -- it
 // surfaces candidates, it never acts (eyes, not hands; design section 11).
 type server struct {
+	// enricher is the asynchronous quark resolution pass; nil when off.
+	enricher        *enrich.Enricher
 	ingesters       []*pipeline.Ingester
 	surfaces        map[string]*pipeline.Surface
 	store           store.Store
@@ -102,6 +105,9 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		ebaySources = append(ebaySources, ebaySource{src: ing.SourceID(), st: ec.BudgetStats()})
+	}
+	if s.enricher != nil {
+		writeEnrichMetrics(w, s.enricher.Snapshot())
 	}
 	if len(ebaySources) == 0 {
 		return
@@ -329,6 +335,16 @@ func runServe(args []string) error {
 	// per-source failure isolation (a bad source never blocks another's loop
 	// or the HTTP surface). Cancelled by the same ctx as the HTTP shutdown.
 	srv.startIngest(ctx, intervals)
+
+	// quark resolution (nagus-6r6): a separate goroutine on its own interval.
+	// Never part of ingest -- quark down or slow leaves offers unattempted.
+	if e, why := buildEnricher(offerStore, cfg, ingesters, logf); e != nil {
+		srv.enricher = e
+		logf("quark resolution enabled (every %s)", e.Interval)
+		go e.Run(ctx)
+	} else {
+		logf("quark resolution off: %s", why)
+	}
 
 	httpServer := &http.Server{
 		Addr:              *listen,
