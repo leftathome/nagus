@@ -67,6 +67,14 @@ func (s *errpathFailingOfferStore) MarkExpired(ctx context.Context, sourceID str
 	return s.inner.MarkExpired(ctx, sourceID, notSeenSince, now)
 }
 
+func (s *errpathFailingOfferStore) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]offer.Offer, error) {
+	return s.inner.PendingResolution(ctx, limit, retryBelowGeneration)
+}
+
+func (s *errpathFailingOfferStore) RecordResolution(ctx context.Context, offerID, hintFingerprint string, r offer.Resolution) (bool, error) {
+	return s.inner.RecordResolution(ctx, offerID, hintFingerprint, r)
+}
+
 func (s *errpathFailingOfferStore) ApplyRetention(ctx context.Context, sourceID string, r offer.Retention, now time.Time) (int, error) {
 	s.applyRetentionCall = true
 	if s.applyRetentionErr != nil {

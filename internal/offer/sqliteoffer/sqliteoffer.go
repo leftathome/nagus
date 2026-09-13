@@ -58,7 +58,11 @@ CREATE TABLE IF NOT EXISTS offers (
 	min_price_cents  INTEGER NOT NULL DEFAULT 0,
 	status           TEXT NOT NULL DEFAULT 'active',
 	outcome          TEXT NOT NULL DEFAULT '',
-	expired_at_ns    INTEGER NOT NULL DEFAULT 0
+	expired_at_ns    INTEGER NOT NULL DEFAULT 0,
+	resolution_state      TEXT NOT NULL DEFAULT 'unattempted',
+	product_id            TEXT NOT NULL DEFAULT '',
+	resolution_generation INTEGER NOT NULL DEFAULT 0,
+	resolved_at_ns        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
@@ -67,6 +71,57 @@ CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
 -- The dedup path: "every offer for this product across sellers".
 CREATE INDEX IF NOT EXISTS idx_offers_provisional_key ON offers(provisional_key);
 `
+
+// resolutionColumns are the quark-resolution columns, added after the table
+// first shipped. SQLite has no ADD COLUMN IF NOT EXISTS, so existing databases
+// get them via migrateResolution; new databases get them from schema above.
+var resolutionColumns = []struct{ name, ddl string }{
+	{"resolution_state", `TEXT NOT NULL DEFAULT 'unattempted'`},
+	{"product_id", `TEXT NOT NULL DEFAULT ''`},
+	{"resolution_generation", `INTEGER NOT NULL DEFAULT 0`},
+	{"resolved_at_ns", `INTEGER NOT NULL DEFAULT 0`},
+}
+
+// resolutionIndexes run AFTER migrateResolution, because on an existing
+// database the columns they index do not exist until it has run.
+const resolutionIndexes = `
+CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_state);
+CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
+`
+
+// migrateResolution adds any missing resolution column. Additive only: every
+// existing offer defaults to unattempted, which is exactly true -- quark has
+// never been asked about it.
+func migrateResolution(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(offers)`)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		have[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, c := range resolutionColumns {
+		if have[c.name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE offers ADD COLUMN ` + c.name + ` ` + c.ddl); err != nil {
+			return fmt.Errorf("add column %s: %w", c.name, err)
+		}
+	}
+	_, err = db.Exec(resolutionIndexes)
+	return err
+}
 
 // New opens (or creates) an offer database at dsn and applies the schema.
 func New(dsn string) (*Store, error) {
@@ -89,6 +144,10 @@ func New(dsn string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("sqliteoffer: schema: %w", err)
+	}
+	if err := migrateResolution(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqliteoffer: migrate resolution columns: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -165,6 +224,15 @@ INSERT INTO offers (
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
+  -- Resolution survives a re-ingest of the SAME hint and resets on a changed
+  -- one. SET expressions see the row as it was BEFORE this update, so these
+  -- CASEs compare the stored hint with the incoming one even though the hint
+  -- columns are themselves being overwritten below. New rows take the column
+  -- defaults (unattempted); Put never writes a caller-supplied resolution.
+  resolution_state = CASE WHEN ` + sameHint + ` THEN offers.resolution_state ELSE 'unattempted' END,
+  product_id = CASE WHEN ` + sameHint + ` THEN offers.product_id ELSE '' END,
+  resolution_generation = CASE WHEN ` + sameHint + ` THEN offers.resolution_generation ELSE 0 END,
+  resolved_at_ns = CASE WHEN ` + sameHint + ` THEN offers.resolved_at_ns ELSE 0 END,
   source_url=excluded.source_url, title=excluded.title, body=excluded.body,
   price_cents=excluded.price_cents, currency=excluded.currency,
   condition=excluded.condition, seller=excluded.seller,
@@ -219,6 +287,10 @@ func (s *Store) Query(ctx context.Context, q offer.Query) ([]offer.Offer, error)
 	if q.ProvisionalKey != "" {
 		where = append(where, `provisional_key = ?`)
 		args = append(args, q.ProvisionalKey)
+	}
+	if q.ProductID != "" {
+		where = append(where, `product_id = ?`)
+		args = append(args, q.ProductID)
 	}
 	if q.Seller != "" {
 		where = append(where, `seller = ?`)
@@ -279,26 +351,67 @@ func (s *Store) ApplyRetention(ctx context.Context, sourceID string, r offer.Ret
 	return int(n), err
 }
 
+// sameHint is true when the stored hint equals the incoming one, column by
+// column. Used inside the upsert's CASE expressions.
+const sameHint = `(offers.hint_brand = excluded.hint_brand AND offers.hint_mpn = excluded.hint_mpn AND offers.hint_gtin = excluded.hint_gtin AND offers.hint_model = excluded.hint_model)`
+
+// storedFingerprint computes offer.ProductHint.Fingerprint in SQL.
+const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model)`
+
+// PendingResolution returns never-asked offers first, then refusals recorded
+// under a generation below retryBelowGeneration, each in id order.
+func (s *Store) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]offer.Offer, error) {
+	sqlStr := selectCols + ` FROM offers
+WHERE resolution_state IN ('unattempted', '')
+   OR (resolution_state = 'refused' AND ? > 0 AND resolution_generation < ?)
+ORDER BY CASE WHEN resolution_state = 'refused' THEN 1 ELSE 0 END, id`
+	if limit > 0 {
+		sqlStr += fmt.Sprintf(` LIMIT %d`, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, sqlStr, retryBelowGeneration, retryBelowGeneration)
+	if err != nil {
+		return nil, fmt.Errorf("sqliteoffer: pending resolution: %w", err)
+	}
+	defer rows.Close()
+	return scanOffers(rows)
+}
+
+// RecordResolution stamps r only while the offer still carries the hint with
+// this fingerprint; the WHERE clause is the race guard.
+func (s *Store) RecordResolution(ctx context.Context, offerID, hintFingerprint string, r offer.Resolution) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE offers SET resolution_state = ?, product_id = ?, resolution_generation = ?, resolved_at_ns = ?
+WHERE id = ? AND `+storedFingerprint+` = ?`,
+		string(r.State), r.ProductID, r.Generation, nsOrZero(r.At), offerID, hintFingerprint)
+	if err != nil {
+		return false, fmt.Errorf("sqliteoffer: record resolution: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // --- scanning -----------------------------------------------------------------
 
 const selectCols = `SELECT
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
   provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
-  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns`
+  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
+  resolution_state, product_id, resolution_generation, resolved_at_ns`
 
 func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 	var out []offer.Offer
 	for rows.Next() {
 		var o offer.Offer
 		var aspects string
-		var firstNS, lastNS, expiredNS int64
-		var status, outcome string
+		var firstNS, lastNS, expiredNS, resolvedNS int64
+		var status, outcome, resState string
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
 			&o.ProvisionalKey, &o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
+			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
 		); err != nil {
 			return nil, fmt.Errorf("sqliteoffer: scan: %w", err)
 		}
@@ -312,6 +425,11 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 		o.ExpiredAt = timeOrZero(expiredNS)
 		o.Status = offer.Status(status)
 		o.Outcome = offer.Outcome(outcome)
+		o.Resolution.State = offer.ResolutionState(resState)
+		if o.Resolution.State == "" {
+			o.Resolution.State = offer.ResolutionUnattempted
+		}
+		o.Resolution.At = timeOrZero(resolvedNS)
 		out = append(out, o)
 	}
 	return out, rows.Err()

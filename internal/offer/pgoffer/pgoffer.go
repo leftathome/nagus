@@ -69,14 +69,28 @@ CREATE TABLE IF NOT EXISTS offers (
 	min_price_cents  BIGINT NOT NULL DEFAULT 0,
 	status           TEXT NOT NULL DEFAULT 'active',
 	outcome          TEXT NOT NULL DEFAULT '',
-	expired_at_ns    BIGINT NOT NULL DEFAULT 0
+	expired_at_ns    BIGINT NOT NULL DEFAULT 0,
+	resolution_state      TEXT NOT NULL DEFAULT 'unattempted',
+	product_id            TEXT NOT NULL DEFAULT '',
+	resolution_generation BIGINT NOT NULL DEFAULT 0,
+	resolved_at_ns        BIGINT NOT NULL DEFAULT 0
 );
+
+-- quark resolution columns, added after the table first shipped. ADD COLUMN IF
+-- NOT EXISTS makes this idempotent on every startup and additive on an existing
+-- database: every stored offer defaults to unattempted, which is exactly true.
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS resolution_state TEXT NOT NULL DEFAULT 'unattempted';
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS product_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS resolution_generation BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS resolved_at_ns BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
 CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
 -- The dedup path: "every offer for this product across sellers".
 CREATE INDEX IF NOT EXISTS idx_offers_provisional_key ON offers(provisional_key);
+CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_state);
+CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
 `
 
 // New opens a pgxpool against dsn and ensures the offer schema exists.
@@ -135,6 +149,14 @@ INSERT INTO offers (
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 ON CONFLICT (id) DO UPDATE SET
+  -- Resolution survives a re-ingest of the SAME hint and resets on a changed
+  -- one. SET expressions read the row as it was before this update, so these
+  -- compare the stored hint with the incoming one even though the hint columns
+  -- are overwritten below. Put never writes a caller-supplied resolution.
+  resolution_state = CASE WHEN `+sameHint+` THEN offers.resolution_state ELSE 'unattempted' END,
+  product_id = CASE WHEN `+sameHint+` THEN offers.product_id ELSE '' END,
+  resolution_generation = CASE WHEN `+sameHint+` THEN offers.resolution_generation ELSE 0 END,
+  resolved_at_ns = CASE WHEN `+sameHint+` THEN offers.resolved_at_ns ELSE 0 END,
   source_url = EXCLUDED.source_url,
   title = EXCLUDED.title,
   body = EXCLUDED.body,
@@ -212,6 +234,9 @@ func (s *Store) Query(ctx context.Context, q offer.Query) ([]offer.Offer, error)
 	if q.ProvisionalKey != "" {
 		add(`provisional_key = $%d`, q.ProvisionalKey)
 	}
+	if q.ProductID != "" {
+		add(`product_id = $%d`, q.ProductID)
+	}
 	if q.Seller != "" {
 		add(`seller = $%d`, q.Seller)
 	}
@@ -273,19 +298,59 @@ const selectCols = `SELECT
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
   provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
-  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns`
+  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
+  resolution_state, product_id, resolution_generation, resolved_at_ns`
+
+// sameHint is true when the stored hint equals the incoming one, column by
+// column. Used inside the upsert's CASE expressions.
+const sameHint = `(offers.hint_brand = EXCLUDED.hint_brand AND offers.hint_mpn = EXCLUDED.hint_mpn AND offers.hint_gtin = EXCLUDED.hint_gtin AND offers.hint_model = EXCLUDED.hint_model)`
+
+// storedFingerprint computes offer.ProductHint.Fingerprint in SQL.
+const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model)`
+
+// PendingResolution returns never-asked offers first, then refusals recorded
+// under a generation below retryBelowGeneration, each in id order.
+func (s *Store) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]offer.Offer, error) {
+	sqlStr := selectCols + ` FROM offers
+WHERE resolution_state IN ('unattempted', '')
+   OR (resolution_state = 'refused' AND $1 > 0 AND resolution_generation < $1)
+ORDER BY CASE WHEN resolution_state = 'refused' THEN 1 ELSE 0 END, id`
+	if limit > 0 {
+		sqlStr += fmt.Sprintf(` LIMIT %d`, limit)
+	}
+	rows, err := s.pool.Query(ctx, sqlStr, retryBelowGeneration)
+	if err != nil {
+		return nil, fmt.Errorf("pgoffer: pending resolution: %w", err)
+	}
+	defer rows.Close()
+	return scanOffers(rows)
+}
+
+// RecordResolution stamps r only while the offer still carries the hint with
+// this fingerprint; the WHERE clause is the race guard.
+func (s *Store) RecordResolution(ctx context.Context, offerID, hintFingerprint string, r offer.Resolution) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+UPDATE offers SET resolution_state = $1, product_id = $2, resolution_generation = $3, resolved_at_ns = $4
+WHERE id = $5 AND `+storedFingerprint+` = $6`,
+		string(r.State), r.ProductID, r.Generation, nsOrZero(r.At), offerID, hintFingerprint)
+	if err != nil {
+		return false, fmt.Errorf("pgoffer: record resolution: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
 
 func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 	var out []offer.Offer
 	for rows.Next() {
 		var o offer.Offer
-		var aspects, status, outcome string
-		var firstNS, lastNS, expiredNS int64
+		var aspects, status, outcome, resState string
+		var firstNS, lastNS, expiredNS, resolvedNS int64
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
 			&o.ProvisionalKey, &o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
+			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
 		); err != nil {
 			return nil, fmt.Errorf("pgoffer: scan: %w", err)
 		}
@@ -298,6 +363,11 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 		o.LastSeen = timeOrZero(lastNS)
 		o.ExpiredAt = timeOrZero(expiredNS)
 		o.Status = offer.Status(status)
+		o.Resolution.State = offer.ResolutionState(resState)
+		if o.Resolution.State == "" {
+			o.Resolution.State = offer.ResolutionUnattempted
+		}
+		o.Resolution.At = timeOrZero(resolvedNS)
 		o.Outcome = offer.Outcome(outcome)
 		out = append(out, o)
 	}
