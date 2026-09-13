@@ -115,6 +115,11 @@ func (h ProductHint) Fingerprint() string {
 	return h.Brand + "|" + h.MPN + "|" + h.GTIN + "|" + h.Model
 }
 
+// Empty reports whether the hint states nothing at all.
+func (h ProductHint) Empty() bool {
+	return h.Brand == "" && h.MPN == "" && h.GTIN == "" && h.Model == ""
+}
+
 // ResolutionState is where an offer stands with quark, the service that owns
 // product identity (spec: quark design section 5, "Coupling (D4)").
 type ResolutionState string
@@ -132,6 +137,15 @@ const (
 	// ResolutionQuarantined: quark flagged the hint as bad-faith. Not retried
 	// by generation advance; that is a review-queue decision on quark's side.
 	ResolutionQuarantined ResolutionState = "quarantined"
+	// ResolutionUnidentifiable: the offer's hint is entirely EMPTY, so there is
+	// nothing for quark to identify and nagus never asks. Recorded locally
+	// rather than sent, for two reasons: a guaranteed refusal is wasted work on
+	// every generation advance, and -- because nagus relays every store as ONE
+	// authenticated principal -- counting hint-less stores as refusals would
+	// pin quark's refused-ratio alert above its threshold forever. The state is
+	// never pending, and resets to Unattempted as soon as the source starts
+	// stating a hint (Put resets resolution on any hint change).
+	ResolutionUnidentifiable ResolutionState = "unidentifiable"
 )
 
 // Resolution is quark's answer for an offer's current hint.

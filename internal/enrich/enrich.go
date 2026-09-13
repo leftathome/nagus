@@ -54,8 +54,9 @@ type Stats struct {
 	BatchesOK     int64
 	BatchesFailed int64
 	Unauthorized  int64
-	// Recorded counts stamped answers by resulting state.
-	Resolved, Refused, Quarantined int64
+	// Recorded counts stamped answers by resulting state. Unidentifiable
+	// offers are recorded locally without a quark call (empty hint).
+	Resolved, Refused, Quarantined, Unidentifiable int64
 	// Discarded counts answers dropped because the offer's hint changed while
 	// quark was answering (or the offer was deleted).
 	Discarded  int64
@@ -163,7 +164,44 @@ func leadingRun(offers []offer.Offer) []offer.Offer {
 	return offers
 }
 
-func (e *Enricher) resolveBatch(ctx context.Context, batch []offer.Offer, retry bool) (recorded, discarded int, err error) {
+func (e *Enricher) resolveBatch(ctx context.Context, all []offer.Offer, retry bool) (recorded, discarded int, err error) {
+	now := time.Now
+	if e.Now != nil {
+		now = e.Now
+	}
+	at := now().UTC()
+
+	// An EMPTY hint gives quark nothing to identify. Record it locally instead
+	// of spending a call on a guaranteed refusal -- and, because nagus relays
+	// every store as one principal, keep hint-less stores out of quark's
+	// refused ratio, where they would hold its alert permanently above
+	// threshold. See offer.ResolutionUnidentifiable.
+	batch := make([]offer.Offer, 0, len(all))
+	var nUnidentifiable int64
+	for _, o := range all {
+		if !o.ProductHint.Empty() {
+			batch = append(batch, o)
+			continue
+		}
+		applied, rerr := e.Offers.RecordResolution(ctx, o.ID, o.ProductHint.Fingerprint(),
+			offer.Resolution{State: offer.ResolutionUnidentifiable, At: at})
+		if rerr != nil {
+			return recorded, discarded, fmt.Errorf("record resolution: %w", rerr)
+		}
+		if applied {
+			recorded++
+			nUnidentifiable++
+		} else {
+			discarded++
+		}
+	}
+	if nUnidentifiable > 0 {
+		e.count(func(s *Stats) { s.Unidentifiable += nUnidentifiable })
+	}
+	if len(batch) == 0 {
+		return recorded, discarded, nil
+	}
+
 	hints := make([]quark.Hint, len(batch))
 	fingerprints := make([]string, len(batch))
 	for i, o := range batch {
@@ -191,17 +229,13 @@ func (e *Enricher) resolveBatch(ctx context.Context, batch []offer.Offer, retry 
 				s.Unauthorized++
 			}
 		})
-		return 0, 0, err
+		// Blank offers recorded above stay recorded; report them honestly.
+		return recorded, discarded, err
 	}
 	if resp.CatalogGeneration > e.generation.Load() {
 		e.generation.Store(resp.CatalogGeneration)
 	}
 
-	now := time.Now
-	if e.Now != nil {
-		now = e.Now
-	}
-	at := now().UTC()
 	var nResolved, nRefused, nQuarantined int64
 	for i, r := range resp.Results {
 		stamp := offer.Resolution{Generation: resp.CatalogGeneration, At: at}

@@ -228,3 +228,42 @@ func TestBatchesRespectTheCap(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyHintIsRecordedLocallyWithoutACall(t *testing.T) {
+	s := offer.NewMemoryStore()
+	blank := offer.Offer{SourceID: "shopify:waterpanther", SourceKey: "wp1", PriceCents: 100, LastSeen: t0}
+	if err := s.Put(context.Background(), blank); err != nil {
+		t.Fatal(err)
+	}
+	blank.ID = offer.DeterministicID(blank.SourceID, blank.SourceKey)
+	hinted := seed(t, s, "shopify:spd", "a", "ST1")
+
+	q := &fakeQuark{}
+	e := newEnricher(s, q)
+	if _, err := e.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass: %v", err)
+	}
+	if r := state(t, s, blank); r.State != offer.ResolutionUnidentifiable {
+		t.Fatalf("empty-hint offer = %+v, want unidentifiable", r)
+	}
+	for _, c := range q.calls {
+		for _, h := range c.hints {
+			if h.Brand == "" && h.MPN == "" && h.GTIN == "" && h.Model == "" {
+				t.Fatal("an empty hint was sent to quark")
+			}
+		}
+	}
+	if r := state(t, s, hinted); r.State != offer.ResolutionResolved {
+		t.Fatalf("hinted offer = %+v", r)
+	}
+	if e.Snapshot().Unidentifiable != 1 {
+		t.Fatalf("unidentifiable count = %d", e.Snapshot().Unidentifiable)
+	}
+	// And a batch of ONLY blank offers makes no call at all.
+	s2 := offer.NewMemoryStore()
+	_ = s2.Put(context.Background(), offer.Offer{SourceID: "x", SourceKey: "1", LastSeen: t0})
+	q2 := &fakeQuark{}
+	if _, err := newEnricher(s2, q2).RunPass(context.Background()); err != nil || len(q2.calls) != 0 {
+		t.Fatalf("calls=%d err=%v; an all-blank pass must not call quark", len(q2.calls), err)
+	}
+}

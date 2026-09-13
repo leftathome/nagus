@@ -68,6 +68,7 @@ func writeEnrichMetrics(w io.Writer, s enrich.Stats) {
 	fmt.Fprintf(w, "nagus_quark_offers_recorded_total{state=\"resolved\"} %d\n", s.Resolved)
 	fmt.Fprintf(w, "nagus_quark_offers_recorded_total{state=\"refused\"} %d\n", s.Refused)
 	fmt.Fprintf(w, "nagus_quark_offers_recorded_total{state=\"quarantined\"} %d\n", s.Quarantined)
+	fmt.Fprintf(w, "nagus_quark_offers_recorded_total{state=\"unidentifiable\"} %d\n", s.Unidentifiable)
 	fmt.Fprintf(w, "# HELP nagus_quark_answers_discarded_total Answers dropped because the offer's hint changed while quark was answering.\n")
 	fmt.Fprintf(w, "# TYPE nagus_quark_answers_discarded_total counter\n")
 	fmt.Fprintf(w, "nagus_quark_answers_discarded_total %d\n", s.Discarded)

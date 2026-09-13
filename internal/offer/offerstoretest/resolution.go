@@ -233,3 +233,26 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+func unidentifiableIsNeverPending(t *testing.T, s offer.Store) {
+	o := Offer("shop:a", "blank", 100, T0) // no hint at all
+	put(t, s, o)
+	if !record(t, s, o, offer.Resolution{State: offer.ResolutionUnidentifiable, At: T1}) {
+		t.Fatal("RecordResolution(unidentifiable) did not apply")
+	}
+	pending, err := s.PendingResolution(context.Background(), 0, 99)
+	if err != nil {
+		t.Fatalf("PendingResolution: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("an unidentifiable offer is pending: %d; it must never be sent, even on retry", len(pending))
+	}
+	// The source starts stating a hint: the offer must become askable again.
+	withHint := hinted("shop:a", "blank", "ST7")
+	withHint.LastSeen = T2
+	put(t, s, withHint)
+	pending, _ = s.PendingResolution(context.Background(), 0, 0)
+	if len(pending) != 1 {
+		t.Fatalf("after the source began stating a hint, pending = %d, want 1", len(pending))
+	}
+}

@@ -83,6 +83,7 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("PendingResolutionSelection", func(t *testing.T) { pendingResolutionSelection(t, newStore(t)) })
 	t.Run("PendingResolutionLimitPrefersUnattempted", func(t *testing.T) { pendingResolutionLimitPrefersUnattempted(t, newStore(t)) })
 	t.Run("QueryByProductID", func(t *testing.T) { queryByProductID(t, newStore(t)) })
+	t.Run("UnidentifiableIsNeverPending", func(t *testing.T) { unidentifiableIsNeverPending(t, newStore(t)) })
 	t.Run("Validation", func(t *testing.T) { validation(t, newStore(t)) })
 	t.Run("FiltersAndOrdering", func(t *testing.T) { filtersAndOrdering(t, newStore(t)) })
 	t.Run("SellerFilter", func(t *testing.T) { sellerFilter(t, newStore(t)) })
