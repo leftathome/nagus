@@ -229,10 +229,10 @@ ON CONFLICT(id) DO UPDATE SET
   -- CASEs compare the stored hint with the incoming one even though the hint
   -- columns are themselves being overwritten below. New rows take the column
   -- defaults (unattempted); Put never writes a caller-supplied resolution.
-  resolution_state = CASE WHEN ` + sameHint + ` THEN offers.resolution_state ELSE 'unattempted' END,
-  product_id = CASE WHEN ` + sameHint + ` THEN offers.product_id ELSE '' END,
-  resolution_generation = CASE WHEN ` + sameHint + ` THEN offers.resolution_generation ELSE 0 END,
-  resolved_at_ns = CASE WHEN ` + sameHint + ` THEN offers.resolved_at_ns ELSE 0 END,
+  resolution_state = CASE WHEN `+sameHint+` THEN offers.resolution_state ELSE 'unattempted' END,
+  product_id = CASE WHEN `+sameHint+` THEN offers.product_id ELSE '' END,
+  resolution_generation = CASE WHEN `+sameHint+` THEN offers.resolution_generation ELSE 0 END,
+  resolved_at_ns = CASE WHEN `+sameHint+` THEN offers.resolved_at_ns ELSE 0 END,
   source_url=excluded.source_url, title=excluded.title, body=excluded.body,
   price_cents=excluded.price_cents, currency=excluded.currency,
   condition=excluded.condition, seller=excluded.seller,
