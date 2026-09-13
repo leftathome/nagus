@@ -71,7 +71,7 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("ExpiryAndRetentionIndependent", func(t *testing.T) { expiryAndRetentionIndependent(t, newStore(t)) })
 	t.Run("SummarizeDecayRejected", func(t *testing.T) { summarizeDecayRejected(t, newStore(t)) })
 	t.Run("OutcomeRoundTrips", func(t *testing.T) { outcomeRoundTrips(t, newStore(t)) })
-	t.Run("GroupsByProvisionalKey", func(t *testing.T) { groupsByProvisionalKey(t, newStore(t)) })
+	t.Run("GroupsByProductID", func(t *testing.T) { groupsByProductID(t, newStore(t)) })
 	// quark resolution contract -- see resolution.go.
 	t.Run("NewOfferIsUnattempted", func(t *testing.T) { newOfferIsUnattempted(t, newStore(t)) })
 	t.Run("PutCannotSetResolution", func(t *testing.T) { putCannotSetResolution(t, newStore(t)) })
@@ -310,17 +310,27 @@ func outcomeRoundTrips(t *testing.T, s offer.Store) {
 	}
 }
 
-func groupsByProvisionalKey(t *testing.T, s offer.Store) {
+// Grouping across sellers is by quark's product id: "every offer for this
+// product" is a Query on the id RecordResolution stamped.
+func groupsByProductID(t *testing.T, s offer.Store) {
+	stamp := func(o offer.Offer, productID string) {
+		t.Helper()
+		if !record(t, s, o, offer.Resolution{State: offer.ResolutionResolved, ProductID: productID, Generation: 1, At: T1}) {
+			t.Fatalf("resolution for %s/%s not applied", o.SourceID, o.SourceKey)
+		}
+	}
 	for i, src := range []string{"shopify:a", "shopify:b", "ebay:ebay"} {
 		o := Offer(src, "k", int64(10000+i*100), T1)
-		o.ProvisionalKey = "mpn:abc123"
+		o.ProductHint = offer.ProductHint{Brand: "WD", MPN: "abc123"}
 		o.Seller = src
 		put(t, s, o)
+		stamp(o, "p-abc123")
 	}
 	other := Offer("shopify:a", "other", 999, T1)
-	other.ProvisionalKey = "mpn:zzz"
+	other.ProductHint = offer.ProductHint{Brand: "WD", MPN: "zzz"}
 	put(t, s, other)
-	got, err := s.Query(context.Background(), offer.Query{ProvisionalKey: "mpn:abc123"})
+	stamp(other, "p-zzz")
+	got, err := s.Query(context.Background(), offer.Query{ProductID: "p-abc123"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}

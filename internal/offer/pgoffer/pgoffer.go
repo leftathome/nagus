@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS offers (
 	condition        TEXT NOT NULL DEFAULT '',
 	seller           TEXT NOT NULL DEFAULT '',
 	aspects_json     TEXT NOT NULL DEFAULT '{}',
+	-- retired 2026-09-13: was the output of ComputeProvisionalKey, superseded by
+-- the quark product_id. Kept, unwritten, so a fresh schema matches a migrated one;
+-- existing rows keep their old values and nothing reads them.
 	provisional_key  TEXT NOT NULL DEFAULT '',
 	hint_brand       TEXT NOT NULL DEFAULT '',
 	hint_mpn         TEXT NOT NULL DEFAULT '',
@@ -88,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
 CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
 -- The dedup path: "every offer for this product across sellers".
-CREATE INDEX IF NOT EXISTS idx_offers_provisional_key ON offers(provisional_key);
+DROP INDEX IF EXISTS idx_offers_provisional_key;
 CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_state);
 CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
 `
@@ -145,9 +148,9 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 ON CONFLICT (id) DO UPDATE SET
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions read the row as it was before this update, so these
@@ -165,7 +168,6 @@ ON CONFLICT (id) DO UPDATE SET
   condition = EXCLUDED.condition,
   seller = EXCLUDED.seller,
   aspects_json = EXCLUDED.aspects_json,
-  provisional_key = EXCLUDED.provisional_key,
   hint_brand = EXCLUDED.hint_brand,
   hint_mpn = EXCLUDED.hint_mpn,
   hint_gtin = EXCLUDED.hint_gtin,
@@ -188,7 +190,7 @@ ON CONFLICT (id) DO UPDATE SET
   expired_at_ns = CASE WHEN EXCLUDED.status = 'active' THEN 0 ELSE EXCLUDED.expired_at_ns END`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
 		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
-		o.ProvisionalKey, o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model,
+		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
 	)
@@ -230,9 +232,6 @@ func (s *Store) Query(ctx context.Context, q offer.Query) ([]offer.Offer, error)
 	}
 	if q.SourceID != "" {
 		add(`source_id = $%d`, q.SourceID)
-	}
-	if q.ProvisionalKey != "" {
-		add(`provisional_key = $%d`, q.ProvisionalKey)
 	}
 	if q.ProductID != "" {
 		add(`product_id = $%d`, q.ProductID)
@@ -297,7 +296,7 @@ func (s *Store) ApplyRetention(ctx context.Context, sourceID string, r offer.Ret
 const selectCols = `SELECT
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
   resolution_state, product_id, resolution_generation, resolved_at_ns`
 
@@ -348,7 +347,7 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
-			&o.ProvisionalKey, &o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
+			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
 		); err != nil {

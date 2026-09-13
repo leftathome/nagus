@@ -275,47 +275,6 @@ func TestDeterministicIDIsStableAndDistinct(t *testing.T) {
 	}
 }
 
-func TestComputeProvisionalKey(t *testing.T) {
-	cases := []struct {
-		name string
-		h    ProductHint
-		want string
-	}{
-		{"mpn wins", ProductHint{Brand: "WD", MPN: "WUH722424AL5201", Model: "HC580"}, "mpn:wuh722424al5201"},
-		{"brand+model fallback", ProductHint{Brand: "Western Digital", Model: "HC580"}, "bm:westerndigital:hc580"},
-		{"punctuation and case normalized", ProductHint{MPN: " wuh-722424 "}, "mpn:wuh722424"},
-		{"nothing to key on", ProductHint{Brand: "WD"}, ""},
-		{"empty", ProductHint{}, ""},
-	}
-	for _, c := range cases {
-		if got := ComputeProvisionalKey(c.h); got != c.want {
-			t.Errorf("%s: got %q want %q", c.name, got, c.want)
-		}
-	}
-}
-
-// Grouping across sellers is the whole point of the provisional key.
-func TestQueryByProvisionalKeyGroupsAcrossSellers(t *testing.T) {
-	s := NewMemoryStore()
-	for i, src := range []string{"shopify:a", "shopify:b", "ebay:ebay"} {
-		o := mkOffer(src, "k", int64(10000+i*100), t1)
-		o.ProvisionalKey = "mpn:abc123"
-		o.Seller = src
-		mustPut(t, s, o)
-	}
-	other := mkOffer("shopify:a", "other", 999, t1)
-	other.ProvisionalKey = "mpn:zzz"
-	mustPut(t, s, other)
-
-	got, err := s.Query(context.Background(), Query{ProvisionalKey: "mpn:abc123"})
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("got %d offers for the group, want 3 across sellers: %v", len(got), keysOf(got))
-	}
-}
-
 // --- validation ----------------------------------------------------------------
 
 func TestValidate(t *testing.T) {

@@ -67,6 +67,11 @@ ones; it never owns product truth and never buys.
 
 ### Product identity in nagus, before quark exists
 
+> **Superseded 2026-09-13:** quark shipped and nagus resolves offers against it
+> asynchronously (`internal/enrich`); `provisionalKey` was deleted once quark
+> product ids were verified populating in production. A frozen copy survives
+> only in the serverpartdeals baseline test.
+
 quark does not exist yet. Decision: **provisional local grouping -- a limited
 best-effort dedup of similar listings, not authoritative resolution.** Each offer
 carries the raw product identifiers the source exposes
