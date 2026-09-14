@@ -3,7 +3,8 @@
 // An offer is a specific listing at a specific source selling some good. Many
 // offers refer to one product (N:1) -- eBay, serverpartdeals and waterpanther
 // each have their own offer for the same drive. Product identity belongs to the
-// manufacturer, not the seller, so it is NOT resolved here; see ProvisionalKey.
+// manufacturer, not the seller, so it is NOT resolved here: quark resolves it
+// asynchronously and the answer lands in Offer.Resolution (package enrich).
 //
 // # Why this layer exists
 //
@@ -188,11 +189,12 @@ type Offer struct {
 	// Aspects are source structured attributes: keys trusted, VALUES UNTRUSTED.
 	Aspects map[string]string
 
-	// ProvisionalKey groups offers believed to be the same product across
-	// sellers. It is a deliberately imperfect, throwaway stand-in for quark's
-	// authoritative productID -- see ComputeProvisionalKey.
-	ProvisionalKey string
-	ProductHint    ProductHint
+	// ProductHint is what the source says the product is. nagus does not group
+	// on it; quark resolves it to Resolution.ProductID, which is the grouping
+	// key. (ComputeProvisionalKey, the local stand-in, was deleted once quark
+	// ids were verified populating in production -- spec D4 rejects a
+	// permanent local fallback.)
+	ProductHint ProductHint
 
 	// Resolution is quark's answer for ProductHint. It is READ-ONLY to Put:
 	// adapters ignore any value supplied there, preserve the stored one while
@@ -244,36 +246,6 @@ func (o Offer) Validate() error {
 func DeterministicID(sourceID, sourceKey string) string {
 	sum := sha256.Sum256([]byte(sourceID + "\x00" + sourceKey))
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-// ComputeProvisionalKey derives a best-effort cross-seller grouping key from the
-// identifiers a source happens to expose: MPN if present, else brand+model.
-//
-// It is EXPECTED to be imperfect against real, messy, cross-source data. It is
-// not entity resolution and must not be treated as authoritative -- when quark
-// ships it supersedes this with a real productID and the matching logic here is
-// thrown away. Returns "" when there is nothing to key on, which callers must
-// treat as "ungrouped", never as a group of its own.
-func ComputeProvisionalKey(h ProductHint) string {
-	norm := func(s string) string {
-		s = strings.ToLower(strings.TrimSpace(s))
-		var b strings.Builder
-		for _, r := range s {
-			switch {
-			case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-				b.WriteRune(r)
-			}
-		}
-		return b.String()
-	}
-	if mpn := norm(h.MPN); mpn != "" {
-		return "mpn:" + mpn
-	}
-	brand, model := norm(h.Brand), norm(h.Model)
-	if brand != "" && model != "" {
-		return "bm:" + brand + ":" + model
-	}
-	return ""
 }
 
 // --- retention ----------------------------------------------------------------
@@ -360,8 +332,6 @@ func (r Retention) Validate() error {
 type Query struct {
 	// SourceID limits to one source; "" = any.
 	SourceID string
-	// ProvisionalKey limits to one provisional product group; "" = any.
-	ProvisionalKey string
 	// ProductID limits to offers quark resolved to this product; "" = any.
 	ProductID string
 	// Seller limits to one vendor; "" = any.

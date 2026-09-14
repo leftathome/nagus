@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"strings"
 	"testing"
 	"time"
 	"unicode"
@@ -95,7 +96,7 @@ func TestServerpartdealsDedupBaseline(t *testing.T) {
 			Model: r.Aspects["model"],
 		}
 		// Spec (quark section 11, slice 1): scan hint fields for non-ASCII
-		// BEFORE asserting parity. ComputeProvisionalKey silently deletes such
+		// BEFORE asserting parity. provisionalKey (below) silently deletes such
 		// runes and groups the offer; quark's gate 1 refuses it. Every such hint
 		// is a place the two algorithms are allowed to disagree.
 		for _, s := range []string{h.Brand, h.MPN, h.GTIN, h.Model} {
@@ -106,7 +107,7 @@ func TestServerpartdealsDedupBaseline(t *testing.T) {
 			}
 		}
 		hints = append(hints, exportedHint{Category: "hdd", Brand: h.Brand, MPN: h.MPN, GTIN: h.GTIN, Model: h.Model})
-		if k := offer.ComputeProvisionalKey(h); k != "" {
+		if k := provisionalKey(h); k != "" {
 			keyed++
 			groups[k]++
 		}
@@ -144,7 +145,7 @@ func TestServerpartdealsDedupBaseline(t *testing.T) {
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %d, want %d. The fixture is frozen, so a change here is a change "+
-				"to the connector's hint emission or to ComputeProvisionalKey: explain it, "+
+				"to the connector's hint emission or to provisionalKey: explain it, "+
 				"and move quark's parity number with it.", c.name, c.got, c.want)
 		}
 	}
@@ -157,4 +158,32 @@ func hasNonASCII(s string) bool {
 		}
 	}
 	return false
+}
+
+// provisionalKey is a TEST-LOCAL, FROZEN copy of the deleted
+// offer.ComputeProvisionalKey (nagus main 7778b807). Production no longer
+// groups offers locally -- quark's product id does (spec D4) -- but quark's
+// parity acceptance number (104 hints -> 35 products) was derived with this
+// exact algorithm, so it stays here to keep that number reproducible. Do not
+// improve it: changing it moves a baseline, not a feature.
+func provisionalKey(h offer.ProductHint) string {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.TrimSpace(s))
+		var b strings.Builder
+		for _, r := range s {
+			switch {
+			case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	if mpn := norm(h.MPN); mpn != "" {
+		return "mpn:" + mpn
+	}
+	brand, model := norm(h.Brand), norm(h.Model)
+	if brand != "" && model != "" {
+		return "bm:" + brand + ":" + model
+	}
+	return ""
 }

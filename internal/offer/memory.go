@@ -106,9 +106,6 @@ func (m *MemoryStore) Query(ctx context.Context, q Query) ([]Offer, error) {
 		if q.SourceID != "" && o.SourceID != q.SourceID {
 			continue
 		}
-		if q.ProvisionalKey != "" && o.ProvisionalKey != q.ProvisionalKey {
-			continue
-		}
 		if q.ProductID != "" && o.Resolution.ProductID != q.ProductID {
 			continue
 		}

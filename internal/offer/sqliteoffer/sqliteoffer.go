@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS offers (
 	condition        TEXT NOT NULL DEFAULT '',
 	seller           TEXT NOT NULL DEFAULT '',
 	aspects_json     TEXT NOT NULL DEFAULT '{}',
+	-- retired 2026-09-13: was the output of ComputeProvisionalKey, superseded by
+-- the quark product_id. Kept, unwritten, so a fresh schema matches a migrated one;
+-- existing rows keep their old values and nothing reads them.
 	provisional_key  TEXT NOT NULL DEFAULT '',
 	hint_brand       TEXT NOT NULL DEFAULT '',
 	hint_mpn         TEXT NOT NULL DEFAULT '',
@@ -68,8 +71,9 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
 CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
--- The dedup path: "every offer for this product across sellers".
-CREATE INDEX IF NOT EXISTS idx_offers_provisional_key ON offers(provisional_key);
+-- The provisional-key dedup index is gone with the key; product_id (below)
+-- is the dedup path now.
+DROP INDEX IF EXISTS idx_offers_provisional_key;
 `
 
 // resolutionColumns are the quark-resolution columns, added after the table
@@ -220,9 +224,9 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions see the row as it was BEFORE this update, so these
@@ -236,7 +240,7 @@ ON CONFLICT(id) DO UPDATE SET
   source_url=excluded.source_url, title=excluded.title, body=excluded.body,
   price_cents=excluded.price_cents, currency=excluded.currency,
   condition=excluded.condition, seller=excluded.seller,
-  aspects_json=excluded.aspects_json, provisional_key=excluded.provisional_key,
+  aspects_json=excluded.aspects_json,
   hint_brand=excluded.hint_brand, hint_mpn=excluded.hint_mpn,
   hint_gtin=excluded.hint_gtin, hint_model=excluded.hint_model,
   first_seen_ns=excluded.first_seen_ns, last_seen_ns=excluded.last_seen_ns,
@@ -244,7 +248,7 @@ ON CONFLICT(id) DO UPDATE SET
   outcome=excluded.outcome, expired_at_ns=excluded.expired_at_ns`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
 		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
-		o.ProvisionalKey, o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model,
+		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
 	)
@@ -283,10 +287,6 @@ func (s *Store) Query(ctx context.Context, q offer.Query) ([]offer.Offer, error)
 	if q.SourceID != "" {
 		where = append(where, `source_id = ?`)
 		args = append(args, q.SourceID)
-	}
-	if q.ProvisionalKey != "" {
-		where = append(where, `provisional_key = ?`)
-		args = append(args, q.ProvisionalKey)
 	}
 	if q.ProductID != "" {
 		where = append(where, `product_id = ?`)
@@ -395,7 +395,7 @@ WHERE id = ? AND `+storedFingerprint+` = ?`,
 const selectCols = `SELECT
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  provisional_key, hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
   resolution_state, product_id, resolution_generation, resolved_at_ns`
 
@@ -409,7 +409,7 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
-			&o.ProvisionalKey, &o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
+			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
 		); err != nil {
