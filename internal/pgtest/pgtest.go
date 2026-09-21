@@ -42,11 +42,22 @@ func DSN(t testing.TB, name string) string {
 	}
 	db := strings.TrimPrefix(u.Path, "/") + "_" + name
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Wait for the server: CI's postgres service container starts alongside
+	// the job, and the first package to run can get there before it accepts
+	// connections (pipeline #2660: "connection refused" at 0.00s).
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	conn, err := pgx.Connect(ctx, base)
-	if err != nil {
-		t.Fatalf("pgtest: connect: %v", err)
+	var conn *pgx.Conn
+	for {
+		conn, err = pgx.Connect(ctx, base)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("pgtest: connect (waited for the server): %v", err)
+		case <-time.After(time.Second):
+		}
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{db}.Sanitize()); err != nil {
