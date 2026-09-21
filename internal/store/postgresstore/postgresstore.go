@@ -280,3 +280,11 @@ func escapeLike(s string) string {
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
 }
+
+// Delete removes one item by id (absent is not an error).
+func (s *Store) Delete(ctx context.Context, id string) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("postgresstore: delete: %w", err)
+	}
+	return nil
+}

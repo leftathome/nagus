@@ -2,6 +2,7 @@ package wine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -462,7 +463,7 @@ func TestExtract_StampsOnlyWithAKnownProducer(t *testing.T) {
 
 // A store sale yields list_price_cents and discount_pct; no sale, no fields.
 func TestExtract_StoreDiscount(t *testing.T) {
-	s := sanitized("Summer Whites Trio", "")
+	s := sanitized("Summer Whites Trio", "Three white wines: 2022 Sauvignon Blanc, Chardonnay and Fume Blanc.")
 	s.PriceCents = 17850
 	s.Aspects = map[string]string{"compare_at_cents": "21000"}
 	it, err := New().Extract(context.Background(), s)
@@ -478,5 +479,19 @@ func TestExtract_StoreDiscount(t *testing.T) {
 	}
 	if _, has := plain.Attributes["discount_pct"]; has {
 		t.Fatal("no compare_at price must mean no discount")
+	}
+}
+
+// No vintage, varietal or colour at all is merchandise (all 12 such items on
+// the live corpus were), and it is a category rejection the ingester acts on.
+func TestExtract_NoWineEvidenceIsNotWine(t *testing.T) {
+	for _, title := range []string{"Le Creuset Foil Cutter", "Iconic Key Chain", "Circle Key Chain"} {
+		_, err := New().Extract(context.Background(), sanitized(title, ""))
+		if !errors.Is(err, listing.ErrNotInCategory) {
+			t.Errorf("%q: err = %v, want ErrNotInCategory", title, err)
+		}
+	}
+	if _, err := New().Extract(context.Background(), sanitized("Bolero", "A red blend of Cabernet Sauvignon and Merlot.")); err != nil {
+		t.Fatalf("a real non-vintage wine with evidence in its description was rejected: %v", err)
 	}
 }

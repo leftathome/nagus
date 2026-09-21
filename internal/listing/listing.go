@@ -33,6 +33,7 @@ package listing
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/leftathome/nagus/internal/item"
@@ -110,3 +111,10 @@ type Extractor interface {
 	// of this category.
 	Extract(ctx context.Context, s Sanitized) (item.Item, error)
 }
+
+// ErrNotInCategory is returned (wrapped) by an Extractor when a listing is not
+// an item of its category at all -- an SSD on a hard-drive source, a gift card
+// on a winery's store. The ingester records it as a skip AND deletes any item
+// previously stored under that listing's id, so a rule added later also
+// removes what the source ingested before it existed.
+var ErrNotInCategory = errors.New("not an item of this category")

@@ -346,3 +346,23 @@ func escapeLike(s string) string {
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
 }
+
+// Delete removes one item by id, keeping the FTS mirror in sync (absent is not
+// an error).
+func (s *Store) Delete(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlitestore: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+	if _, err := tx.ExecContext(ctx, `DELETE FROM items_fts WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("sqlitestore: delete fts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("sqlitestore: delete: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlitestore: commit: %w", err)
+	}
+	return nil
+}

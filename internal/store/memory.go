@@ -118,3 +118,11 @@ func textMatch(it item.Item, text string) bool {
 	}
 	return false
 }
+
+// Delete removes one item by id (absent is not an error).
+func (m *MemoryStore) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.items, id)
+	return nil
+}
