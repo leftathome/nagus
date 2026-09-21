@@ -417,3 +417,25 @@ func TestTokenize(t *testing.T) {
 		}
 	}
 }
+
+// nagus-17k: every one of these was ingested as a wine (live corpus,
+// 2026-09-21), and none of the 81 real bottles alongside them matches.
+func TestIsMerchandise(t *testing.T) {
+	for _, title := range []string{
+		"Mushroom Madness Tickets", "Gift Card!", "Wine Aerator", "Two Prong Wine Opener",
+		"Single Bottle Wine Tote", "Black and Gold Marble Coasters", "Branded Hat",
+	} {
+		if !isMerchandise(title) {
+			t.Errorf("%q is merchandise", title)
+		}
+	}
+	for _, title := range []string{
+		"Bolero", "La Petite Fleur", "2021 The Estates Merlot, Oak Knoll",
+		"2022 The Reserve Cabernet Sauvignon, To Kalon Vineyard 1.5L", "El Jefe",
+		"Robert Mondavi Winery 60th Anniversary Commemorative Cabernet Sauvignon",
+	} {
+		if isMerchandise(title) {
+			t.Errorf("%q is a wine", title)
+		}
+	}
+}

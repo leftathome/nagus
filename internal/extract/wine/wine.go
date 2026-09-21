@@ -39,6 +39,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -92,6 +93,9 @@ func (e *Extractor) Category() string {
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
+	if isMerchandise(s.Title) {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+	}
 	text := s.Title
 	if s.Body != "" {
 		text += "\n" + s.Body
@@ -457,4 +461,19 @@ func tokenize(title string) []string {
 		tokens = append(tokens, p)
 	}
 	return tokens
+}
+
+// ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
+// pipeline records it as an extract skip.
+var ErrNotWine = errors.New("not a wine (merchandise listing)")
+
+// merchandiseRe matches what winery storefronts sell besides wine. A keyword
+// rule, deliberately, rather than "no vintage, no varietal": plenty of real
+// wines carry neither (Harbinger's non-vintage "Bolero").
+var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping fee)\b`)
+
+// isMerchandise reports whether a wine-store title is merchandise (nagus-17k:
+// robert-mondavi-winery's "Single Bottle Wine Tote" was ingested as a wine).
+func isMerchandise(title string) bool {
+	return merchandiseRe.MatchString(title)
 }

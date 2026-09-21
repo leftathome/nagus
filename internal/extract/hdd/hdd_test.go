@@ -2,6 +2,7 @@ package hdd
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -565,5 +566,41 @@ func TestExtractFallsBackWhenCapacityAspectIsJunk(t *testing.T) {
 		if got := it.Attributes["capacity_tb"]; got != "16" {
 			t.Errorf("aspect %q: capacity_tb = %q, want 16 (fallback to title)", bad, got)
 		}
+	}
+}
+
+// nagus-17k: titles from the live corpus (2026-09-21). 59 of 421 hdd rows were
+// SSDs, 7 of them ranked "great" on $/TB and pinged Telegram as drive deals.
+func TestIsSolidState(t *testing.T) {
+	for _, title := range []string{
+		`Refurbished: 15.36TB SAS 12Gb/s 3.5" Hybrid SSD for Dell PowerEdge Servers`,
+		`Refurbished: 7.68TB PCIe 3.0 x4 NVMe U.2 SSD for HPE ProLiant Servers`,
+		`Refurbished: WP Arsenal 15.36TB SAS 12Gb/s 2.5" DAS SSD`,
+		`Samsung 870 EVO 4TB Solid State Drive`,
+		`Micron 7450 PRO 3.84TB NVMe`,
+	} {
+		if !isSolidState(title) {
+			t.Errorf("%q is an SSD and must leave the hdd category", title)
+		}
+	}
+	for _, title := range []string{
+		`Seagate Exos 7E8 ST6000NM035A 6TB 3.5" 7.2K RPM 12Gb/s HDD`,
+		`Seagate FireCuda 2TB Solid State Hybrid Drive ST2000DX002`, // SSHD: platters
+		`WD Black SSHD 1TB`,
+		`HGST Ultrastar He10 10TB SAS`,
+	} {
+		if isSolidState(title) {
+			t.Errorf("%q is a hard drive and must stay", title)
+		}
+	}
+}
+
+func TestExtractRejectsSolidState(t *testing.T) {
+	_, err := New().Extract(context.Background(), listing.Sanitized{
+		SourceID: "shopify:waterpanther", SourceKey: "k",
+		Title: `Refurbished: 15.36TB SAS 12Gb/s 2.5" SSD for HPE ProLiant Servers`,
+	})
+	if !errors.Is(err, ErrNotHardDrive) {
+		t.Fatalf("err = %v, want ErrNotHardDrive", err)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -52,6 +53,9 @@ func (e *Extractor) Category() string {
 // hard-filter stage is responsible for enforcing and explaining any capacity
 // requirement.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
+	if isSolidState(s.Title) {
+		return item.Item{}, fmt.Errorf("hdd: extract: %w", ErrNotHardDrive)
+	}
 	it := item.Item{
 		ID:          deterministicID(s.SourceID, s.SourceKey),
 		Category:    "hdd",
@@ -362,4 +366,25 @@ func tokenize(title string) []string {
 		tokens = append(tokens, p)
 	}
 	return tokens
+}
+
+// ErrNotHardDrive rejects a listing that is not a hard disk drive. The ingest
+// pipeline records it as an extract skip.
+var ErrNotHardDrive = errors.New("not a hard disk drive (solid-state listing)")
+
+// solidStateRe matches solid-state storage named in a title.
+var solidStateRe = regexp.MustCompile(`(?i)\b(ssd|nvme)\b|solid[- ]state`)
+
+// hybridRe matches solid-state HYBRID drives (SSHD): spinning platters with a
+// flash cache, which ARE hard drives and stay in the category.
+var hybridRe = regexp.MustCompile(`(?i)\bsshd\b|solid[- ]state hybrid`)
+
+// isSolidState reports whether a title describes an SSD rather than a hard
+// drive (nagus-17k). Sources that sell both without a usable product type put
+// SSDs into the hdd category: waterpanther did, and "Refurbished: 15.36TB SAS
+// 12Gb/s 3.5" Hybrid SSD" ranked "great" on $/TB against spinning-disk
+// references and pinged Telegram. Per-source config cannot catch this (the
+// store leaves product_type empty), so it is a category rule for every source.
+func isSolidState(title string) bool {
+	return solidStateRe.MatchString(title) && !hybridRe.MatchString(title)
 }
