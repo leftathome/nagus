@@ -154,13 +154,18 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 
 	// LWIN identity resolution (optional).
 	if e.Resolver != nil {
-		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage})
+		producer := strings.TrimSpace(s.Aspects["wine_producer"])
+		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage, Producer: producer})
 		it.Attributes["lwin_route"] = string(res.Route)
 		if res.Route != lwin.RouteReview {
 			it.Attributes["lwin_candidate"] = res.Best.Record.LWIN11(vintage)
 			it.Attributes["lwin_score"] = strconv.FormatFloat(res.Best.Score, 'f', 1, 64)
 		}
-		if res.Route == lwin.RouteAuto && e.Stamp {
+		// Stamped only when the producer was KNOWN, not inferred from the
+		// title: measured on the live listings, title-only auto matches were
+		// mostly wrong ("Bolero" -> producer Bolero), while producer-hinted
+		// ones were right (24 of 24 on Robert Mondavi's store, 2026-09-21).
+		if res.Route == lwin.RouteAuto && e.Stamp && producer != "" {
 			it.CanonicalID = res.Best.Record.LWIN11(vintage)
 		}
 	}

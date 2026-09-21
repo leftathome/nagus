@@ -186,7 +186,9 @@ func TestExtract_LWINResolverStampsOnlyAutoRoute(t *testing.T) {
 	})
 	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
 
-	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
+	s := sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", "")
+	s.Aspects = map[string]string{"wine_producer": "Leonetti Cellar"}
+	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -437,5 +439,23 @@ func TestIsMerchandise(t *testing.T) {
 		if isMerchandise(title) {
 			t.Errorf("%q is a wine", title)
 		}
+	}
+}
+
+// nagus-86s: stamping requires the producer to be KNOWN (declared or the
+// producer store's vendor), never inferred from the title alone. Title-only
+// auto matches were mostly wrong on the live listings; producer-hinted ones
+// were right.
+func TestExtract_StampsOnlyWithAKnownProducer(t *testing.T) {
+	db := lwin.NewDB([]lwin.Record{
+		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
+	})
+	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
+	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.CanonicalID != "" || it.Attributes["lwin_candidate"] != "11012452019" {
+		t.Fatalf("title-only auto match: canonical=%q candidate=%q; want shadow only", it.CanonicalID, it.Attributes["lwin_candidate"])
 	}
 }

@@ -173,3 +173,54 @@ func TestResolve_AutoRequiresProducerAgreement(t *testing.T) {
 		t.Fatalf("a title naming the producer must still auto-match: %+v", res)
 	}
 }
+
+// Records shaped like Robert Mondavi's real LWIN rows (2026-09 export).
+func mondaviDB() *DB {
+	return NewDB([]Record{
+		{LWIN7: "1122646", Producer: "Robert Mondavi Winery", Wine: "Cabernet Sauvignon", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "1250624", Producer: "Robert Mondavi Winery", Wine: "Cabernet Sauvignon", Region: "California", SubRegion: "Stags Leap District"},
+		{LWIN7: "1186602", Producer: "Robert Mondavi Winery", Wine: "The Estates Cabernet Sauvignon", Region: "California", SubRegion: "Oakville"},
+		{LWIN7: "1186312", Producer: "Mondavi", Wine: "To Kalon Vineyard The Reserve Cabernet Sauvignon", Region: "California", SubRegion: "Oakville"},
+		{LWIN7: "1122659", Producer: "Robert Mondavi Winery", Wine: "Reserve Cabernet Sauvignon", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "1241626", Producer: "Robert Mondavi Winery", Wine: "Merlot", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "9000001", Producer: "Bolero", Wine: "Rouge", Region: "Bordeaux"},
+		{LWIN7: "9000002", Producer: "B & E Vineyard", Wine: "Reserve Cabernet Sauvignon", Region: "California"},
+	})
+}
+
+func TestResolve_ProducerHintPicksTheRightWine(t *testing.T) {
+	r := Resolver{DB: mondaviDB()}
+	const mondavi = "Robert Mondavi Winery"
+	for _, tc := range []struct {
+		title, want string
+		route       Route
+	}{
+		// Geography picks among same-named records.
+		{"2022 Napa Valley Cabernet Sauvignon", "1122646", RouteAuto},
+		{"2022 The Estates Cabernet Sauvignon, Oakville", "1186602", RouteAuto},
+		// The specific record beats the generic one it contains.
+		{"2021 The Reserve Cabernet Sauvignon, To Kalon Vineyard", "1186312", RouteAuto},
+		// Names something no record covers: never auto.
+		{"2022 The Estates Merlot, Oak Knoll", "", RouteAdjudicate},
+		{"2021 The Reserve Heritage Clone Cabernet Sauvignon, To Kalon Vineyard", "", RouteAdjudicate},
+		{"2023 The Estates Cabernet Sauvignon, W.H Vineyard", "", RouteAdjudicate},
+	} {
+		res := r.Resolve(Query{Name: tc.title, Producer: mondavi})
+		if res.Route != tc.route || (tc.want != "" && res.Best.Record.LWIN7 != tc.want) {
+			t.Errorf("%q: route %s best %s (%s), want %s %s", tc.title, res.Route,
+				res.Best.Record.LWIN7, res.Best.Record.DisplayName(), tc.route, tc.want)
+		}
+	}
+}
+
+// A known producer is a hard constraint: Harbinger's wine "Bolero" must not
+// resolve to the real producer named Bolero.
+func TestResolve_ProducerHintExcludesOtherProducers(t *testing.T) {
+	r := Resolver{DB: mondaviDB()}
+	if res := r.Resolve(Query{Name: "Bolero", Producer: "Harbinger Winery"}); res.Route == RouteAuto {
+		t.Fatalf("Bolero with producer Harbinger auto-matched %s", res.Best.Record.DisplayName())
+	}
+	if res := r.Resolve(Query{Name: "2018 The Reserve Cabernet Sauvignon, To Kalon Vineyard", Producer: "Robert Mondavi Winery"}); res.Best.Record.Producer == "B & E Vineyard" {
+		t.Fatal("a known producer must exclude other producers' records")
+	}
+}
