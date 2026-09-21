@@ -19,23 +19,38 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	// A database private to this package (nagus-0wj): packages run in
-	// parallel and must not truncate each other's tables.
+	// parallel and must not touch each other's tables.
 	dsn := pgtest.DSN(t, "postgresstore")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// ONE store per package run: New's schema DDL takes an ACCESS EXCLUSIVE
+	// lock, and so did the TRUNCATE that isolated each test; repeating both
+	// before every test stalled setup in CI whenever a reader lingered
+	// (nagus-0wj). Tests are isolated with DELETE, which readers never block.
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if shared == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		s, err := New(ctx, dsn)
+		cancel()
+		if err != nil {
+			pgtest.LogActivity(t, dsn)
+			t.Fatalf("New: %v", err)
+		}
+		shared = s // closed when the test binary exits
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
-	s, err := New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	if _, err := shared.pool.Exec(ctx, "DELETE FROM items"); err != nil {
+		pgtest.LogActivity(t, dsn)
+		t.Fatalf("reset items: %v", err)
 	}
-	if _, err := s.pool.Exec(ctx, "TRUNCATE TABLE items"); err != nil {
-		s.Close()
-		t.Fatalf("truncate items: %v", err)
-	}
-	t.Cleanup(s.Close)
-	return s
+	return shared
 }
+
+var (
+	sharedMu sync.Mutex
+	shared   *Store
+)
 
 func mkItem(id, cat string, price int64, seen time.Time, title string) item.Item {
 	return item.Item{

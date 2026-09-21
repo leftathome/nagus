@@ -70,3 +70,37 @@ func DSN(t testing.TB, name string) string {
 	u.Path = "/" + db
 	return u.String()
 }
+
+// LogActivity logs what else is running in the test database and who blocks
+// whom. Call it when a setup statement times out: a lock wait is otherwise a
+// bare "context deadline exceeded" that names nobody (nagus-0wj).
+func LogActivity(t testing.TB, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Logf("pgtest: activity: connect: %v", err)
+		return
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	rows, err := conn.Query(ctx, `
+		SELECT pid, state, coalesce(wait_event_type, ''), coalesce(wait_event, ''),
+		       pg_blocking_pids(pid)::text, left(query, 120)
+		FROM pg_stat_activity
+		WHERE datname = current_database() AND pid <> pg_backend_pid()`)
+	if err != nil {
+		t.Logf("pgtest: activity: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid int32
+		var state, waitType, wait, blockers, query string
+		if err := rows.Scan(&pid, &state, &waitType, &wait, &blockers, &query); err != nil {
+			t.Logf("pgtest: activity scan: %v", err)
+			return
+		}
+		t.Logf("pgtest: pid=%d state=%s wait=%s/%s blocked_by=%s query=%q", pid, state, waitType, wait, blockers, query)
+	}
+}

@@ -76,6 +76,12 @@ type SourceConfig struct {
 	// vendor, which some stores fill usefully ("Harbinger Winery") and some do
 	// not ("RMW").
 	WineProducer string `json:"wineProducer,omitempty"`
+	// LWINStamp opts this source in to writing LWIN canonical ids, once its
+	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
+	// lwin.stamp switch alone is not enough: a newly added source would
+	// otherwise stamp before anyone had looked at its matches (nagus-a8t --
+	// Turley stamped 47 ids on arrival, one of them wrong).
+	LWINStamp bool `json:"lwinStamp,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`

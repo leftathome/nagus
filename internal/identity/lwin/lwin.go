@@ -385,7 +385,8 @@ func (r Resolver) Resolve(q Query) Resolution {
 	best := matches[0]
 	res := Resolution{Best: best, Candidates: matches}
 	switch {
-	case best.Score >= auto && producerAgrees(qTokens, best.Record) && coverage(distinct, best.Record) >= minAutoCoverage:
+	case best.Score >= auto && producerAgrees(qTokens, best.Record) && coverage(distinct, best.Record) >= minAutoCoverage &&
+		!uncoveredNamesSibling(distinct, best.Record, db, candidates):
 		res.Route = RouteAuto
 	case best.Score >= review:
 		res.Route = RouteAdjudicate
@@ -566,6 +567,48 @@ func distinctiveTokens(query, producer []string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// uncoveredNamesSibling reports whether a distinctive title token the best
+// record does NOT cover appears in another candidate record of the same
+// producer. minAutoCoverage lets one stray word through, which is right for
+// marketing words ("Commemorative") and wrong for identity: "2023 Hayne
+// Vineyard Cabernet Sauvignon" (Turley) auto-matched Turley's plain Napa
+// Valley Cabernet Sauvignon, leaving "hayne" uncovered -- while "hayne" names
+// Turley's Hayne Vineyard Petite Syrah and Hayne Zinfandel. A word that
+// distinguishes the producer's other wines is identity-bearing, so the match
+// goes to adjudication instead.
+func uncoveredNamesSibling(distinct []string, best Record, db *DB, candidates []int) bool {
+	have := map[string]bool{}
+	for _, t := range tokens(normalizeName(best.matchText())) {
+		have[t] = true
+	}
+	var uncovered []string
+	for _, t := range distinct {
+		if !have[t] {
+			uncovered = append(uncovered, t)
+		}
+	}
+	if len(uncovered) == 0 {
+		return false
+	}
+	producer := tokens(normalizeName(best.Producer))
+	for _, idx := range candidates {
+		rec := db.records[idx]
+		if rec.LWIN7 == best.LWIN7 || !producerAgrees(producer, rec) {
+			continue
+		}
+		sib := map[string]bool{}
+		for _, t := range tokens(normalizeName(rec.matchText())) {
+			sib[t] = true
+		}
+		for _, t := range uncovered {
+			if sib[t] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // initialsTokens joins runs of single letters in a normalized title into one
