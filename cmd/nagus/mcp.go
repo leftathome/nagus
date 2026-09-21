@@ -286,7 +286,7 @@ func (s *server) mcpSearchItems(ctx context.Context, args json.RawMessage) (any,
 	if err != nil {
 		return nil, &rpcError{Code: rpcInternalError, Message: "search failed: " + err.Error()}
 	}
-	rows := scoredToRows(res)
+	rows := s.withProductIDs(ctx, scoredToRows(res))
 	text, err := json.Marshal(rows)
 	if err != nil {
 		return nil, &rpcError{Code: rpcInternalError, Message: "encode failed: " + err.Error()}

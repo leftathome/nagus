@@ -161,9 +161,11 @@ func TestEvaluateAll(t *testing.T) {
 		{Name: "big-deals", Category: "hdd"},
 		{Name: "any-good", Category: "hdd", StrongVerdicts: []string{"great", "good"}},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
-	if err != nil {
-		t.Fatalf("EvaluateAll: %v", err)
+	rs := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	for _, r := range rs {
+		if r.Err != nil {
+			t.Fatalf("EvaluateAll: %v", r.Err)
+		}
 	}
 	if len(rs) != 2 || rs[0].Watch.Name != "big-deals" || rs[1].Watch.Name != "any-good" {
 		t.Fatalf("unexpected results: %+v", rs)
@@ -185,9 +187,11 @@ func TestEvaluateAllDispatchesByCategory(t *testing.T) {
 		{Name: "land-watch", Category: "land"},
 		{Name: "hdd-watch", Category: "hdd"},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
-	if err != nil {
-		t.Fatalf("EvaluateAll: %v", err)
+	rs := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	for _, r := range rs {
+		if r.Err != nil {
+			t.Fatalf("EvaluateAll: %v", r.Err)
+		}
 	}
 	if len(rs) != 2 {
 		t.Fatalf("want 2 results, got %d", len(rs))
@@ -203,13 +207,25 @@ func TestEvaluateAllDispatchesByCategory(t *testing.T) {
 	}
 }
 
-// TestEvaluateAllUnknownCategoryErrors: a watch naming a category with no
-// configured surface is a per-watch error (it cannot silently surface nothing).
-func TestEvaluateAllUnknownCategoryErrors(t *testing.T) {
+// TestEvaluateAllUnknownCategoryIsIsolated: a watch naming a category with no
+// configured surface is a per-watch error (it cannot silently surface nothing),
+// and it does NOT take the other watches down with it -- the delivery cron
+// reads every watch from one response, so an abort here silenced every ping.
+func TestEvaluateAllUnknownCategoryIsIsolated(t *testing.T) {
 	surfaces := map[string]*pipeline.Surface{"hdd": mkHDDSurface(t)}
-	cfg := Config{Watches: []Watch{{Name: "ghost", Category: "nope"}}}
-	if _, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow); err == nil {
-		t.Fatal("expected error for a watch naming an unconfigured category")
+	cfg := Config{Watches: []Watch{
+		{Name: "ghost", Category: "nope"},
+		{Name: "drives", Category: "hdd"},
+	}}
+	rs := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	if len(rs) != 2 {
+		t.Fatalf("got %d results, want one per watch", len(rs))
+	}
+	if rs[0].Err == nil {
+		t.Fatal("expected an error on the watch naming an unconfigured category")
+	}
+	if rs[1].Err != nil || len(rs[1].Candidates) == 0 {
+		t.Fatalf("the healthy watch must still be answered: err=%v candidates=%d", rs[1].Err, len(rs[1].Candidates))
 	}
 }
 
@@ -317,9 +333,11 @@ func TestEvaluateAllSkipsExpiredInquiries(t *testing.T) {
 		{Name: "live", Category: "hdd"},
 		{Name: "expired", Category: "hdd", ExpiresAt: inqNow.Add(-time.Hour)},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
-	if err != nil {
-		t.Fatalf("EvaluateAll: %v", err)
+	rs := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	for _, r := range rs {
+		if r.Err != nil {
+			t.Fatalf("EvaluateAll: %v", r.Err)
+		}
 	}
 	if len(rs) != 1 {
 		t.Fatalf("got %d results, want 1 -- the expired inquiry must be absent, not empty", len(rs))
@@ -328,9 +346,11 @@ func TestEvaluateAllSkipsExpiredInquiries(t *testing.T) {
 		t.Fatalf("wrong inquiry survived: %q", rs[0].Watch.Name)
 	}
 	// And it comes back once we ask at a time before it expired.
-	before, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow.Add(-2*time.Hour))
-	if err != nil {
-		t.Fatalf("EvaluateAll: %v", err)
+	before := EvaluateAll(context.Background(), surfaces, cfg, inqNow.Add(-2*time.Hour))
+	for _, r := range before {
+		if r.Err != nil {
+			t.Fatalf("EvaluateAll: %v", r.Err)
+		}
 	}
 	if len(before) != 2 {
 		t.Fatalf("got %d results before the expiry, want 2", len(before))
@@ -346,9 +366,11 @@ func TestExpiredInquiryWithUnknownCategoryDoesNotError(t *testing.T) {
 		{Name: "live", Category: "hdd"},
 		{Name: "lapsed", Category: "sneakers", ExpiresAt: inqNow.Add(-time.Hour)},
 	}}
-	rs, err := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
-	if err != nil {
-		t.Fatalf("a lapsed inquiry for a dormant category must not break evaluation: %v", err)
+	rs := EvaluateAll(context.Background(), surfaces, cfg, inqNow)
+	for _, r := range rs {
+		if r.Err != nil {
+			t.Fatalf("a lapsed inquiry for a dormant category must not break evaluation: %v", r.Err)
+		}
 	}
 	if len(rs) != 1 {
 		t.Fatalf("got %d results, want 1", len(rs))

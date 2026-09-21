@@ -267,3 +267,26 @@ func TestEmptyHintIsRecordedLocallyWithoutACall(t *testing.T) {
 		t.Fatalf("calls=%d err=%v; an all-blank pass must not call quark", len(q2.calls), err)
 	}
 }
+
+// LastCleanPass is the staleness signal the stall alert reads. A clean pass
+// stamps it -- including one with nothing to do -- and a failed pass does not.
+func TestLastCleanPassTracksOnlyCleanPasses(t *testing.T) {
+	s := offer.NewMemoryStore()
+	q := &fakeQuark{}
+	e := newEnricher(s, q)
+	if e.Snapshot().LastCleanPass != 0 {
+		t.Fatal("LastCleanPass must start at 0 (never)")
+	}
+	e.pass(context.Background()) // nothing pending: still clean
+	if got := e.Snapshot().LastCleanPass; got != t0.Unix() {
+		t.Fatalf("after an idle clean pass LastCleanPass = %d, want %d", got, t0.Unix())
+	}
+
+	seed(t, s, "shopify:spd", "a", "ST1")
+	q.err = errors.New("connection refused")
+	e.Now = func() time.Time { return t0.Add(time.Hour) }
+	e.pass(context.Background())
+	if got := e.Snapshot().LastCleanPass; got != t0.Unix() {
+		t.Fatalf("a failed pass moved LastCleanPass to %d", got)
+	}
+}

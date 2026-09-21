@@ -127,6 +127,10 @@ type Result struct {
 	Watch      Watch
 	Candidates []pipeline.Scored
 	Strong     []pipeline.Scored
+	// Err is this watch's failure, nil on success. It is carried on the
+	// result rather than aborting EvaluateAll: one mistyped or not-yet-sourced
+	// watch must not silence every other watch's pings.
+	Err error
 }
 
 // Surfacer is the read half a watch needs: query -> ranked scored results.
@@ -153,11 +157,13 @@ func Evaluate(ctx context.Context, s Surfacer, w Watch) (Result, error) {
 }
 
 // EvaluateAll evaluates every watch in the config, dispatching each to the
-// surface for its category. A watch naming an unconfigured category is an error
-// (a saved query must resolve to a real surface). A single watch's evaluation
-// error aborts (the query is deterministic; a Surface error is a store fault,
-// not per-watch noise).
-func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg Config, now time.Time) ([]Result, error) {
+// surface for its category. A watch naming an unconfigured category, or one
+// whose evaluation fails, yields a Result with Err set -- it never aborts the
+// others. It used to: a single bad watch turned /watches into a 500, and the
+// delivery cron, which reads every watch from that one response, then pinged
+// nothing at all. Adding a wine or land watch must not be able to cost the hdd
+// pings.
+func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg Config, now time.Time) []Result {
 	out := make([]Result, 0, len(cfg.Watches))
 	for _, w := range cfg.Watches {
 		// An EXPIRED inquiry is not evaluated and produces no result at all --
@@ -169,13 +175,15 @@ func EvaluateAll(ctx context.Context, surfaces map[string]*pipeline.Surface, cfg
 		}
 		sf, ok := surfaces[w.Category]
 		if !ok {
-			return nil, fmt.Errorf("watch %q: unknown category %q", w.Name, w.Category)
+			out = append(out, Result{Watch: w, Err: fmt.Errorf("watch %q: unknown category %q", w.Name, w.Category)})
+			continue
 		}
 		r, err := Evaluate(ctx, sf, w)
 		if err != nil {
-			return nil, fmt.Errorf("watch %q: %w", w.Name, err)
+			out = append(out, Result{Watch: w, Err: fmt.Errorf("watch %q: %w", w.Name, err)})
+			continue
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out
 }

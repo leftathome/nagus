@@ -282,3 +282,19 @@ probes:
     path: /readyz
     initialDelaySeconds: 3
     periodSeconds: 10
+
+# Prometheus scraping of /metrics (nagus-ff4). Needs the prometheus-operator
+# CRDs; the templates render nothing where they are absent.
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  scrapeTimeout: 10s
+
+alerts:
+  enabled: true
+  quark:
+    # No clean resolution pass for this long fires NagusQuarkEnrichmentStalled.
+    # 3x the default 10m pass interval: one slow or failed pass is not news,
+    # three in a row is.
+    stallSeconds: 1800
+    for: 15m

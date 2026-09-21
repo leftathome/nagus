@@ -92,4 +92,7 @@ func writeEnrichMetrics(w io.Writer, s enrich.Stats) {
 	fmt.Fprintf(w, "# HELP nagus_quark_catalog_generation Highest catalog generation quark has reported.\n")
 	fmt.Fprintf(w, "# TYPE nagus_quark_catalog_generation gauge\n")
 	fmt.Fprintf(w, "nagus_quark_catalog_generation %d\n", s.Generation)
+	fmt.Fprintf(w, "# HELP nagus_quark_last_clean_pass_timestamp_seconds When a resolution pass last finished without error (0 = never since start).\n")
+	fmt.Fprintf(w, "# TYPE nagus_quark_last_clean_pass_timestamp_seconds gauge\n")
+	fmt.Fprintf(w, "nagus_quark_last_clean_pass_timestamp_seconds %d\n", s.LastCleanPass)
 }

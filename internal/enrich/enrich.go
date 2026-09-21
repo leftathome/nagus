@@ -62,6 +62,11 @@ type Stats struct {
 	Discarded  int64
 	Retries    int64
 	Generation int64
+	// LastCleanPass is when a pass last finished without error (Unix seconds,
+	// 0 = never since start). A pass with nothing pending counts: "caught up"
+	// is healthy. This is the staleness gauge the stall alert reads, because
+	// counters cannot tell an idle nagus from a broken one.
+	LastCleanPass int64
 }
 
 // Snapshot returns the current counters.
@@ -98,6 +103,15 @@ func (e *Enricher) Run(ctx context.Context) {
 
 func (e *Enricher) pass(ctx context.Context) {
 	res, err := e.RunPass(ctx)
+	if err == nil {
+		now := time.Now
+		if e.Now != nil {
+			now = e.Now
+		}
+		e.mu.Lock()
+		e.stats.LastCleanPass = now().Unix()
+		e.mu.Unlock()
+	}
 	switch {
 	case errors.Is(err, quark.ErrUnauthorized):
 		e.logf("enrich: quark rejected nagus's token; offers stay unattempted until the token is fixed")

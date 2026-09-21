@@ -18,6 +18,7 @@ import (
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/enrich"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
@@ -35,6 +36,28 @@ type server struct {
 	store           store.Store
 	defaultCategory string // "" when >1 category and no explicit default
 	watches         watch.Config
+	// offers is the offer layer, nil when off. Read only to stamp quark's
+	// product id onto rows (withProductIDs).
+	offers offer.Store
+}
+
+// withProductIDs stamps quark's product id onto every row whose offer quark
+// resolved. An item and its offer share one id (both are
+// sha256(source NUL key)[:16]), so the lookup is by row id. Rows whose offer
+// is unresolved, missing, or unreadable simply carry no product id: this is
+// enrichment on a read path, never a reason to fail it.
+func (s *server) withProductIDs(ctx context.Context, rows []searchRow) []searchRow {
+	if s.offers == nil {
+		return rows
+	}
+	for i := range rows {
+		o, ok, err := s.offers.Get(ctx, rows[i].ID)
+		if err != nil || !ok || o.Resolution.State != offer.ResolutionResolved {
+			continue
+		}
+		rows[i].ProductID = o.Resolution.ProductID
+	}
+	return rows
 }
 
 // resolveCategory applies the absent-category rule: empty -> the single
@@ -136,9 +159,13 @@ type searchRow struct {
 	PriceCents int64   `json:"price_cents"`
 	Currency   string  `json:"currency"`
 	CapacityTB string  `json:"capacity_tb"`
-	Condition  string  `json:"condition"`
-	Title      string  `json:"title"`
-	SourceURL  string  `json:"source_url"`
+	// ProductID is quark's product id for this listing's offer, when quark
+	// resolved it. Two rows with one ProductID are the same product at
+	// different sellers.
+	ProductID string `json:"product_id,omitempty"`
+	Condition string `json:"condition"`
+	Title     string `json:"title"`
+	SourceURL string `json:"source_url"`
 }
 
 func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +195,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"matched":  res.Matched,
 		"filtered": res.Filtered,
-		"items":    scoredToRows(res),
+		"items":    s.withProductIDs(r.Context(), scoredToRows(res)),
 	})
 }
 
@@ -203,14 +230,14 @@ func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	results, err := watch.EvaluateAll(r.Context(), s.surfaces, s.watches, time.Now())
-	if err != nil {
-		http.Error(w, "watch evaluation failed", http.StatusInternalServerError)
-		return
-	}
+	results := watch.EvaluateAll(r.Context(), s.surfaces, s.watches, time.Now())
 	type watchOut struct {
-		Name           string      `json:"name"`
-		Audience       string      `json:"audience,omitempty"`
+		Name     string `json:"name"`
+		Audience string `json:"audience,omitempty"`
+		// Error is set when THIS watch failed; the others are still answered.
+		// Fixed text plus the watch's own name and category -- never a raw
+		// store error, which can carry a query fragment.
+		Error          string      `json:"error,omitempty"`
 		CandidateCount int         `json:"candidate_count"`
 		StrongCount    int         `json:"strong_count"`
 		Candidates     []searchRow `json:"candidates"`
@@ -218,11 +245,20 @@ func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]watchOut, 0, len(results))
 	for _, res := range results {
+		if res.Err != nil {
+			fmt.Fprintf(os.Stderr, "  watches: %v\n", res.Err)
+			out = append(out, watchOut{
+				Name: res.Watch.Name, Audience: res.Watch.Audience,
+				Error:      fmt.Sprintf("evaluation failed for watch %q (category %q)", res.Watch.Name, res.Watch.Category),
+				Candidates: []searchRow{}, Strong: []searchRow{},
+			})
+			continue
+		}
 		out = append(out, watchOut{
 			Name: res.Watch.Name, Audience: res.Watch.Audience,
 			CandidateCount: len(res.Candidates), StrongCount: len(res.Strong),
-			Candidates: scoredItemsToRows(res.Candidates),
-			Strong:     scoredItemsToRows(res.Strong),
+			Candidates: s.withProductIDs(r.Context(), scoredItemsToRows(res.Candidates)),
+			Strong:     s.withProductIDs(r.Context(), scoredItemsToRows(res.Strong)),
 		})
 	}
 	writeJSON(w, map[string]any{"watches": out})
@@ -326,7 +362,7 @@ func runServe(args []string) error {
 			def = name
 		}
 	}
-	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches}
+	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

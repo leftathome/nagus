@@ -1,0 +1,51 @@
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+{{- $ns := .Release.Namespace -}}
+{{- $job := include "nagus.fullname" . -}}
+# ruleSelectorNilUsesHelmValues is false on orac, so this is picked up from the
+# nagus namespace. The quark rules read metrics that exist only while the quark
+# resolution pass is ON (NAGUS_QUARK_URL + token set), so with it off they
+# evaluate over nothing and never fire.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "nagus.fullname" . }}
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: nagus.availability
+      interval: 1m
+      rules:
+        - alert: NagusDown
+          expr: up{job="{{ $job }}", namespace="{{ $ns }}"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "nagus is not answering scrapes"
+            description: "No deal surfacing, no watches, no Telegram pings while this fires."
+    - name: nagus.quark
+      interval: 1m
+      rules:
+        # A 401 is a TOKEN problem (rotated or mis-set Vault
+        # eso/quark/consumers#nagus_bearer_token), never transient, so any one
+        # of them is worth a look. Every pass after it fails the same way.
+        - alert: NagusQuarkUnauthorized
+          expr: increase(nagus_quark_unauthorized_total{namespace="{{ $ns }}"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "quark is rejecting nagus's bearer token"
+            description: "Offers stay unattempted until the token nagus sends matches quark's consumer secret. Check both ExternalSecrets synced from eso/quark/consumers."
+        # Staleness, not error counts: an idle nagus and a broken one both stop
+        # moving counters, but only the broken one stops finishing clean passes.
+        # A pass with nothing pending counts as clean.
+        - alert: NagusQuarkEnrichmentStalled
+          expr: (time() - nagus_quark_last_clean_pass_timestamp_seconds{namespace="{{ $ns }}"}) > {{ .Values.alerts.quark.stallSeconds }}
+          for: {{ .Values.alerts.quark.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "nagus has not finished a clean quark resolution pass in {{ "{{ $value | humanizeDuration }}" }}"
+            description: "New offers are not getting product ids. See the nagus log lines starting 'enrich:'. Usual causes: quark down or slow (quark-j7t), NetworkPolicy, or the token."
+{{- end }}
