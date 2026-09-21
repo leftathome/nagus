@@ -152,6 +152,14 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["ship_legal_to"] = strings.Join(jurisdictionTokens(raw), " ")
 	}
 
+	// Store sale: the store's own list price, when it says the listing is on
+	// sale. A signal that needs no critic scores and no price history -- the
+	// only deal signal the configured producer stores can offer today.
+	if cmp, err := strconv.ParseInt(s.Aspects["compare_at_cents"], 10, 64); err == nil && cmp > s.PriceCents && s.PriceCents > 0 {
+		it.Attributes["list_price_cents"] = strconv.FormatInt(cmp, 10)
+		it.Attributes["discount_pct"] = strconv.FormatInt((cmp-s.PriceCents)*100/cmp, 10)
+	}
+
 	// LWIN identity resolution (optional).
 	if e.Resolver != nil {
 		producer := strings.TrimSpace(s.Aspects["wine_producer"])

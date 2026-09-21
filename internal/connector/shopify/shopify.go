@@ -428,6 +428,9 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if m := c.mpnOf(v); m != "" {
 				aspects["mpn"] = m
 			}
+			if cmp := compareAtCents(v.CompareAtPrice); cmp > priceCents(v.Price) && priceCents(v.Price) > 0 {
+				aspects["compare_at_cents"] = strconv.FormatInt(cmp, 10)
+			}
 			out = append(out, listing.Raw{
 				SourceID:     c.SourceID(),
 				SourceKey:    fmt.Sprintf("%d:%d", p.ID, v.ID),
@@ -485,12 +488,16 @@ type product struct {
 }
 
 type variant struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Price     string `json:"price"` // string in the wire format, e.g. "799.00"
-	SKU       string `json:"sku"`
-	Available bool   `json:"available"`
-	Option1   string `json:"option1"`
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	Price string `json:"price"` // string in the wire format, e.g. "799.00"
+	// CompareAtPrice is the store's own "was" price, set when the variant is
+	// on sale; null otherwise. Raw, because stores send a string, null, or
+	// occasionally a number, and one odd product must not fail the page.
+	CompareAtPrice json.RawMessage `json:"compare_at_price"`
+	SKU            string          `json:"sku"`
+	Available      bool            `json:"available"`
+	Option1        string          `json:"option1"`
 }
 
 // brandOf returns the manufacturer from the configured brand tag, or "" when the
@@ -680,4 +687,14 @@ func truncate(b []byte, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// compareAtCents reads a variant's compare_at_price -- a JSON string, number or
+// null -- as cents; 0 when absent or unparseable.
+func compareAtCents(raw json.RawMessage) int64 {
+	v := strings.TrimSpace(string(raw))
+	if v == "" || v == "null" {
+		return 0
+	}
+	return priceCents(strings.Trim(v, `"`))
 }

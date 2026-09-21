@@ -459,3 +459,24 @@ func TestExtract_StampsOnlyWithAKnownProducer(t *testing.T) {
 		t.Fatalf("title-only auto match: canonical=%q candidate=%q; want shadow only", it.CanonicalID, it.Attributes["lwin_candidate"])
 	}
 }
+
+// A store sale yields list_price_cents and discount_pct; no sale, no fields.
+func TestExtract_StoreDiscount(t *testing.T) {
+	s := sanitized("Summer Whites Trio", "")
+	s.PriceCents = 17850
+	s.Aspects = map[string]string{"compare_at_cents": "21000"}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Attributes["list_price_cents"] != "21000" || it.Attributes["discount_pct"] != "15" {
+		t.Fatalf("list=%q discount=%q, want 21000 and 15", it.Attributes["list_price_cents"], it.Attributes["discount_pct"])
+	}
+	plain, err := New().Extract(context.Background(), sanitized("2020 Moscato d'Oro", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := plain.Attributes["discount_pct"]; has {
+		t.Fatal("no compare_at price must mean no discount")
+	}
+}

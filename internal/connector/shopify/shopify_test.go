@@ -634,3 +634,37 @@ func TestFetchCompleteReportsTruncation(t *testing.T) {
 		t.Fatal("a short final page means the catalogue ended: must report COMPLETE")
 	}
 }
+
+// The store's own list price travels as compare_at_cents only when the variant
+// is on sale (compare_at above price). Stores send a string, a number or null;
+// none of them may fail the page.
+func TestCompareAtPriceOnlyWhenOnSale(t *testing.T) {
+	body := `{"products":[
+	 {"id":1,"title":"Summer Whites Trio","handle":"a","variants":[{"id":11,"price":"178.50","compare_at_price":"210.00","available":true}]},
+	 {"id":2,"title":"Moscato","handle":"b","variants":[{"id":21,"price":"25.00","compare_at_price":null,"available":true}]},
+	 {"id":3,"title":"Numeric","handle":"c","variants":[{"id":31,"price":"10.00","compare_at_price":12.5,"available":true}]},
+	 {"id":4,"title":"Not a sale","handle":"d","variants":[{"id":41,"price":"30.00","compare_at_price":"20.00","available":true}]}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := r.URL.Query().Get("page"); p != "" && p != "1" {
+			_, _ = w.Write([]byte(`{"products":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	raws, err := NewConnector(Config{Name: "s", BaseURL: srv.URL, MaxRetries: -1}).Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	got := map[string]string{}
+	for _, r := range raws {
+		got[r.Title] = r.Aspects["compare_at_cents"]
+	}
+	want := map[string]string{"Summer Whites Trio": "21000", "Moscato": "", "Numeric": "1250", "Not a sale": ""}
+	for title, w := range want {
+		if got[title] != w {
+			t.Errorf("%s: compare_at_cents = %q, want %q", title, got[title], w)
+		}
+	}
+}

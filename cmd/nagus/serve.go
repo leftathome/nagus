@@ -168,6 +168,12 @@ type searchRow struct {
 	PriceCents int64   `json:"price_cents"`
 	Currency   string  `json:"currency"`
 	CapacityTB string  `json:"capacity_tb"`
+	// Category is the item's category, so a consumer can format per category.
+	Category string `json:"category,omitempty"`
+	// Details are category attributes a message or agent needs (vintage,
+	// varietal, discount, acreage, ...): a fixed whitelist of short extracted
+	// values (rowDetailKeys), never free text beyond what Title already is.
+	Details map[string]string `json:"details,omitempty"`
 	// ProductID is quark's product id for this listing's offer, when quark
 	// resolved it. Two rows with one ProductID are the same product at
 	// different sellers.

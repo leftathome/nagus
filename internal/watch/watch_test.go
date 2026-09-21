@@ -376,3 +376,28 @@ func TestExpiredInquiryWithUnknownCategoryDoesNotError(t *testing.T) {
 		t.Fatalf("got %d results, want 1", len(rs))
 	}
 }
+
+// A store-discount threshold makes an item strong without a "great" verdict --
+// the only deal signal a producer store without critic scores can give.
+func TestIsStrongByStoreDiscount(t *testing.T) {
+	sale := pipeline.Scored{Item: item.Item{Attributes: map[string]string{"discount_pct": "15"}}}
+	sale.Signal.Verdict = "unknown-no-reference"
+	small := pipeline.Scored{Item: item.Item{Attributes: map[string]string{"discount_pct": "5"}}}
+	none := pipeline.Scored{Item: item.Item{Attributes: map[string]string{}}}
+
+	w := Watch{Name: "wine-sales", Category: "wine", MinDiscountPct: 10}
+	if !w.isStrong(sale) || w.isStrong(small) || w.isStrong(none) {
+		t.Fatal("min_discount_pct 10: want 15% strong, 5% and none not")
+	}
+	// Setting only a discount threshold must not also imply the default
+	// ["great"] verdict rule -- and must not remove an explicit one.
+	great := pipeline.Scored{Item: item.Item{Attributes: map[string]string{}}}
+	great.Signal.Verdict = "great"
+	if w.isStrong(great) {
+		t.Fatal("a discount-only watch treated a verdict as strong")
+	}
+	w.StrongVerdicts = []string{"great"}
+	if !w.isStrong(great) || !w.isStrong(sale) {
+		t.Fatal("verdicts and discount must combine with OR")
+	}
+}

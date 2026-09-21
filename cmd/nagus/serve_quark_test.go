@@ -126,3 +126,19 @@ func TestServeWatchesIsolatesAFailingWatch(t *testing.T) {
 		t.Fatalf("healthy watch = %+v, want answered with 1 strong match", body.Watches[1])
 	}
 }
+
+// Rows carry the category and a WHITELISTED details map, so the delivery cron
+// can format per category; attributes outside the whitelist never leave.
+func TestRowDetailsAreWhitelisted(t *testing.T) {
+	d := rowDetails(map[string]string{"vintage": "2021", "discount_pct": "15", "critic_scores": "WS 94", "lwin_candidate": "x", "body": "free text"})
+	if d["vintage"] != "2021" || d["discount_pct"] != "15" || len(d) != 2 {
+		t.Fatalf("details = %v, want only vintage and discount_pct", d)
+	}
+	if rowDetails(map[string]string{"critic_scores": "WS 94"}) != nil {
+		t.Fatal("no whitelisted attribute must mean no details")
+	}
+	rows := searchRows(t, newTestServer(t), "/search?category=hdd")
+	if len(rows) == 0 || rows[0].Category != "hdd" {
+		t.Fatalf("rows must carry their category: %+v", rows)
+	}
+}
