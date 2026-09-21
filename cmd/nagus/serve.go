@@ -39,6 +39,9 @@ type server struct {
 	// lwin is the shared LWIN dictionary source, nil when LWIN is off. Read
 	// for its metrics.
 	lwin *lwinSource
+	// ingestGates, aligned with ingesters, run once before a source's FIRST
+	// ingest pass (nil = start at once). See wineIngestGates.
+	ingestGates []func(context.Context)
 	// offers is the offer layer, nil when off. Read only to stamp quark's
 	// product id onto rows (withProductIDs).
 	offers offer.Store
@@ -368,7 +371,8 @@ func runServe(args []string) error {
 			def = name
 		}
 	}
-	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore, lwin: opts.lwin}
+	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore, lwin: opts.lwin,
+		ingestGates: wineIngestGates(cfg.Sources, opts.lwin, lwinStartWait, logf)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -469,14 +473,25 @@ func (s *server) startIngest(ctx context.Context, intervals []time.Duration) {
 		if i >= len(intervals) || intervals[i] <= 0 {
 			continue
 		}
-		go runSourceIngestLoop(ctx, ing, intervals[i])
+		var gate func(context.Context)
+		if i < len(s.ingestGates) {
+			gate = s.ingestGates[i]
+		}
+		go runSourceIngestLoop(ctx, ing, intervals[i], gate)
 	}
 }
 
-// runSourceIngestLoop runs Ingest immediately, then on every tick, until ctx is
-// done. It operates on exactly one source's Ingester; an error there is logged
-// and the loop continues, never affecting any other source's loop.
-func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration) {
+// runSourceIngestLoop runs Ingest immediately (after gate, when set), then on
+// every tick, until ctx is done. It operates on exactly one source's Ingester;
+// an error there is logged and the loop continues, never affecting any other
+// source's loop.
+func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration, gate func(context.Context)) {
+	if gate != nil {
+		gate(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+	}
 	ingestOnceSource(ctx, ing)
 	t := time.NewTicker(interval)
 	defer t.Stop()

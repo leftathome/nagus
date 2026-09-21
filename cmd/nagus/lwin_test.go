@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
 )
 
@@ -161,5 +162,47 @@ func TestLWINMirrorRejectsATruncatedExport(t *testing.T) {
 	}
 	if r.Len() != 3 {
 		t.Fatalf("records=%d: a truncated export replaced the good dictionary", r.Len())
+	}
+}
+
+// nagus-0k0: a wine source's first ingest waits for the dictionary, so a
+// restart does not extract every wine item against an empty one (and then
+// wait 12h to redo it). Other categories never wait.
+func TestWineIngestGateHoldsTheFirstPassUntilLoaded(t *testing.T) {
+	s := &lwinSource{logf: t.Logf, loaded: make(chan struct{})}
+	gates := wineIngestGates([]SourceConfig{
+		{Name: "spd", Category: "hdd"},
+		{Name: "harbinger", Category: "wine"},
+	}, s, time.Minute, t.Logf)
+	if gates[0] != nil || gates[1] == nil {
+		t.Fatalf("gates = %v; only the wine source should wait", gates)
+	}
+
+	conn := &loopFakeConnector{id: "harbinger"}
+	ing := &pipeline.Ingester{Connector: conn}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runSourceIngestLoop(ctx, ing, time.Hour, gates[1])
+
+	time.Sleep(50 * time.Millisecond)
+	if conn.calls.Load() != 0 {
+		t.Fatal("the wine source ingested before the dictionary loaded")
+	}
+	close(s.loaded)
+	loopWaitForCount(t, 2*time.Second, 1, conn.calls.Load)
+}
+
+// The wait is bounded: a dictionary that never loads delays the first pass by
+// at most max, never forever.
+func TestWineIngestGateGivesUpAtItsLimit(t *testing.T) {
+	s := &lwinSource{logf: t.Logf, loaded: make(chan struct{})} // never closed
+	gate := wineIngestGates([]SourceConfig{{Name: "w", Category: "wine"}}, s, 20*time.Millisecond, t.Logf)[0]
+	start := time.Now()
+	gate(context.Background())
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Fatalf("gate waited %s past a 20ms limit", waited)
+	}
+	if wineIngestGates([]SourceConfig{{Name: "w", Category: "wine"}}, nil, time.Minute, t.Logf) != nil {
+		t.Fatal("with LWIN off there must be no gates")
 	}
 }
