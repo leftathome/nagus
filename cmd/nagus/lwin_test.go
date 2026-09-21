@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -204,5 +205,33 @@ func TestWineIngestGateGivesUpAtItsLimit(t *testing.T) {
 	}
 	if wineIngestGates([]SourceConfig{{Name: "w", Category: "wine"}}, nil, time.Minute, t.Logf) != nil {
 		t.Fatal("with LWIN off there must be no gates")
+	}
+}
+
+// nagus-a8t: a source stamps only when it has opted in, even with stamping on
+// globally, so a newly added source starts in shadow until reviewed.
+func TestWineSourceStampsOnlyWhenOptedIn(t *testing.T) {
+	s := &lwinSource{localPath: filepath.Join(t.TempDir(), "lwin.csv"), stamp: true, logf: t.Logf}
+	if err := os.WriteFile(s.localPath, []byte(lwinCSV3), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := categoryOpts{lwin: s}
+	for _, tc := range []struct {
+		optIn bool
+		want  bool
+	}{{false, false}, {true, true}} {
+		src := SourceConfig{Name: "w", Category: "wine", Type: "shopify", BaseURL: "https://example.test",
+			WineChannel: "producer", Origin: "US-CA", WineProducer: "Leonetti Cellar", LWINStamp: tc.optIn}
+		ing, err := buildIngester(src, CategoryConfig{}, store.NewMemoryStore(), o)
+		if err != nil {
+			t.Fatalf("buildIngester: %v", err)
+		}
+		ex, ok := ing.Extractor.(interface{ StampEnabled() bool })
+		if !ok {
+			t.Fatalf("extractor %T does not report its stamp setting", ing.Extractor)
+		}
+		if got := ex.StampEnabled(); got != tc.want {
+			t.Errorf("lwinStamp=%v: stamping %v, want %v", tc.optIn, got, tc.want)
+		}
 	}
 }

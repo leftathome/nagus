@@ -498,3 +498,6 @@ var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|cork
 func isMerchandise(title string) bool {
 	return merchandiseRe.MatchString(title)
 }
+
+// StampEnabled reports whether this extractor writes LWIN canonical ids.
+func (e *Extractor) StampEnabled() bool { return e.Stamp }
