@@ -184,7 +184,7 @@ func TestExtract_LWINResolverStampsOnlyAutoRoute(t *testing.T) {
 	db := lwin.NewDB([]lwin.Record{
 		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
 	})
-	e := &Extractor{Resolver: &lwin.Resolver{DB: db}}
+	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
 
 	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
 	if err != nil {
@@ -207,6 +207,36 @@ func TestExtract_LWINResolverStampsOnlyAutoRoute(t *testing.T) {
 	}
 	if it.Attributes["lwin_route"] != "review" {
 		t.Errorf("expected review route, got %q", it.Attributes["lwin_route"])
+	}
+}
+
+// Shadow mode (the default): the match is recorded -- route, would-be id,
+// score -- so false matches can be measured on real listings, but no
+// canonical id is written until stamping is turned on deliberately.
+func TestExtract_LWINShadowRecordsButNeverStamps(t *testing.T) {
+	db := lwin.NewDB([]lwin.Record{
+		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
+	})
+	e := &Extractor{Resolver: &lwin.Resolver{DB: db}}
+
+	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if it.CanonicalID != "" {
+		t.Fatalf("shadow mode stamped %q", it.CanonicalID)
+	}
+	if it.Attributes["lwin_route"] != "auto" || it.Attributes["lwin_candidate"] != "11012452019" || it.Attributes["lwin_score"] == "" {
+		t.Fatalf("shadow attributes = route %q candidate %q score %q", it.Attributes["lwin_route"],
+			it.Attributes["lwin_candidate"], it.Attributes["lwin_score"])
+	}
+
+	it, err = e.Extract(context.Background(), sanitized("Screaming Eagle Napa 2018", ""))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, has := it.Attributes["lwin_candidate"]; has {
+		t.Fatal("a review-route listing must record no candidate")
 	}
 }
 

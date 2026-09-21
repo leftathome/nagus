@@ -143,17 +143,17 @@ func TestWineDepsFromLoadsLWIN(t *testing.T) {
 	if err := os.WriteFile(path, []byte(csv), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	deps, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwinCSV: path})
+	deps, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwin: &lwinSource{localPath: path, logf: t.Logf}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if deps.LWIN == nil || deps.LWIN.DB.Len() != 1 {
+	if deps.LWIN == nil || deps.LWIN.Len() != 1 {
 		t.Fatalf("expected a loaded LWIN resolver, got %+v", deps.LWIN)
 	}
 }
 
 func TestWineDepsFromMissingLWINFileFailsLoudly(t *testing.T) {
-	_, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwinCSV: "/does/not/exist.csv"})
+	_, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwin: &lwinSource{localPath: "/does/not/exist.csv", logf: t.Logf}})
 	if err == nil {
 		t.Fatalf("a configured-but-missing LWIN export must be a startup error, not a silent identity-less run")
 	}

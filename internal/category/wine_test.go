@@ -183,9 +183,10 @@ func TestWineSliceEndToEnd(t *testing.T) {
 		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
 	})
 	deps := WineDeps{
-		Store: st,
-		LWIN:  &lwin.Resolver{DB: lwinDB},
-		Score: WineScoreConfig{MinScore: 92, ShipTo: "US-WA"},
+		Store:     st,
+		LWIN:      &lwin.Resolver{DB: lwinDB},
+		LWINStamp: true,
+		Score:     WineScoreConfig{MinScore: 92, ShipTo: "US-WA"},
 	}
 
 	// WA retailer: a steal, an overpriced bottle, and an unscored one.

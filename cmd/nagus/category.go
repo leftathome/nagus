@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -50,7 +50,10 @@ type categoryOpts struct {
 	wineMinScoreCount int
 	wineShipTo        string
 	wineShipRules     string
-	lwinCSV           string
+	// lwin is the process's one shared LWIN dictionary (NAGUS_LWIN_URL or
+	// NAGUS_LWIN_CSV); nil when LWIN is not configured. A pointer, so every
+	// copy of categoryOpts shares the same loaded dictionary.
+	lwin *lwinSource
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
 
@@ -77,7 +80,7 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		wineMinScoreCount: int(envInt64("NAGUS_WINE_MIN_SCORE_COUNT", 0)),
 		wineShipTo:        envOr("NAGUS_WINE_SHIP_TO", ""),
 		wineShipRules:     envOr("NAGUS_WINE_SHIP_RULES", ""),
-		lwinCSV:           envOr("NAGUS_LWIN_CSV", ""),
+		lwin:              lwinSourceFromEnv(client, logf),
 	}
 }
 
@@ -165,17 +168,13 @@ func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.W
 			return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q has no shipping policy in the rules table, so nothing could ever surface for it; add one via a rules override file (NAGUS_WINE_SHIP_RULES)", cc.WineShipTo)
 		}
 	}
-	if o.lwinCSV != "" {
-		f, err := os.Open(o.lwinCSV)
+	if o.lwin != nil {
+		r, err := o.lwin.get(context.Background())
 		if err != nil {
-			return category.WineDeps{}, fmt.Errorf("wine: opening LWIN export: %w", err)
+			return category.WineDeps{}, err
 		}
-		defer f.Close()
-		db, err := lwin.LoadCSV(f)
-		if err != nil {
-			return category.WineDeps{}, fmt.Errorf("wine: loading LWIN export %q: %w", o.lwinCSV, err)
-		}
-		deps.LWIN = &lwin.Resolver{DB: db}
+		deps.LWIN = r
+		deps.LWINStamp = o.lwin.stamp
 	}
 	return deps, nil
 }

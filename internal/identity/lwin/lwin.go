@@ -4,7 +4,9 @@
 // LWIN is Liv-ex's Creative-Commons-licensed universal wine identifier: an
 // LWIN-7 names a producer/wine, LWIN-11 appends a 4-digit vintage, LWIN-16
 // appends a 5-digit bottle size in ml. The database itself is a free download
-// (registration form at liv-ex.com/lwin/), refreshed quarterly; this package
+// -- the form at liv-ex.com/lwin/ leads to a public object, refreshed often, at
+// https://s3-eu-west-1.amazonaws.com/lwin-dictionary/latest/LWINdatabase.xlsx
+// (LoadXLSX reads it directly; package refdata keeps a local mirror); this package
 // takes the loaded records and does ENTITY RESOLUTION from messy retailer
 // listing titles to an LWIN-11.
 //
@@ -30,6 +32,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // Record is one LWIN-7 entry: a producer/wine with its geography and colour.
@@ -127,7 +130,8 @@ func (db *DB) Len() int { return len(db.records) }
 // LoadCSV reads an LWIN export. The header row names the columns; recognized
 // (case-insensitive) names follow the Liv-ex export: LWIN, PRODUCER_NAME (or
 // PRODUCER), WINE, COUNTRY, REGION, COLOUR (or COLOR). Unknown columns are
-// ignored so a fuller export loads without modification.
+// ignored so a fuller export loads without modification. See loadRows for the
+// normalization and filtering every loader applies.
 func LoadCSV(r io.Reader) (*DB, error) {
 	cr := csv.NewReader(r)
 	cr.FieldsPerRecord = -1
@@ -135,6 +139,31 @@ func LoadCSV(r io.Reader) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lwin: reading header: %w", err)
 	}
+	return loadRows(header, func() ([]string, error) {
+		row, err := cr.Read()
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("lwin: reading row: %w", err)
+		}
+		return row, err
+	})
+}
+
+// loadRows builds a DB from a header and a row iterator (next returns io.EOF
+// when done). Shared by LoadCSV and LoadXLSX so both formats load identically.
+//
+// Normalization, all driven by the real Liv-ex export (2026-09, 212,430 rows):
+//   - The literal "NA" is the export's missing-value marker. It becomes "",
+//     or every blank region would score as the token "na".
+//   - Numeric cells arrive as floats ("1000001.0"); a trailing ".0" on the
+//     LWIN is dropped, or no LWIN-11 built from it would be valid.
+//   - When the STATUS column exists only "Live" rows load: "Combined" and
+//     "Deleted" LWINs are retired and must never be stamped.
+//   - When the TYPE column exists only wines load (Wine, Fortified Wine):
+//     spirits, beer and cider are not what the wine category resolves, and
+//     loading them costs memory and invites false matches.
+//
+// Exports without STATUS or TYPE (test fixtures, older files) load unfiltered.
+func loadRows(header []string, next func() ([]string, error)) (*DB, error) {
 	col := map[string]int{}
 	for i, h := range header {
 		col[strings.ToUpper(strings.TrimSpace(h))] = i
@@ -142,7 +171,11 @@ func LoadCSV(r io.Reader) (*DB, error) {
 	get := func(row []string, names ...string) string {
 		for _, n := range names {
 			if i, ok := col[n]; ok && i < len(row) {
-				return strings.TrimSpace(row[i])
+				v := strings.TrimSpace(row[i])
+				if v == "NA" {
+					return ""
+				}
+				return v
 			}
 		}
 		return ""
@@ -150,18 +183,26 @@ func LoadCSV(r io.Reader) (*DB, error) {
 	if _, ok := col["LWIN"]; !ok {
 		return nil, fmt.Errorf("lwin: header has no LWIN column (got %v)", header)
 	}
+	_, hasStatus := col["STATUS"]
+	_, hasType := col["TYPE"]
 
 	var records []Record
 	for {
-		row, err := cr.Read()
+		row, err := next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("lwin: reading row: %w", err)
+			return nil, err
+		}
+		if hasStatus && get(row, "STATUS") != "Live" {
+			continue
+		}
+		if hasType && !wineTypes[get(row, "TYPE")] {
+			continue
 		}
 		records = append(records, Record{
-			LWIN7:    get(row, "LWIN"),
+			LWIN7:    strings.TrimSuffix(get(row, "LWIN"), ".0"),
 			Producer: get(row, "PRODUCER_NAME", "PRODUCER"),
 			Wine:     get(row, "WINE"),
 			Country:  get(row, "COUNTRY"),
@@ -172,9 +213,28 @@ func LoadCSV(r io.Reader) (*DB, error) {
 	return NewDB(records), nil
 }
 
+// wineTypes are the export TYPE values the wine category resolves.
+var wineTypes = map[string]bool{"Wine": true, "Fortified Wine": true}
+
+// Dictionary holds the current DB for a Resolver whose data is refreshed while
+// it serves. Store swaps it atomically: a Resolve in flight keeps the DB it
+// started with, and the next one sees the new DB. The zero value holds nothing.
+type Dictionary struct {
+	p atomic.Pointer[DB]
+}
+
+// Load returns the current DB, or nil.
+func (d *Dictionary) Load() *DB { return d.p.Load() }
+
+// Store replaces the current DB.
+func (d *Dictionary) Store(db *DB) { d.p.Store(db) }
+
 // Resolver resolves queries against a DB with confidence routing.
 type Resolver struct {
-	DB *DB
+	// DB is a fixed dictionary. Dict, when set, takes precedence: it is the
+	// swappable holder for a dictionary refreshed while serving.
+	DB   *DB
+	Dict *Dictionary
 	// AutoThreshold is the minimum score for RouteAuto; 0 defaults to 92.
 	AutoThreshold float64
 	// ReviewThreshold is the minimum score for RouteAdjudicate; 0 defaults
@@ -189,6 +249,24 @@ const (
 	defaultReviewThreshold = 80
 	defaultMaxCandidates   = 5
 )
+
+// db is the dictionary this Resolve uses: Dict's current DB when set, else DB.
+func (r Resolver) db() *DB {
+	if r.Dict != nil {
+		if db := r.Dict.Load(); db != nil {
+			return db
+		}
+	}
+	return r.DB
+}
+
+// Len reports the number of records the resolver currently matches against.
+func (r Resolver) Len() int {
+	if db := r.db(); db != nil {
+		return db.Len()
+	}
+	return 0
+}
 
 func (r Resolver) thresholds() (auto, review float64, maxC int) {
 	auto, review, maxC = r.AutoThreshold, r.ReviewThreshold, r.MaxCandidates
@@ -208,7 +286,8 @@ func (r Resolver) thresholds() (auto, review float64, maxC int) {
 // confidence. A nil/empty DB or a blank name is RouteReview (nothing to say).
 func (r Resolver) Resolve(q Query) Resolution {
 	auto, review, maxC := r.thresholds()
-	if r.DB == nil || r.DB.Len() == 0 {
+	db := r.db()
+	if db == nil || db.Len() == 0 {
 		return Resolution{Route: RouteReview}
 	}
 	norm := normalizeName(q.Name)
@@ -222,7 +301,7 @@ func (r Resolver) Resolve(q Query) Resolution {
 	seen := map[int]bool{}
 	var candidates []int
 	for _, tok := range qTokens {
-		for _, idx := range r.DB.tokenIdx[tok] {
+		for _, idx := range db.tokenIdx[tok] {
 			if !seen[idx] {
 				seen[idx] = true
 				candidates = append(candidates, idx)
@@ -235,7 +314,7 @@ func (r Resolver) Resolve(q Query) Resolution {
 
 	matches := make([]Match, 0, len(candidates))
 	for _, idx := range candidates {
-		rec := r.DB.records[idx]
+		rec := db.records[idx]
 		recNorm := normalizeName(rec.DisplayName())
 		score := tokenSetRatio(norm, recNorm)
 		matches = append(matches, Match{Record: rec, Score: score})
@@ -260,7 +339,7 @@ func (r Resolver) Resolve(q Query) Resolution {
 	best := matches[0]
 	res := Resolution{Best: best, Candidates: matches}
 	switch {
-	case best.Score >= auto:
+	case best.Score >= auto && producerAgrees(qTokens, best.Record):
 		res.Route = RouteAuto
 	case best.Score >= review:
 		res.Route = RouteAdjudicate
@@ -328,6 +407,69 @@ func normalizeName(s string) string {
 }
 
 // tokens splits a normalized name, dropping single-character noise.
+// producerAgrees is the gate an AUTO route must also pass: every meaningful
+// token of the record's producer appears in the query.
+//
+// Token-set similarity scores 100 whenever the record's name is a SUBSET of the
+// query. Against the full Liv-ex dictionary that is most of the time: measured
+// on nagus's 91 live wine listings (2026-09-21), 48 of 49 auto matches were
+// wrong -- "2021 The Estates Merlot, Oak Knoll" (Robert Mondavi) matched
+// producer "A", wine "Merlot", Tasmania, because producer-storefront titles
+// never name the producer and "A" normalizes to nothing. A listing that does
+// not name the producer cannot be auto-identified from its title alone; it
+// routes to adjudication instead, where the producer can be supplied.
+//
+// Generic words carry no identity ("Vineyard", "Winery", "The"), and a
+// producer with no meaningful token left can never agree. Agreement must also
+// rest on a DISTINCTIVE token -- one that is not a grape, colour, style word or
+// article -- because the dictionary holds producers literally named
+// "Chardonnay", "Malbec" and "Barbera": with the gate alone, "2024 Napa Valley
+// Chardonnay" (Mondavi) still auto-matched producer "Chardonnay", Burgundy.
+func producerAgrees(query []string, rec Record) bool {
+	have := make(map[string]bool, len(query))
+	for _, t := range query {
+		have[t] = true
+	}
+	distinctive := 0
+	for _, t := range tokens(normalizeName(rec.Producer)) {
+		if genericProducerWords[t] {
+			continue
+		}
+		if !have[t] {
+			return false
+		}
+		if !wineVocabulary[t] {
+			distinctive++
+		}
+	}
+	return distinctive > 0
+}
+
+// wineVocabulary is vocabulary every wine listing shares -- grapes, colours,
+// styles, articles -- and so cannot, on its own, name a producer.
+var wineVocabulary = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`
+		chardonnay malbec barbera merlot cabernet sauvignon franc pinot noir gris
+		grigio blanc syrah shiraz zinfandel riesling grenache garnacha tempranillo
+		sangiovese nebbiolo viognier roussanne marsanne mourvedre petite petit
+		sirah verdot albarino gewurztraminer semillon chenin muscat moscato
+		carmenere primitivo gamay dolcetto aglianico torrontes vermentino
+		rose rosado rosato rouge red white bianco blanco rosso tinto
+		sparkling brut reserve reserva riserva cuvee blend
+		la le les de du des di del da el los las von der und et y`) {
+		m[w] = true
+	}
+	return m
+}()
+
+// genericProducerWords appear in producer names without identifying one.
+var genericProducerWords = map[string]bool{
+	"the": true, "winery": true, "wines": true, "wine": true, "vineyard": true,
+	"vineyards": true, "estate": true, "estates": true, "cellar": true,
+	"cellars": true, "co": true, "company": true, "family": true,
+}
+
 func tokens(norm string) []string {
 	var out []string
 	for _, f := range strings.Fields(norm) {
