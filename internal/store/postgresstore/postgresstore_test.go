@@ -3,12 +3,12 @@ package postgresstore
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/leftathome/nagus/internal/item"
+	"github.com/leftathome/nagus/internal/pgtest"
 	"github.com/leftathome/nagus/internal/store"
 )
 
@@ -18,10 +18,9 @@ import (
 // machines without a Postgres available.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("NAGUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set NAGUS_TEST_POSTGRES_DSN to run postgres contract tests")
-	}
+	// A database private to this package (nagus-0wj): packages run in
+	// parallel and must not truncate each other's tables.
+	dsn := pgtest.DSN(t, "postgresstore")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
