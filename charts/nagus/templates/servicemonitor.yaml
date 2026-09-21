@@ -1,0 +1,27 @@
+{{- if and .Values.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+# nagus serves /metrics on its one HTTP port (the Service port named "http").
+# serviceMonitorSelectorNilUsesHelmValues is false on orac's
+# kube-prometheus-stack, so this is picked up from the nagus namespace with no
+# label matching. Added with nagus-ff4: until this existed nothing scraped
+# nagus, so a rotated quark token or an unreachable quark was visible only in
+# logs.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "nagus.fullname" . }}
+  labels:
+    {{- include "nagus.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nagus.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+      scheme: http
+{{- end }}
