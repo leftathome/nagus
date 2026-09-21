@@ -43,6 +43,12 @@ type Record struct {
 	Country  string
 	Region   string
 	Colour   string // red | white | rose | ...
+	// SubRegion and Site are part of a wine's identity in LWIN: Mondavi's
+	// Cabernet Sauvignon has distinct LWINs for Napa Valley and Stags Leap
+	// District, and "To Kalon Vineyard The Reserve Cabernet Sauvignon" is its
+	// own record. They are matched on (matchText), not displayed.
+	SubRegion string
+	Site      string
 }
 
 // DisplayName is the record's resolvable name: producer + wine.
@@ -51,6 +57,15 @@ func (r Record) DisplayName() string {
 		return r.Producer
 	}
 	return r.Producer + " " + r.Wine
+}
+
+// matchText is the name plus the geography that distinguishes otherwise
+// same-named wines. It feeds blocking and COVERAGE -- a title's "Napa Valley"
+// is accounted for by a record whose sub-region is Napa Valley -- but not the
+// similarity score, which stays on the name: a title need not repeat the
+// region to match ("Chateau Margaux 2015").
+func (r Record) matchText() string {
+	return strings.TrimSpace(r.DisplayName() + " " + r.Region + " " + r.SubRegion + " " + r.Site)
 }
 
 // LWIN11 renders the record's LWIN-11 for a vintage. Vintage 0 (non-vintage)
@@ -97,6 +112,12 @@ type Resolution struct {
 type Query struct {
 	Name    string
 	Vintage int // 0 = unknown / non-vintage
+	// Producer, when known from outside the title -- the store a listing came
+	// from is often the producer, and producer-storefront titles never name it
+	// ("2021 The Estates Merlot, Oak Knoll" on Robert Mondavi's own store) --
+	// is scored together with the title and restricts candidates to records of
+	// that producer. Empty = title only.
+	Producer string
 }
 
 // DB is an in-memory LWIN database with a token index for blocking.
@@ -117,7 +138,7 @@ func NewDB(records []Record) *DB {
 		}
 		idx := len(db.records)
 		db.records = append(db.records, r)
-		for _, tok := range tokens(normalizeName(r.DisplayName())) {
+		for _, tok := range tokens(normalizeName(r.matchText())) {
 			db.tokenIdx[tok] = append(db.tokenIdx[tok], idx)
 		}
 	}
@@ -202,12 +223,14 @@ func loadRows(header []string, next func() ([]string, error)) (*DB, error) {
 			continue
 		}
 		records = append(records, Record{
-			LWIN7:    strings.TrimSuffix(get(row, "LWIN"), ".0"),
-			Producer: get(row, "PRODUCER_NAME", "PRODUCER"),
-			Wine:     get(row, "WINE"),
-			Country:  get(row, "COUNTRY"),
-			Region:   get(row, "REGION"),
-			Colour:   strings.ToLower(get(row, "COLOUR", "COLOR")),
+			LWIN7:     strings.TrimSuffix(get(row, "LWIN"), ".0"),
+			Producer:  get(row, "PRODUCER_NAME", "PRODUCER"),
+			Wine:      get(row, "WINE"),
+			Country:   get(row, "COUNTRY"),
+			Region:    get(row, "REGION"),
+			Colour:    strings.ToLower(get(row, "COLOUR", "COLOR")),
+			SubRegion: get(row, "SUB_REGION"),
+			Site:      get(row, "SITE"),
 		})
 	}
 	return NewDB(records), nil
@@ -290,7 +313,13 @@ func (r Resolver) Resolve(q Query) Resolution {
 	if db == nil || db.Len() == 0 {
 		return Resolution{Route: RouteReview}
 	}
-	norm := normalizeName(q.Name)
+	text := q.Name
+	var producerTokens []string
+	if p := strings.TrimSpace(q.Producer); p != "" {
+		producerTokens = tokens(normalizeName(p))
+		text = p + " " + q.Name
+	}
+	norm := normalizeName(text)
 	qTokens := tokens(norm)
 	if len(qTokens) == 0 {
 		return Resolution{Route: RouteReview}
@@ -308,10 +337,23 @@ func (r Resolver) Resolve(q Query) Resolution {
 			}
 		}
 	}
+	// A known producer is a hard constraint, not a hint to be outvoted: a
+	// record of another producer is never the right identity, however well its
+	// wine name happens to fit the title.
+	if len(producerTokens) > 0 {
+		kept := candidates[:0]
+		for _, idx := range candidates {
+			if producerAgrees(producerTokens, db.records[idx]) {
+				kept = append(kept, idx)
+			}
+		}
+		candidates = kept
+	}
 	if len(candidates) == 0 {
 		return Resolution{Route: RouteReview}
 	}
 
+	distinct := append(distinctiveTokens(qTokens, producerTokens), initialsTokens(norm)...)
 	matches := make([]Match, 0, len(candidates))
 	for _, idx := range candidates {
 		rec := db.records[idx]
@@ -325,6 +367,10 @@ func (r Resolver) Resolve(q Query) Resolution {
 		}
 		// Jaro-Winkler tiebreak on the full normalized strings, then LWIN7
 		// for full determinism.
+		ci, cj := coverage(distinct, matches[i].Record), coverage(distinct, matches[j].Record)
+		if ci != cj {
+			return ci > cj
+		}
 		ji := jaroWinkler(norm, normalizeName(matches[i].Record.DisplayName()))
 		jj := jaroWinkler(norm, normalizeName(matches[j].Record.DisplayName()))
 		if ji != jj {
@@ -339,7 +385,7 @@ func (r Resolver) Resolve(q Query) Resolution {
 	best := matches[0]
 	res := Resolution{Best: best, Candidates: matches}
 	switch {
-	case best.Score >= auto && producerAgrees(qTokens, best.Record):
+	case best.Score >= auto && producerAgrees(qTokens, best.Record) && coverage(distinct, best.Record) >= minAutoCoverage:
 		res.Route = RouteAuto
 	case best.Score >= review:
 		res.Route = RouteAdjudicate
@@ -462,6 +508,99 @@ var wineVocabulary = func() map[string]bool {
 	}
 	return m
 }()
+
+// coverage is the share of the query's distinctive tokens the record's match
+// text contains (1 when the query has none).
+//
+// Token-set similarity rewards a record whose name is a SUBSET of the title, so
+// the shortest, most generic record wins ties: with the producer known,
+// "2022 The Estates Merlot, Oak Knoll" still scored 100 against plain
+// "Robert Mondavi Winery Merlot" (Napa Valley) -- a different wine. An AUTO
+// route therefore requires the distinctive title tokens to be accounted for
+// by the record (minAutoCoverage); a title that names something the record does
+// not (Oak Knoll, Heritage Clone) routes to adjudication, and among tied
+// candidates the one covering more of the title ranks first.
+func coverage(distinct []string, rec Record) float64 {
+	if len(distinct) == 0 {
+		return 1
+	}
+	have := map[string]bool{}
+	for _, t := range tokens(normalizeName(rec.matchText())) {
+		have[t] = true
+	}
+	n := 0
+	for _, t := range distinct {
+		if have[t] {
+			n++
+		}
+	}
+	return float64(n) / float64(len(distinct))
+}
+
+// minAutoCoverage is the share of distinctive title tokens an AUTO match must
+// account for. Not 1: listing titles carry marketing words no record has
+// ("Commemorative"). At 0.8 one stray word in five passes, while a title naming
+// a different vineyard, clone or district (two or more uncovered tokens) does
+// not.
+const minAutoCoverage = 0.8
+
+// sizeOrNumberRe matches vintages, bottle sizes and other bare numbers, which
+// never identify a wine by name.
+var sizeOrNumberRe = regexp.MustCompile(`^\d+(\.\d+)?(ml|cl|l|lt|ltr)?$`)
+
+// distinctiveTokens are the query tokens a correct record must account for:
+// all of them except the producer the caller supplied, numbers and bottle
+// sizes, and words that name no particular wine.
+func distinctiveTokens(query, producer []string) []string {
+	skip := map[string]bool{}
+	for _, t := range producer {
+		skip[t] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range query {
+		if skip[t] || seen[t] || sizeOrNumberRe.MatchString(t) || coverageFillerWords[t] || genericProducerWords[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// initialsTokens joins runs of single letters in a normalized title into one
+// token -- "W.H Vineyard" normalizes to "w h vineyard", and tokens drops the
+// single letters, so a vineyard designate named by initials would otherwise be
+// invisible to coverage and collapse into the estate's generic record (it did:
+// "2023 The Estates Cabernet Sauvignon, W.H Vineyard" auto-matched The Estates
+// Cabernet Sauvignon, Oakville). The joined token is distinctive and is almost
+// never in a record, which is the point: it forces adjudication.
+func initialsTokens(norm string) []string {
+	var out []string
+	var run []string
+	flush := func() {
+		if len(run) >= 2 {
+			out = append(out, strings.Join(run, ""))
+		}
+		run = run[:0]
+	}
+	for _, f := range strings.Fields(norm) {
+		if len(f) == 1 {
+			run = append(run, f)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+// coverageFillerWords appear in listing titles without naming a wine.
+var coverageFillerWords = map[string]bool{
+	"and": true, "of": true, "ml": true, "cl": true, "lt": true, "magnum": true,
+	"bottle": true, "btl": true, "half": true, "case": true, "pack": true,
+	"750ml": true, "375ml": true, "1500ml": true,
+}
 
 // genericProducerWords appear in producer names without identifying one.
 var genericProducerWords = map[string]bool{

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -52,6 +53,11 @@ type Watch struct {
 	StrongVerdicts []string `json:"strong_verdicts,omitempty"`
 	// MinScore, when > 0, additionally marks any item scoring >= it as strong.
 	MinScore float64 `json:"min_score,omitempty"`
+	// MinDiscountPct, when > 0, additionally marks any item the store itself
+	// has discounted by at least this percent (attribute discount_pct, from
+	// the store's own list price) as strong. It is a SALE signal, not a value
+	// verdict: it says the seller cut the price, not that the price is good.
+	MinDiscountPct float64 `json:"min_discount_pct,omitempty"`
 }
 
 // Active reports whether this inquiry is still being looked for at time now.
@@ -106,7 +112,7 @@ func LoadConfig(path string) (Config, error) {
 // isStrong reports whether a scored item clears the watch's ping threshold.
 func (w Watch) isStrong(sc pipeline.Scored) bool {
 	verdicts := w.StrongVerdicts
-	if len(verdicts) == 0 && w.MinScore <= 0 {
+	if len(verdicts) == 0 && w.MinScore <= 0 && w.MinDiscountPct <= 0 {
 		verdicts = []string{"great"} // default threshold
 	}
 	for _, v := range verdicts {
@@ -116,6 +122,11 @@ func (w Watch) isStrong(sc pipeline.Scored) bool {
 	}
 	if w.MinScore > 0 && sc.Score.Value >= w.MinScore {
 		return true
+	}
+	if w.MinDiscountPct > 0 {
+		if d, err := strconv.ParseFloat(sc.Item.Attributes["discount_pct"], 64); err == nil && d >= w.MinDiscountPct {
+			return true
+		}
 	}
 	return false
 }

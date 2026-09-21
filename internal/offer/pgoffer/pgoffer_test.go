@@ -2,22 +2,21 @@ package pgoffer
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/offer/offerstoretest"
+	"github.com/leftathome/nagus/internal/pgtest"
 )
 
 // The Postgres adapter is correct when it passes the SAME contract MemoryStore
 // and the SQLite adapter pass. Gated on NAGUS_TEST_POSTGRES_DSN so the suite
 // stays green on machines with no Postgres, matching internal/store/postgresstore.
 func TestPostgresOfferStoreSatisfiesTheContract(t *testing.T) {
-	dsn := os.Getenv("NAGUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set NAGUS_TEST_POSTGRES_DSN to run postgres offer contract tests")
-	}
+	// A database private to this package (nagus-0wj): packages run in
+	// parallel and must not truncate each other's tables.
+	dsn := pgtest.DSN(t, "pgoffer")
 	offerstoretest.Run(t, func(t *testing.T) offer.Store {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()

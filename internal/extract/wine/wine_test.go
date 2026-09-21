@@ -186,7 +186,9 @@ func TestExtract_LWINResolverStampsOnlyAutoRoute(t *testing.T) {
 	})
 	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
 
-	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
+	s := sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", "")
+	s.Aspects = map[string]string{"wine_producer": "Leonetti Cellar"}
+	it, err := e.Extract(context.Background(), s)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -415,5 +417,66 @@ func TestTokenize(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("tokens missing %q: %v", want, tokens)
 		}
+	}
+}
+
+// nagus-17k: every one of these was ingested as a wine (live corpus,
+// 2026-09-21), and none of the 81 real bottles alongside them matches.
+func TestIsMerchandise(t *testing.T) {
+	for _, title := range []string{
+		"Mushroom Madness Tickets", "Gift Card!", "Wine Aerator", "Two Prong Wine Opener",
+		"Single Bottle Wine Tote", "Black and Gold Marble Coasters", "Branded Hat",
+	} {
+		if !isMerchandise(title) {
+			t.Errorf("%q is merchandise", title)
+		}
+	}
+	for _, title := range []string{
+		"Bolero", "La Petite Fleur", "2021 The Estates Merlot, Oak Knoll",
+		"2022 The Reserve Cabernet Sauvignon, To Kalon Vineyard 1.5L", "El Jefe",
+		"Robert Mondavi Winery 60th Anniversary Commemorative Cabernet Sauvignon",
+	} {
+		if isMerchandise(title) {
+			t.Errorf("%q is a wine", title)
+		}
+	}
+}
+
+// nagus-86s: stamping requires the producer to be KNOWN (declared or the
+// producer store's vendor), never inferred from the title alone. Title-only
+// auto matches were mostly wrong on the live listings; producer-hinted ones
+// were right.
+func TestExtract_StampsOnlyWithAKnownProducer(t *testing.T) {
+	db := lwin.NewDB([]lwin.Record{
+		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
+	})
+	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
+	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.CanonicalID != "" || it.Attributes["lwin_candidate"] != "11012452019" {
+		t.Fatalf("title-only auto match: canonical=%q candidate=%q; want shadow only", it.CanonicalID, it.Attributes["lwin_candidate"])
+	}
+}
+
+// A store sale yields list_price_cents and discount_pct; no sale, no fields.
+func TestExtract_StoreDiscount(t *testing.T) {
+	s := sanitized("Summer Whites Trio", "")
+	s.PriceCents = 17850
+	s.Aspects = map[string]string{"compare_at_cents": "21000"}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Attributes["list_price_cents"] != "21000" || it.Attributes["discount_pct"] != "15" {
+		t.Fatalf("list=%q discount=%q, want 21000 and 15", it.Attributes["list_price_cents"], it.Attributes["discount_pct"])
+	}
+	plain, err := New().Extract(context.Background(), sanitized("2020 Moscato d'Oro", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := plain.Attributes["discount_pct"]; has {
+		t.Fatal("no compare_at price must mean no discount")
 	}
 }

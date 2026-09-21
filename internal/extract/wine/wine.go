@@ -39,6 +39,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -92,6 +93,9 @@ func (e *Extractor) Category() string {
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
+	if isMerchandise(s.Title) {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+	}
 	text := s.Title
 	if s.Body != "" {
 		text += "\n" + s.Body
@@ -148,15 +152,28 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["ship_legal_to"] = strings.Join(jurisdictionTokens(raw), " ")
 	}
 
+	// Store sale: the store's own list price, when it says the listing is on
+	// sale. A signal that needs no critic scores and no price history -- the
+	// only deal signal the configured producer stores can offer today.
+	if cmp, err := strconv.ParseInt(s.Aspects["compare_at_cents"], 10, 64); err == nil && cmp > s.PriceCents && s.PriceCents > 0 {
+		it.Attributes["list_price_cents"] = strconv.FormatInt(cmp, 10)
+		it.Attributes["discount_pct"] = strconv.FormatInt((cmp-s.PriceCents)*100/cmp, 10)
+	}
+
 	// LWIN identity resolution (optional).
 	if e.Resolver != nil {
-		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage})
+		producer := strings.TrimSpace(s.Aspects["wine_producer"])
+		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage, Producer: producer})
 		it.Attributes["lwin_route"] = string(res.Route)
 		if res.Route != lwin.RouteReview {
 			it.Attributes["lwin_candidate"] = res.Best.Record.LWIN11(vintage)
 			it.Attributes["lwin_score"] = strconv.FormatFloat(res.Best.Score, 'f', 1, 64)
 		}
-		if res.Route == lwin.RouteAuto && e.Stamp {
+		// Stamped only when the producer was KNOWN, not inferred from the
+		// title: measured on the live listings, title-only auto matches were
+		// mostly wrong ("Bolero" -> producer Bolero), while producer-hinted
+		// ones were right (24 of 24 on Robert Mondavi's store, 2026-09-21).
+		if res.Route == lwin.RouteAuto && e.Stamp && producer != "" {
 			it.CanonicalID = res.Best.Record.LWIN11(vintage)
 		}
 	}
@@ -457,4 +474,19 @@ func tokenize(title string) []string {
 		tokens = append(tokens, p)
 	}
 	return tokens
+}
+
+// ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
+// pipeline records it as an extract skip.
+var ErrNotWine = errors.New("not a wine (merchandise listing)")
+
+// merchandiseRe matches what winery storefronts sell besides wine. A keyword
+// rule, deliberately, rather than "no vintage, no varietal": plenty of real
+// wines carry neither (Harbinger's non-vintage "Bolero").
+var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping fee)\b`)
+
+// isMerchandise reports whether a wine-store title is merchandise (nagus-17k:
+// robert-mondavi-winery's "Single Bottle Wine Tote" was ingested as a wine).
+func isMerchandise(title string) bool {
+	return merchandiseRe.MatchString(title)
 }

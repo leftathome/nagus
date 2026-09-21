@@ -45,6 +45,8 @@ type channelTagger struct {
 	inner listing.Connector
 	src   shipping.Source
 	rules shipping.Rules
+	// producer is the source's declared producer ("" = none declared).
+	producer string
 }
 
 // TagWineChannel wraps conn so every listing it emits carries the source's
@@ -69,6 +71,9 @@ func (t *channelTagger) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		raws[i].Aspects["wine_channel"] = string(t.src.Channel)
 		raws[i].Aspects["source_origin"] = t.src.Origin.Code()
 		raws[i].Aspects["ship_legal_to"] = legalTo
+		if p := t.producerFor(raws[i]); p != "" {
+			raws[i].Aspects["wine_producer"] = p
+		}
 	}
 	return raws, nil
 }
@@ -110,6 +115,9 @@ type WineDeps struct {
 	// LWINStamp lets auto-route LWIN matches stamp CanonicalID; off is shadow
 	// mode (see extwine.Extractor.Stamp).
 	LWINStamp bool
+	// Producer is this source's declared producer (SourceConfig.WineProducer),
+	// passed to LWIN resolution. Per source, so set on the source's own copy.
+	Producer string
 	// Model overrides the hedonic value model; nil = valwine.DefaultModel
 	// (the documented cold-start bootstrap priors).
 	Model *valwine.HedonicModel
@@ -213,7 +221,7 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 		return nil, fmt.Errorf("wine: %w", err)
 	}
 	return &pipeline.Ingester{
-		Connector:        TagWineChannel(conn, src, deps.shipRules()),
+		Connector:        &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer},
 		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(wine)"},
 		Extractor:        &extwine.Extractor{Resolver: deps.LWIN, Stamp: deps.LWINStamp},
 		Store:            deps.Store,
@@ -223,4 +231,19 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 		OfferExpireAfter: deps.OfferExpireAfter,
 		Logf:             deps.Logf,
 	}, nil
+}
+
+// producerFor is the producer to resolve a listing against: the source's
+// declared producer, else -- only on a PRODUCER-channel source, where every
+// listing is the store owner's own wine -- the product vendor. A retailer's
+// vendor field names whoever the retailer bought from, or nothing useful, and
+// is never trusted as the producer.
+func (t *channelTagger) producerFor(r listing.Raw) string {
+	if t.producer != "" {
+		return t.producer
+	}
+	if t.src.Channel == shipping.ChannelProducer {
+		return strings.TrimSpace(r.Aspects["vendor"])
+	}
+	return ""
 }

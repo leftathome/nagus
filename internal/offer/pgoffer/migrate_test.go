@@ -2,13 +2,13 @@ package pgoffer
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/pgtest"
 )
 
 // The prod offers table predates the resolution columns and holds live data, so
@@ -32,10 +32,9 @@ VALUES ('legacy-1', 'shopify:old', 'k', 'An old drive', 5000, 'Seagate', 'ST1', 
 `
 
 func TestMigrationAddsResolutionToExistingTable(t *testing.T) {
-	dsn := os.Getenv("NAGUS_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set NAGUS_TEST_POSTGRES_DSN to run postgres offer migration test")
-	}
+	// A database private to this package (nagus-0wj): packages run in
+	// parallel and must not truncate each other's tables.
+	dsn := pgtest.DSN(t, "pgoffer_migrate")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

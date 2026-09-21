@@ -247,8 +247,11 @@ func TestWineSliceEndToEnd(t *testing.T) {
 	if worst.Signal.Verdict != "poor" {
 		t.Errorf("a double-price 95-pointer should be poor, got %q (ratio %.2f)", worst.Signal.Verdict, worst.Signal.Ratio)
 	}
-	if best.Item.CanonicalID != "11012452019" {
-		t.Errorf("expected LWIN-11 canonical id, got %q", best.Item.CanonicalID)
+	// A RETAILER declares no producer, so the LWIN match is recorded (shadow)
+	// but not stamped: stamping needs a known producer (nagus-86s).
+	if best.Item.CanonicalID != "" || best.Item.Attributes["lwin_candidate"] != "11012452019" {
+		t.Errorf("retailer listing: canonical=%q candidate=%q; want shadow candidate 11012452019 and no stamp",
+			best.Item.CanonicalID, best.Item.Attributes["lwin_candidate"])
 	}
 
 	// Destination US-CA over the SAME stored corpus: both retailers may ship
@@ -489,5 +492,30 @@ func TestWineSurfaceMinScoreCountGate(t *testing.T) {
 	}
 	if sr.Items[0].Signal.Verdict == "unknown-no-reference" {
 		t.Fatalf("MinScoreCount=1 should allow flagging, got %q", sr.Items[0].Signal.Verdict)
+	}
+}
+
+// nagus-86s: a producer store's listings carry the producer -- declared on the
+// source, else the store's vendor -- and a retailer's vendor is never trusted.
+func TestChannelTaggerProducer(t *testing.T) {
+	for _, tc := range []struct {
+		name, channel, declared, want string
+	}{
+		{"declared wins", "producer", "Robert Mondavi Winery", "Robert Mondavi Winery"},
+		{"producer store falls back to vendor", "producer", "", "RMW"},
+		{"retailer vendor is not the producer", "retailer", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := listing.Raw{SourceKey: "k", Title: "2021 The Estates Merlot, Oak Knoll", Aspects: map[string]string{"vendor": "RMW"}}
+			tag := &channelTagger{inner: &fakeWineConn{id: "s", raws: []listing.Raw{raw}},
+				src: mustSource(t, tc.channel, "US-CA"), rules: shipping.DefaultRules(), producer: tc.declared}
+			got, err := tag.Fetch(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p := got[0].Aspects["wine_producer"]; p != tc.want {
+				t.Fatalf("wine_producer = %q, want %q", p, tc.want)
+			}
+		})
 	}
 }

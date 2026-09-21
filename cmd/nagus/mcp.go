@@ -354,7 +354,29 @@ func scoredItemsToRows(items []pipeline.Scored) []searchRow {
 			PriceCents: sc.Item.PriceCents, Currency: sc.Item.Currency,
 			CapacityTB: sc.Item.Attributes["capacity_tb"], Condition: sc.Item.Condition,
 			Title: sc.Item.Title, SourceURL: sc.Item.SourceURL,
+			Category: sc.Item.Category, Details: rowDetails(sc.Item.Attributes),
 		})
 	}
 	return rows
+}
+
+// rowDetailKeys are the item attributes a row carries in Details: short,
+// extracted, category-specific facts a message needs. A whitelist, so a new
+// attribute never reaches consumers (or the agent) by accident.
+var rowDetailKeys = []string{
+	"vintage", "varietal", "colour", "bottle_ml", "wine_score", "wine_score_count",
+	"discount_pct", "list_price_cents", "acreage", "location",
+}
+
+func rowDetails(attrs map[string]string) map[string]string {
+	var out map[string]string
+	for _, k := range rowDetailKeys {
+		if v := attrs[k]; v != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[k] = v
+		}
+	}
+	return out
 }

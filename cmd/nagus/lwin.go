@@ -133,6 +133,55 @@ func (s *lwinSource) get(ctx context.Context) (*lwin.Resolver, error) {
 	return s.resolver, s.err
 }
 
+// waitLoaded blocks until the first dictionary load attempt has finished, max
+// has passed, or ctx ends. It reports whether the load attempt finished.
+func (s *lwinSource) waitLoaded(ctx context.Context, max time.Duration) bool {
+	if s.loaded == nil {
+		return true // get never ran: nothing is loading
+	}
+	t := time.NewTimer(max)
+	defer t.Stop()
+	select {
+	case <-s.loaded:
+		return true
+	case <-t.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// lwinStartWait bounds how long a wine source's first ingest waits for the
+// dictionary. The real load takes ~2 minutes on an arm64 node at the 500m CPU
+// limit; past this, ingest proceeds without it rather than stalling a source.
+const lwinStartWait = 10 * time.Minute
+
+// wineIngestGates returns, aligned with sources, a gate for every WINE source
+// that holds its first ingest until the LWIN dictionary has loaded (nagus-0k0).
+//
+// Without it the startup ingest ran at 17:37 and the dictionary landed at
+// 17:39 (2026-09-21): every wine item was extracted against an empty
+// dictionary, and wine sources ingest every 12h, so each restart cost 12h of
+// identity data. Other categories never wait on a wine dictionary.
+func wineIngestGates(sources []SourceConfig, s *lwinSource, max time.Duration, logf func(string, ...any)) []func(context.Context) {
+	if s == nil {
+		return nil
+	}
+	gates := make([]func(context.Context), len(sources))
+	for i, src := range sources {
+		if src.Category != "wine" {
+			continue
+		}
+		name := src.Name
+		gates[i] = func(ctx context.Context) {
+			if !s.waitLoaded(ctx, max) && ctx.Err() == nil {
+				logf("lwin: %s starting ingest without the dictionary (not loaded within %s)", name, max)
+			}
+		}
+	}
+	return gates
+}
+
 // refresh makes the mirror current and, when the file changed or nothing is
 // loaded yet, loads it and swaps it in.
 func (s *lwinSource) refresh(ctx context.Context) error {

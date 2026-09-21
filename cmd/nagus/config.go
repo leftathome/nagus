@@ -69,6 +69,13 @@ type SourceConfig struct {
 	// as unable to prove in-subdivision standing.
 	WineChannel string `json:"wineChannel,omitempty"`
 	Origin      string `json:"origin,omitempty"`
+	// WineProducer names the producer when every listing on the source is
+	// one producer's (a winery's own store). Producer-storefront titles never
+	// name the producer, and LWIN resolution needs it (nagus-86s). Optional:
+	// without it a producer-channel source falls back to the store's product
+	// vendor, which some stores fill usefully ("Harbinger Winery") and some do
+	// not ("RMW").
+	WineProducer string `json:"wineProducer,omitempty"`
 
 	// offline/testing
 	Fixture string `json:"fixture,omitempty"`

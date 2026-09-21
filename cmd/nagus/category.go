@@ -339,6 +339,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w (declare wineChannel and origin on the source; shipping legality is a conscious per-source declaration)", s.Name, err)
 		}
+		deps.Producer = s.WineProducer
 		ing, err := category.NewWineIngester(conn, src, deps)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
