@@ -224,3 +224,26 @@ func TestResolve_ProducerHintExcludesOtherProducers(t *testing.T) {
 		t.Fatal("a known producer must exclude other producers' records")
 	}
 }
+
+// Regression from production (Turley, 2026-09-21): the one uncovered title word
+// named the producer's OTHER wines, so the generic record must not auto-match.
+func TestResolve_UncoveredWordNamingASiblingBlocksAuto(t *testing.T) {
+	db := NewDB([]Record{
+		{LWIN7: "2000001", Producer: "Turley", Wine: "Cabernet Sauvignon", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "2000002", Producer: "Turley", Wine: "Hayne Vineyard Petite Syrah", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "2000003", Producer: "Turley", Wine: "Hayne Zinfandel", Region: "California", SubRegion: "Napa Valley"},
+		{LWIN7: "3000001", Producer: "Robert Mondavi Winery", Wine: "60th Anniversary Cabernet Sauvignon", Region: "California", SubRegion: "Napa Valley"},
+	})
+	r := Resolver{DB: db}
+	if res := r.Resolve(Query{Name: "2023 Hayne Vineyard Cabernet Sauvignon Napa Valley", Producer: "Turley Wine Cellars"}); res.Route == RouteAuto {
+		t.Fatalf("auto-matched %s although 'Hayne' names Turley's other wines", res.Best.Record.DisplayName())
+	}
+	// Still auto: the sibling rule does not fire on a true match...
+	if res := r.Resolve(Query{Name: "2024 Hayne Vineyard Petite Syrah Napa Valley", Producer: "Turley Wine Cellars"}); res.Route != RouteAuto || res.Best.Record.LWIN7 != "2000002" {
+		t.Fatalf("Hayne Petite Syrah: %+v", res)
+	}
+	// ...nor on a marketing word no sibling uses.
+	if res := r.Resolve(Query{Name: "Robert Mondavi Winery 60th Anniversary Commemorative Cabernet Sauvignon", Producer: "Robert Mondavi Winery"}); res.Route != RouteAuto {
+		t.Fatalf("60th Anniversary: %+v", res)
+	}
+}
