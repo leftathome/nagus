@@ -422,3 +422,31 @@ func mustPut(t *testing.T, s *Store, it item.Item) {
 		t.Fatalf("put %s: %v", it.ID, err)
 	}
 }
+
+// Delete removes exactly one item and tolerates an absent id.
+func TestDeleteRemovesOneItem(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(2000, 0)
+	for _, id := range []string{"keep", "gone"} {
+		if err := s.Put(ctx, mkItem(id, "hdd", 100, now, "Seagate "+id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Delete(ctx, "gone"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err := s.Delete(ctx, "never-existed"); err != nil {
+		t.Fatalf("Delete of an absent id: %v", err)
+	}
+	if _, ok, _ := s.Get(ctx, "gone"); ok {
+		t.Fatal("deleted item still present")
+	}
+	if _, ok, _ := s.Get(ctx, "keep"); !ok {
+		t.Fatal("Delete removed the wrong item")
+	}
+	res, err := s.Search(ctx, store.Query{Text: "gone"})
+	if err != nil || len(res) != 0 {
+		t.Fatalf("deleted item still searchable: %v %v", res, err)
+	}
+}

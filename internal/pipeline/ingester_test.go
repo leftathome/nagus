@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -420,5 +421,56 @@ func TestConnectorsWithoutCompletenessStillExpire(t *testing.T) {
 	}
 	if res.OffersExpired != 1 {
 		t.Fatalf("OffersExpired = %d, want 1 -- a connector with no completeness signal is treated as complete", res.OffersExpired)
+	}
+}
+
+// categoryRejectingExtractor rejects listings keyed "ssd" as out of category.
+type categoryRejectingExtractor struct{ fakeExtractor }
+
+func (e categoryRejectingExtractor) Extract(ctx context.Context, s listing.Sanitized) (item.Item, error) {
+	if s.SourceKey == "ssd" {
+		return item.Item{}, fmt.Errorf("hdd: extract: %w", listing.ErrNotInCategory)
+	}
+	return e.fakeExtractor.Extract(ctx, s)
+}
+
+// An item stored before a category rule existed is removed on the next ingest
+// that rejects its listing. Shopify sources have no freshness purge, so without
+// this the waterpanther SSDs (7 of them pinging as "great" hard drives) would
+// have stayed in the hdd surface forever.
+func TestIngestRemovesAnItemItsCategoryNowRejects(t *testing.T) {
+	st := store.NewMemoryStore()
+	oldID := offer.DeterministicID("fake", "ssd")
+	if err := st.Put(context.Background(), item.Item{ID: oldID, Category: "hdd", Class: item.ClassDurable,
+		Title: "15.36TB SSD", SourceID: "fake", SourceKey: "ssd", SeenAt: time.Unix(900, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{raw("ssd", "15.36TB SSD", 9000, "15.36")}},
+		Sanitizer: sanitize.Passthrough{}, Extractor: categoryRejectingExtractor{}, Store: st}
+	res, err := ing.Ingest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skips) != 1 {
+		t.Fatalf("skips = %+v, want the one rejection", res.Skips)
+	}
+	if _, ok, _ := st.Get(context.Background(), oldID); ok {
+		t.Fatal("the previously stored out-of-category item is still there")
+	}
+}
+
+// An ordinary extract failure (not a category rejection) must not delete.
+func TestIngestKeepsItemsOnOrdinaryExtractErrors(t *testing.T) {
+	st := store.NewMemoryStore()
+	oldID := offer.DeterministicID("fake", "bad")
+	_ = st.Put(context.Background(), item.Item{ID: oldID, Category: "hdd", Class: item.ClassDurable,
+		Title: "x", SourceID: "fake", SourceKey: "bad", SeenAt: time.Unix(900, 0)})
+	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{raw("bad", "broken", 1, "1")}},
+		Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: st}
+	if _, err := ing.Ingest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Get(context.Background(), oldID); !ok {
+		t.Fatal("a transient extract error deleted a stored item")
 	}
 }

@@ -39,7 +39,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -176,6 +175,15 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		if res.Route == lwin.RouteAuto && e.Stamp && producer != "" {
 			it.CanonicalID = res.Best.Record.LWIN11(vintage)
 		}
+	}
+
+	// No wine evidence at all -- no vintage, no varietal, no colour -- means
+	// merchandise the keyword list did not name. Measured on the live corpus
+	// (2026-09-21): exactly 12 of 91 wine items had none of the three, and all
+	// 12 were merchandise (a foil cutter and key chains among them, on sale,
+	// which the wine-sales watch would have pinged); none of the 79 bottles.
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
 	if err := it.Validate(); err != nil {
@@ -478,7 +486,7 @@ func tokenize(title string) []string {
 
 // ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
 // pipeline records it as an extract skip.
-var ErrNotWine = errors.New("not a wine (merchandise listing)")
+var ErrNotWine = fmt.Errorf("%w: not a wine (merchandise listing)", listing.ErrNotInCategory)
 
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real

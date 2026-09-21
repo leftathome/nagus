@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -370,7 +369,7 @@ func tokenize(title string) []string {
 
 // ErrNotHardDrive rejects a listing that is not a hard disk drive. The ingest
 // pipeline records it as an extract skip.
-var ErrNotHardDrive = errors.New("not a hard disk drive (solid-state listing)")
+var ErrNotHardDrive = fmt.Errorf("%w: not a hard disk drive (solid-state listing)", listing.ErrNotInCategory)
 
 // solidStateRe matches solid-state storage named in a title.
 var solidStateRe = regexp.MustCompile(`(?i)\b(ssd|nvme)\b|solid[- ]state`)

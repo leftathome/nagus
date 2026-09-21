@@ -50,4 +50,9 @@ type Store interface {
 	// content-age obligation) applies to one source without touching others
 	// (e.g. a keyless feed source).
 	DeleteStale(ctx context.Context, sourceID string, olderThan time.Time) (int, error)
+	// Delete removes one item by id; deleting an absent id is not an error.
+	// Used when a source's listing turns out not to belong to the category at
+	// all (listing.ErrNotInCategory): without it such an item, stored before
+	// the rule existed, would stay forever on sources with no freshness purge.
+	Delete(ctx context.Context, id string) error
 }

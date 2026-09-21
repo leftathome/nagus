@@ -442,3 +442,9 @@ func TestErrpathFilterRejectionLogs(t *testing.T) {
 		t.Fatal("expected the filter rejection to be logged via Logf")
 	}
 }
+
+func (s *errpathFailingItemStore) Delete(ctx context.Context, id string) error {
+	return s.inner.Delete(ctx, id)
+}
+
+func (errpathSearchErrorStore) Delete(context.Context, string) error { return nil }

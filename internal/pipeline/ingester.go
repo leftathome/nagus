@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/leftathome/nagus/internal/listing"
@@ -112,6 +113,13 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		if err != nil {
 			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "extract", Reason: err.Error()})
 			i.logf("ingest: extract dropped %s: %v", r.SourceKey, err)
+			if errors.Is(err, listing.ErrNotInCategory) && i.Store != nil {
+				// An item stored before the category rule existed must not
+				// outlive it: Shopify sources have no freshness purge.
+				if derr := i.Store.Delete(ctx, offer.DeterministicID(r.SourceID, r.SourceKey)); derr != nil {
+					i.logf("ingest: removing out-of-category item %s: %v", r.SourceKey, derr)
+				}
+			}
 			continue
 		}
 		if err := i.Store.Put(ctx, it); err != nil {
