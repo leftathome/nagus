@@ -156,6 +156,28 @@ quark:
       key: eso/quark/consumers
       property: nagus_bearer_token
 
+# lwin: the Liv-ex LWIN wine dictionary (CC BY), used to resolve wine listings
+# to canonical LWIN identities. OFF while url is empty.
+#
+# The registration form at liv-ex.com/lwin/ leads to a public object that
+# Liv-ex refreshes in place; nagus mirrors it onto the data volume, validates
+# each download (it must parse to a real dictionary) before it replaces the
+# mirror, and keeps the last good copy if the source is down.
+lwin:
+  # e.g. https://s3-eu-west-1.amazonaws.com/lwin-dictionary/latest/LWINdatabase.xlsx
+  url: ""
+  # On the data volume. With storage.backend=sqlite that is the PVC and a
+  # restart reuses the copy; with postgres it is an emptyDir, so each new pod
+  # downloads the export once (~26 MB) and revalidates conditionally after.
+  cachePath: /data/lwin/LWINdatabase.xlsx
+  # How long a copy is used before asking the source again (a conditional
+  # request: an unchanged export costs no download).
+  maxAge: 720h
+  # Write canonical ids from auto-route matches. OFF = shadow mode: the route,
+  # would-be id and score are recorded on each wine item so the false-match
+  # rate can be measured first. Keep off until it is under 5%.
+  stamp: false
+
 # watches are saved search_items queries + notify thresholds that the /watches
 # endpoint evaluates for openclaw's delivery cron (candidates -> quiet inbox,
 # strong matches -> ping; audience is routed by openclaw's household resolver).
@@ -267,7 +289,9 @@ resources:
     memory: 64Mi
   limits:
     cpu: 500m
-    memory: 256Mi
+    # 384Mi, up from 256Mi, for the LWIN dictionary (~55 MiB resident; the
+    # Go runtime peaked ~180 MiB while building it). GOMEMLIMIT follows this.
+    memory: 384Mi
 
 nodeSelector: {}
 tolerations: []

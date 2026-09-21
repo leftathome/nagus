@@ -26,7 +26,7 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.7.0
+version: 0.8.0
 appVersion: "0.4.0"
 kubeVersion: ">=1.27.0-0"
 keywords:

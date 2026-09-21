@@ -107,6 +107,9 @@ type WineDeps struct {
 	// disabled) -- the pipeline still works, per the graceful-degradation
 	// convention.
 	LWIN *lwin.Resolver
+	// LWINStamp lets auto-route LWIN matches stamp CanonicalID; off is shadow
+	// mode (see extwine.Extractor.Stamp).
+	LWINStamp bool
 	// Model overrides the hedonic value model; nil = valwine.DefaultModel
 	// (the documented cold-start bootstrap priors).
 	Model *valwine.HedonicModel
@@ -212,7 +215,7 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 	return &pipeline.Ingester{
 		Connector:        TagWineChannel(conn, src, deps.shipRules()),
 		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(wine)"},
-		Extractor:        &extwine.Extractor{Resolver: deps.LWIN},
+		Extractor:        &extwine.Extractor{Resolver: deps.LWIN, Stamp: deps.LWINStamp},
 		Store:            deps.Store,
 		StaleAfter:       deps.StaleAfter,
 		Offers:           deps.Offers,

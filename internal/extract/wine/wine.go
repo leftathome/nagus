@@ -63,8 +63,16 @@ type Extractor struct {
 	// default anchors with no per-critic bias.
 	Normalizer valwine.Normalizer
 	// Resolver, when non-nil, resolves listings to LWIN identities. Only
-	// RouteAuto matches stamp CanonicalID (see package doc).
+	// RouteAuto matches stamp CanonicalID (see package doc), and only when
+	// Stamp is set.
 	Resolver *lwin.Resolver
+	// Stamp enables writing CanonicalID. Off, the resolver runs in SHADOW:
+	// lwin_route plus the would-be id and score are recorded as attributes so
+	// the false-match rate can be measured on real listings before any id is
+	// trusted. Measured on the full Liv-ex dictionary (185k wines), token-set
+	// scoring auto-matched "2018 The Reserve Cabernet Sauvignon, To Kalon
+	// Vineyard" to an unrelated producer at 100 -- so this starts off.
+	Stamp bool
 }
 
 var _ listing.Extractor = (*Extractor)(nil)
@@ -144,7 +152,11 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	if e.Resolver != nil {
 		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage})
 		it.Attributes["lwin_route"] = string(res.Route)
-		if res.Route == lwin.RouteAuto {
+		if res.Route != lwin.RouteReview {
+			it.Attributes["lwin_candidate"] = res.Best.Record.LWIN11(vintage)
+			it.Attributes["lwin_score"] = strconv.FormatFloat(res.Best.Score, 'f', 1, 64)
+		}
+		if res.Route == lwin.RouteAuto && e.Stamp {
 			it.CanonicalID = res.Best.Record.LWIN11(vintage)
 		}
 	}

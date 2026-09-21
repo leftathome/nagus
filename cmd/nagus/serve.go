@@ -36,6 +36,9 @@ type server struct {
 	store           store.Store
 	defaultCategory string // "" when >1 category and no explicit default
 	watches         watch.Config
+	// lwin is the shared LWIN dictionary source, nil when LWIN is off. Read
+	// for its metrics.
+	lwin *lwinSource
 	// offers is the offer layer, nil when off. Read only to stamp quark's
 	// product id onto rows (withProductIDs).
 	offers offer.Store
@@ -131,6 +134,9 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.enricher != nil {
 		writeEnrichMetrics(w, s.enricher.Snapshot())
+	}
+	if s.lwin != nil {
+		writeLWINMetrics(w, s.lwin)
 	}
 	if len(ebaySources) == 0 {
 		return
@@ -362,10 +368,14 @@ func runServe(args []string) error {
 			def = name
 		}
 	}
-	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore}
+	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore, lwin: opts.lwin}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if opts.lwin != nil {
+		go opts.lwin.refreshLoop(ctx)
+	}
 
 	// One ingest goroutine per source, each on its own configured interval;
 	// per-source failure isolation (a bad source never blocks another's loop
