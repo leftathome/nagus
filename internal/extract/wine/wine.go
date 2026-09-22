@@ -127,6 +127,22 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	} else if colour, ok := extractColour(text); ok {
 		it.Attributes["colour"] = colour
 	}
+	// Structured fields from the SOURCE (Commerce7 and Vinoshipper publish
+	// vintage, varietal, wine type and bottle size as data) beat parsing the
+	// title: "Esprit de Tablas" names neither its vintage nor its grapes.
+	if v, err := strconv.Atoi(s.Aspects["vintage"]); err == nil && v > 1800 && v < 2200 {
+		vintage, hasVintage = v, true
+		it.Attributes["vintage"] = strconv.Itoa(v)
+	}
+	if ml, err := strconv.Atoi(s.Aspects["bottle_ml"]); err == nil && ml > 0 {
+		it.Attributes["bottle_ml"] = strconv.Itoa(ml)
+	}
+	if v := strings.TrimSpace(s.Aspects["varietal"]); v != "" {
+		it.Attributes["varietal"] = v
+	}
+	if c := sourceColour(s.Aspects["wine_type"]); c != "" {
+		it.Attributes["colour"] = c
+	}
 
 	// Critic attributions -> aggregated normalized quality score.
 	raw := parseCriticScores(text)
@@ -501,3 +517,20 @@ func isMerchandise(title string) bool {
 
 // StampEnabled reports whether this extractor writes LWIN canonical ids.
 func (e *Extractor) StampEnabled() bool { return e.Stamp }
+
+// sourceColour maps a source's structured wine type (Commerce7 "Red",
+// Vinoshipper "RED", "ROSE", ...) onto the extractor's colour vocabulary; ""
+// when the type names no colour (sparkling, dessert).
+func sourceColour(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "red":
+		return "red"
+	case "white":
+		return "white"
+	case "rose", "ros\u00e9", "rosado", "rosato":
+		return "rose"
+	case "orange":
+		return "orange"
+	}
+	return ""
+}

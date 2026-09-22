@@ -57,6 +57,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "nagus serve:", err)
 			os.Exit(1)
 		}
+	case "fingerprint":
+		if err := runFingerprint(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "nagus fingerprint:", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -74,6 +79,8 @@ usage:
   nagus ingest -category hdd  ... (-ebay-fixture FILE | -client-id ID -client-secret SECRET) [-query ...] [-limit 50]
   nagus search -category hdd|land -db nagus.db [-text STR] [-limit 20] [-min-capacity 6] [-offline] [-json]
   nagus serve  -category hdd|land -db /data/nagus.db [-listen :8080] [-ingest-interval 30m] [-offline]
+  nagus fingerprint DOMAIN...   classify stores (shopify, vinoshipper, orderport, commerce7, ...) and
+                               print the endpoint a connector would use, one JSON line per domain
 
 Categories: hdd ($/TB deal-watch, eBay), land (structure-first + free gov geo
 enrichment; NAGUS_LAND_* and NAGUS_RENTCAST_KEY env), and wine (critic-score

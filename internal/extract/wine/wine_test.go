@@ -495,3 +495,25 @@ func TestExtract_NoWineEvidenceIsNotWine(t *testing.T) {
 		t.Fatalf("a real non-vintage wine with evidence in its description was rejected: %v", err)
 	}
 }
+
+// Structured source fields beat title parsing (Commerce7/Vinoshipper publish
+// them): "Esprit de Tablas" names no vintage or grape, and Kiona's "Old Vine
+// Chenin Blanc" description mentioned another grape the text parser picked.
+func TestExtract_StructuredSourceFieldsWin(t *testing.T) {
+	s := sanitized("Esprit de Tablas", "A Rhone blend with notes that recall Sauvignon Blanc.")
+	s.Aspects = map[string]string{"vintage": "2021", "varietal": "Chenin Blanc", "wine_type": "white", "bottle_ml": "1500"}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := it.Attributes
+	if a["vintage"] != "2021" || a["varietal"] != "Chenin Blanc" || a["colour"] != "white" || a["bottle_ml"] != "1500" {
+		t.Fatalf("attributes %v", a)
+	}
+	// Garbage in a structured field is ignored, not trusted.
+	s.Aspects = map[string]string{"vintage": "tbd", "bottle_ml": "-1"}
+	it, _ = New().Extract(context.Background(), s)
+	if it.Attributes["vintage"] == "tbd" || it.Attributes["bottle_ml"] == "-1" {
+		t.Fatalf("bad structured values were used: %v", it.Attributes)
+	}
+}

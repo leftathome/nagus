@@ -76,6 +76,15 @@ type SourceConfig struct {
 	// vendor, which some stores fill usefully ("Harbinger Winery") and some do
 	// not ("RMW").
 	WineProducer string `json:"wineProducer,omitempty"`
+
+	// vinoshipper: the producer's Vinoshipper account id (nagus fingerprint).
+	VinoshipperAccount int `json:"vinoshipperAccount,omitempty"`
+	// commerce7: the store's Commerce7 tenant slug (nagus fingerprint);
+	// baseUrl is the storefront root used for product links.
+	Commerce7Tenant string `json:"commerce7Tenant,omitempty"`
+	// orderport: baseUrl is the <store>.orderport.net root; catalogPath
+	// overrides /wines/All-Wines.
+	CatalogPath string `json:"catalogPath,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
 	// lwin.stamp switch alone is not enough: a newly added source would

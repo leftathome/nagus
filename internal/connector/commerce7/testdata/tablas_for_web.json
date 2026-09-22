@@ -1,0 +1,539 @@
+{
+ "collection": {
+  "productCount": 7
+ },
+ "products": [
+  {
+   "id": "8cda2190-c5be-4e63-bc51-58dff4150998",
+   "title": "$100 Virtual Gift Card",
+   "subTitle": null,
+   "image": "https://images.commerce7.com/tablas-creek-vineyard/images/original/tablas-gift-card-1789162292992.jpg",
+   "type": "Gift Card",
+   "departmentId": "a6facafd-85aa-4312-a56b-b882f7d266a5",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "virtual-gift-card-100",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-07-31T23:16:18.478Z",
+   "updatedAt": "2026-09-11T21:31:43.481Z",
+   "variants": [
+    {
+     "id": "c400c561-f679-49e3-bb33-044e3e9bc803",
+     "productId": "8cda2190-c5be-4e63-bc51-58dff4150998",
+     "title": "$100",
+     "sku": "ZGIFTCARDVIRTUAL100",
+     "upcCode": "",
+     "volumeInML": null,
+     "alcoholPercentage": null,
+     "price": 10000,
+     "comparePrice": null,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": false,
+     "inventoryPolicy": "Back Order",
+     "hasShipping": false,
+     "taxType": "Not Taxable",
+     "weight": 0,
+     "inventory": null,
+     "addToCartPrice": 10000
+    }
+   ],
+   "giftCard": {
+    "type": "Virtual"
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "726df64b-117d-43ad-afaf-32316eba1624",
+   "title": "2002 Las Tablas estates glenrose vineyard",
+   "subTitle": null,
+   "image": null,
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2002-las-tablas-estates-glenrose-vineyard",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T20:58:51.777Z",
+   "updatedAt": "2026-06-04T20:58:51.777Z",
+   "variants": [],
+   "wine": {
+    "type": "Red",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2002
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "fcec2a85-b120-4820-8eec-f39d3d6aecad",
+   "title": "2011 Esprit Blanc de Tablas 375ml",
+   "subTitle": null,
+   "image": "https://images.commerce7.com/tablas-creek-vineyard/images/original/2011-esprit-blanc-bottleshot-375ml-1788463056554.png",
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2011-esprit-blanc-de-tablas-375ml",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T20:54:05.698Z",
+   "updatedAt": "2026-09-03T19:17:54.468Z",
+   "variants": [
+    {
+     "id": "cdd84697-732b-4823-83dc-ec02d7686a14",
+     "productId": "fcec2a85-b120-4820-8eec-f39d3d6aecad",
+     "title": "375ml",
+     "sku": "11BLHA",
+     "upcCode": null,
+     "volumeInML": 375,
+     "alcoholPercentage": 13.5,
+     "price": 5300,
+     "comparePrice": null,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": true,
+     "inventoryPolicy": "Dont Sell",
+     "hasShipping": true,
+     "taxType": "Wine",
+     "weight": 3,
+     "inventory": [
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "6b02b423-2d6f-4c55-bbc0-b9adf319e8a6",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "3d2e9e47-6a52-46e5-b3df-9d25f2e0475b",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "02094047-91af-4c40-961a-14ffc37c02b8",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "380d9442-bf19-42e1-b231-e63c7e17c5fb",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "95ec4de3-b2cb-4ddc-b15c-386fc61052ca",
+       "availableForSaleCount": 96
+      }
+     ],
+     "addToCartPrice": 5300
+    }
+   ],
+   "wine": {
+    "type": "White",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2011
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "d6abd651-3a94-4120-b721-868e18ad9f93",
+   "title": "2011 Esprit de Tablas",
+   "subTitle": null,
+   "image": "https://images.commerce7.com/tablas-creek-vineyard/images/original/2011-esprit-1787258176080.png",
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2011-esprit-de-tablas",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T21:01:02.893Z",
+   "updatedAt": "2026-08-20T20:36:23.961Z",
+   "variants": [
+    {
+     "id": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+     "productId": "d6abd651-3a94-4120-b721-868e18ad9f93",
+     "title": "750ml",
+     "sku": "11EBFA",
+     "upcCode": null,
+     "volumeInML": 750,
+     "alcoholPercentage": 14.5,
+     "price": 10500,
+     "comparePrice": null,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": true,
+     "inventoryPolicy": "Dont Sell",
+     "hasShipping": true,
+     "taxType": "Wine",
+     "weight": 3,
+     "inventory": [
+      {
+       "reserveCount": 0,
+       "allocatedCount": 3,
+       "productVariantId": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+       "inventoryLocationId": "380d9442-bf19-42e1-b231-e63c7e17c5fb",
+       "availableForSaleCount": 100
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+       "inventoryLocationId": "6b02b423-2d6f-4c55-bbc0-b9adf319e8a6",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 2,
+       "productVariantId": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+       "inventoryLocationId": "95ec4de3-b2cb-4ddc-b15c-386fc61052ca",
+       "availableForSaleCount": 286
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+       "inventoryLocationId": "02094047-91af-4c40-961a-14ffc37c02b8",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "ca4f68be-03c8-4624-bb5e-b33ccba07bb8",
+       "inventoryLocationId": "3d2e9e47-6a52-46e5-b3df-9d25f2e0475b",
+       "availableForSaleCount": 0
+      }
+     ],
+     "addToCartPrice": 10500
+    }
+   ],
+   "wine": {
+    "type": "Red",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2011
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "8f3ba624-4aee-4e65-952c-3080a73d2efd",
+   "title": "2015 Esprit Blanc de Tablas 375ml",
+   "subTitle": null,
+   "image": null,
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2015-esprit-blanc-de-tablas-375ml",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T20:54:00.196Z",
+   "updatedAt": "2026-06-04T20:54:00.196Z",
+   "variants": [
+    {
+     "id": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+     "productId": "8f3ba624-4aee-4e65-952c-3080a73d2efd",
+     "title": "375ml",
+     "sku": "15BLHA",
+     "upcCode": null,
+     "volumeInML": 375,
+     "alcoholPercentage": 13,
+     "price": 4800,
+     "comparePrice": 0,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": true,
+     "inventoryPolicy": "Dont Sell",
+     "hasShipping": true,
+     "taxType": "Wine",
+     "weight": 3,
+     "inventory": [
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+       "inventoryLocationId": "95ec4de3-b2cb-4ddc-b15c-386fc61052ca",
+       "availableForSaleCount": 165
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+       "inventoryLocationId": "6b02b423-2d6f-4c55-bbc0-b9adf319e8a6",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+       "inventoryLocationId": "380d9442-bf19-42e1-b231-e63c7e17c5fb",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+       "inventoryLocationId": "02094047-91af-4c40-961a-14ffc37c02b8",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "2b035f3a-0536-4fb1-a2fe-a9450d1b3d0d",
+       "inventoryLocationId": "3d2e9e47-6a52-46e5-b3df-9d25f2e0475b",
+       "availableForSaleCount": 0
+      }
+     ],
+     "addToCartPrice": 4800
+    }
+   ],
+   "wine": {
+    "type": "White",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2015
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "sale-6a6b4e0e-c859-413c-9aa6-427fe9b27437",
+   "title": "2016 Esprit Blanc de Tablas 375ml",
+   "subTitle": null,
+   "image": null,
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2016-esprit-blanc-de-tablas-375ml",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T20:54:01.175Z",
+   "updatedAt": "2026-06-29T21:25:09.591Z",
+   "variants": [
+    {
+     "id": "sale-970500dd-c721-43e1-9627-b5c6e0a8d040",
+     "productId": "6a6b4e0e-c859-413c-9aa6-427fe9b27437",
+     "title": "375ml",
+     "sku": "16BLHA",
+     "upcCode": null,
+     "volumeInML": 375,
+     "alcoholPercentage": 13,
+     "price": 4800,
+     "comparePrice": 5800,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": true,
+     "inventoryPolicy": "Dont Sell",
+     "hasShipping": true,
+     "taxType": "Wine",
+     "weight": 3,
+     "inventory": [
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "970500dd-c721-43e1-9627-b5c6e0a8d040",
+       "inventoryLocationId": "380d9442-bf19-42e1-b231-e63c7e17c5fb",
+       "availableForSaleCount": 3
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "970500dd-c721-43e1-9627-b5c6e0a8d040",
+       "inventoryLocationId": "6b02b423-2d6f-4c55-bbc0-b9adf319e8a6",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "970500dd-c721-43e1-9627-b5c6e0a8d040",
+       "inventoryLocationId": "02094047-91af-4c40-961a-14ffc37c02b8",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "970500dd-c721-43e1-9627-b5c6e0a8d040",
+       "inventoryLocationId": "95ec4de3-b2cb-4ddc-b15c-386fc61052ca",
+       "availableForSaleCount": 259
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "970500dd-c721-43e1-9627-b5c6e0a8d040",
+       "inventoryLocationId": "3d2e9e47-6a52-46e5-b3df-9d25f2e0475b",
+       "availableForSaleCount": 0
+      }
+     ],
+     "addToCartPrice": 4800
+    }
+   ],
+   "wine": {
+    "type": "White",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2016
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  },
+  {
+   "id": "sold-fcec2a85-b120-4820-8eec-f39d3d6aecad",
+   "title": "2011 Esprit Blanc de Tablas 375ml",
+   "subTitle": null,
+   "image": "https://images.commerce7.com/tablas-creek-vineyard/images/original/2011-esprit-blanc-bottleshot-375ml-1788463056554.png",
+   "type": "Wine",
+   "departmentId": "566c223f-edb5-4067-a816-e62781f78725",
+   "vendorId": null,
+   "teaser": null,
+   "content": null,
+   "webStatus": "Available",
+   "adminStatus": "Available",
+   "slug": "2011-esprit-blanc-de-tablas-375ml",
+   "productTemplateId": null,
+   "isRedeemableWithLoyaltyPoints": true,
+   "createdAt": "2026-06-04T20:54:05.698Z",
+   "updatedAt": "2026-09-03T19:17:54.468Z",
+   "variants": [
+    {
+     "id": "sold-cdd84697-732b-4823-83dc-ec02d7686a14",
+     "productId": "fcec2a85-b120-4820-8eec-f39d3d6aecad",
+     "title": "375ml",
+     "sku": "11BLHA",
+     "upcCode": null,
+     "volumeInML": 375,
+     "alcoholPercentage": 13.5,
+     "price": 5300,
+     "comparePrice": null,
+     "bottleDeposit": 0,
+     "maxQuantityPerCart": null,
+     "sortOrder": 1,
+     "hasInventory": false,
+     "inventoryPolicy": "Dont Sell",
+     "hasShipping": true,
+     "taxType": "Wine",
+     "weight": 3,
+     "inventory": [
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "6b02b423-2d6f-4c55-bbc0-b9adf319e8a6",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "3d2e9e47-6a52-46e5-b3df-9d25f2e0475b",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "02094047-91af-4c40-961a-14ffc37c02b8",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "380d9442-bf19-42e1-b231-e63c7e17c5fb",
+       "availableForSaleCount": 0
+      },
+      {
+       "reserveCount": 0,
+       "allocatedCount": 0,
+       "productVariantId": "cdd84697-732b-4823-83dc-ec02d7686a14",
+       "inventoryLocationId": "95ec4de3-b2cb-4ddc-b15c-386fc61052ca",
+       "availableForSaleCount": 96
+      }
+     ],
+     "addToCartPrice": 5300
+    }
+   ],
+   "wine": {
+    "type": "White",
+    "varietal": "Blend",
+    "countryCode": "US",
+    "region": "California",
+    "appellation": "Paso Robles",
+    "vintage": 2011
+   },
+   "overrideOperatingRegions": {
+    "isOverride": false,
+    "operatingStateCodes": null,
+    "operatingCountryCodes": null
+   }
+  }
+ ],
+ "total": 7
+}
