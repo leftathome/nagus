@@ -19,7 +19,7 @@ unknown/wordpress 3. Several producers moved off AMS/OrderPort to Commerce7.
 | nagus-oc4 | Commerce7 connector (public `product/for-web`, `tenant` header) | done (this branch) |
 | nagus-29b | fallback for non-feed stores: OrderPort HTML reader | done (this branch); AMS still unhandled |
 | nagus-cux | Shopify new-release/restock signals, sitemap lastmod diffing | open |
-| nagus-0ek | TTB COLA new-label feed | open; ttbonline.gov fails TLS verification -- investigate chain, never bypass |
+| nagus-0ek | TTB COLA new-label feed | done (ttb-cola branch): new `release` category + `ttbcola` source; server omits its Entrust intermediate, which is embedded and the chain fully verified to system roots |
 | nagus-t9n | WA in-state distilleries (spirits) | open |
 
 ## Design notes
@@ -40,4 +40,5 @@ unknown/wordpress 3. Several producers moved off AMS/OrderPort to Commerce7.
       hedges 21/22 stored, all WA-legal.
 - [ ] MR merged, image built
 - [ ] gitops: sources deployed in shadow mode, ingest verified
-- [ ] nagus-cux, nagus-0ek, nagus-t9n
+- [x] nagus-0ek: live 6 approvals / 365 days for Quilceda Creek + Leonetti
+- [ ] nagus-cux, nagus-t9n
