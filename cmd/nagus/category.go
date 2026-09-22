@@ -9,6 +9,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/commerce7"
+	"github.com/leftathome/nagus/internal/connector/dynamics365"
 	"github.com/leftathome/nagus/internal/connector/orderport"
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/vinoshipper"
@@ -215,6 +216,12 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 			return nil, fmt.Errorf("source %q: orderport needs baseUrl (the <store>.orderport.net root)", s.Name)
 		}
 		return orderport.NewConnector(orderport.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
+			FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "dynamics365":
+		if (s.BaseURL == "" || s.CatalogPath == "") && s.Fixture == "" {
+			return nil, fmt.Errorf("source %q: dynamics365 needs baseUrl and catalogPath (the category page, a /<id>.c path)", s.Name)
+		}
+		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
 			FixturePath: s.Fixture, Logf: o.logf}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)

@@ -37,6 +37,7 @@ const (
 	Vinoshipper Platform = "vinoshipper"
 	Commerce7   Platform = "commerce7"
 	OrderPort   Platform = "orderport"
+	Dynamics365 Platform = "dynamics365"
 	WooCommerce Platform = "woocommerce"
 	AMS         Platform = "ams-ecellar"
 	WineDirect  Platform = "winedirect-vin65"
@@ -143,6 +144,9 @@ func (p *Prober) Probe(ctx context.Context, rawURL string) Result {
 		res.OrderPortHost = m
 		mark(OrderPort, "orderport host "+m)
 	}
+	if strings.Contains(h, "_msdyn365") || strings.Contains(h, "commerce.dynamics.com") {
+		mark(Dynamics365, "dynamics 365 commerce assets")
+	}
 	if strings.Contains(h, ".ams") && (strings.Contains(h, "login.ams") || strings.Contains(h, "/cart.ams") || strings.Contains(h, ".ams\"")) || strings.Contains(h, "ecellar") {
 		mark(AMS, "ams/ecellar paths")
 	}
@@ -165,7 +169,7 @@ func (p *Prober) Probe(ctx context.Context, rawURL string) Result {
 	}
 
 	if res.Platform == Unknown {
-		for _, pl := range []Platform{Shopify, Vinoshipper, Commerce7, OrderPort, WooCommerce, AMS, WineDirect, Squarespace, WordPress} {
+		for _, pl := range []Platform{Shopify, Vinoshipper, Commerce7, OrderPort, Dynamics365, WooCommerce, AMS, WineDirect, Squarespace, WordPress} {
 			if markers[pl] {
 				res.Platform = pl
 				break

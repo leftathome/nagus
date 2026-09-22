@@ -105,3 +105,12 @@ func TestBareDomainAndUnreachable(t *testing.T) {
 		t.Fatalf("got %+v", r)
 	}
 }
+
+// Chateau Ste Michelle (2026-09-21): Dynamics 365 Commerce, seen by its asset
+// hosts and /_msdyn365/ paths.
+func TestDynamics365Assets(t *testing.T) {
+	srv := site(t, `<link href="/_msdyn365/_scnr/app.css"><img src="https://images-us-prod.cms.commerce.dynamics.com/x.png">`, nil)
+	if r := probe(t, srv); r.Platform != Dynamics365 {
+		t.Fatalf("got %+v", r)
+	}
+}

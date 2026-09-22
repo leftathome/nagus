@@ -84,6 +84,8 @@ type SourceConfig struct {
 	Commerce7Tenant string `json:"commerce7Tenant,omitempty"`
 	// orderport: baseUrl is the <store>.orderport.net root; catalogPath
 	// overrides /wines/All-Wines.
+	// dynamics365: baseUrl is the site root; catalogPath (required) is the
+	// category page, e.g. /chateau-ste-michelle/shop/all-wines/5637155140.c.
 	CatalogPath string `json:"catalogPath,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global

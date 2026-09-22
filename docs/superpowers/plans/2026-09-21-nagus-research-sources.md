@@ -18,6 +18,7 @@ unknown/wordpress 3. Several producers moved off AMS/OrderPort to Commerce7.
 | nagus-tub | Vinoshipper connector (`/json-api/v2/wine-list?id=`) | done (this branch) |
 | nagus-oc4 | Commerce7 connector (public `product/for-web`, `tenant` header) | done (this branch) |
 | nagus-29b | fallback for non-feed stores: OrderPort HTML reader | done (this branch); AMS still unhandled |
+| nagus-390 | Dynamics 365 Commerce connector (Chateau Ste Michelle; embedded LISTPAGESTATE, ?skip=N, 10s crawl delay) | done (dynamics365 branch) |
 | nagus-cux | Shopify new-release/restock signals, sitemap lastmod diffing | open |
 | nagus-0ek | TTB COLA new-label feed | open; ttbonline.gov fails TLS verification -- investigate chain, never bypass |
 | nagus-t9n | WA in-state distilleries (spirits) | open |
@@ -38,6 +39,10 @@ unknown/wordpress 3. Several producers moved off AMS/OrderPort to Commerce7.
 
 - [x] Connectors + tests; live dry run: tablas-creek 80/80, kiona 23/23,
       hedges 21/22 stored, all WA-legal.
-- [ ] MR merged, image built
+- [x] MR !9 merged (connectors), MR !10 (title beats stale structured
+      fields; pgtest template0 fix)
+- [x] Chateau Ste Michelle (user request): D365 Commerce connector; live
+      dry run 125/132 stored (7 multi-bottle sets skipped), all WA-legal.
+- [ ] MRs merged, image built
 - [ ] gitops: sources deployed in shadow mode, ingest verified
 - [ ] nagus-cux, nagus-0ek, nagus-t9n
