@@ -116,30 +116,50 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		Tokens:     tokenize(s.Title),
 	}
 
-	vintage, hasVintage := extractVintage(text)
+	// Precedence for vintage and varietal: what the TITLE says, then the
+	// source's structured field, then the description. Commerce7 and
+	// Vinoshipper publish vintage/varietal/type/bottle size as data, which
+	// fills gaps ("Esprit de Tablas" names neither vintage nor grapes) and
+	// beats a description that mentions another grape (Kiona's "Old Vine
+	// Chenin Blanc"). But stores reuse product records across releases, so
+	// the data can be stale: K Vintners' "2022 Broncho Malbec" carries
+	// vintage 2021 and Analemma's Mencia carries Pinot Noir (2026-09-21).
+	// The title is what the buyer sees, so it wins.
+	vintage, hasVintage := extractVintage(s.Title)
+	if !hasVintage {
+		if v, err := strconv.Atoi(s.Aspects["vintage"]); err == nil && v > 1800 && v < 2200 {
+			vintage, hasVintage = v, true
+		} else {
+			vintage, hasVintage = extractVintage(text)
+		}
+	}
 	if hasVintage {
 		it.Attributes["vintage"] = strconv.Itoa(vintage)
 	}
 	it.Attributes["bottle_ml"] = strconv.Itoa(extractBottleML(text))
-	if varietal, colour, ok := extractVarietal(text); ok {
-		it.Attributes["varietal"] = varietal
-		it.Attributes["colour"] = colour
-	} else if colour, ok := extractColour(text); ok {
-		it.Attributes["colour"] = colour
-	}
-	// Structured fields from the SOURCE (Commerce7 and Vinoshipper publish
-	// vintage, varietal, wine type and bottle size as data) beat parsing the
-	// title: "Esprit de Tablas" names neither its vintage nor its grapes.
-	if v, err := strconv.Atoi(s.Aspects["vintage"]); err == nil && v > 1800 && v < 2200 {
-		vintage, hasVintage = v, true
-		it.Attributes["vintage"] = strconv.Itoa(v)
-	}
 	if ml, err := strconv.Atoi(s.Aspects["bottle_ml"]); err == nil && ml > 0 {
 		it.Attributes["bottle_ml"] = strconv.Itoa(ml)
 	}
-	if v := strings.TrimSpace(s.Aspects["varietal"]); v != "" {
-		it.Attributes["varietal"] = v
+	sourceVarietal := strings.TrimSpace(s.Aspects["varietal"])
+	if varietal, colour, ok := extractVarietal(s.Title); ok {
+		it.Attributes["varietal"] = varietal
+		it.Attributes["colour"] = colour
+	} else if sourceVarietal != "" {
+		it.Attributes["varietal"] = sourceVarietal
+		if _, colour, ok := extractVarietal(sourceVarietal); ok {
+			it.Attributes["colour"] = colour
+		}
+	} else if varietal, colour, ok := extractVarietal(text); ok {
+		it.Attributes["varietal"] = varietal
+		it.Attributes["colour"] = colour
 	}
+	if it.Attributes["colour"] == "" {
+		if colour, ok := extractColour(text); ok {
+			it.Attributes["colour"] = colour
+		}
+	}
+	// The source's wine type is the colour ("Rose of Pinot Noir" is a rose,
+	// not the red its grape implies).
 	if c := sourceColour(s.Aspects["wine_type"]); c != "" {
 		it.Attributes["colour"] = c
 	}
@@ -308,6 +328,9 @@ var varietals = []struct {
 }{
 	{"cabernet sauvignon", "Cabernet Sauvignon", "red"},
 	{"sauvignon blanc", "Sauvignon Blanc", "white"},
+	{"grenache blanc", "Grenache Blanc", "white"},
+	{"pinot blanc", "Pinot Blanc", "white"},
+	{"gruner veltliner", "Gruner Veltliner", "white"},
 	{"cabernet franc", "Cabernet Franc", "red"},
 	{"pinot noir", "Pinot Noir", "red"},
 	{"pinot gris", "Pinot Gris", "white"},
@@ -330,6 +353,18 @@ var varietals = []struct {
 	{"mourvedre", "Mourvedre", "red"},
 	{"petite sirah", "Petite Sirah", "red"},
 	{"petit verdot", "Petit Verdot", "red"},
+	{"semillon", "Semillon", "white"},
+	{"roussanne", "Roussanne", "white"},
+	{"marsanne", "Marsanne", "white"},
+	{"vermentino", "Vermentino", "white"},
+	{"picpoul", "Picpoul", "white"},
+	{"mencia", "Mencia", "red"},
+	{"gamay", "Gamay", "red"},
+	{"barbera", "Barbera", "red"},
+	{"carignan", "Carignan", "red"},
+	{"cinsault", "Cinsault", "red"},
+	{"counoise", "Counoise", "red"},
+	{"tannat", "Tannat", "red"},
 }
 
 // extractVarietal scans for a known varietal keyword; the accent fold keeps
