@@ -366,6 +366,8 @@ func scoredItemsToRows(items []pipeline.Scored) []searchRow {
 var rowDetailKeys = []string{
 	"vintage", "varietal", "colour", "bottle_ml", "wine_score", "wine_score_count",
 	"discount_pct", "list_price_cents", "acreage", "location",
+	// release (TTB label approvals)
+	"brand", "fanciful_name", "class_type", "approval_date", "permit",
 }
 
 func rowDetails(attrs map[string]string) map[string]string {
