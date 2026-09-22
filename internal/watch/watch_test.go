@@ -401,3 +401,22 @@ func TestIsStrongByStoreDiscount(t *testing.T) {
 		t.Fatal("verdicts and discount must combine with OR")
 	}
 }
+
+// A new-release window makes a recently published item strong whatever its
+// price or verdict (nagus-cux).
+func TestIsStrongByNewRelease(t *testing.T) {
+	defer func(f func() time.Time) { now = f }(now)
+	now = func() time.Time { return time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC) }
+	fresh := pipeline.Scored{Item: item.Item{Attributes: map[string]string{"published_at": "2026-09-15"}}}
+	old := pipeline.Scored{Item: item.Item{Attributes: map[string]string{"published_at": "2025-11-03"}}}
+	none := pipeline.Scored{Item: item.Item{Attributes: map[string]string{}}}
+	w := Watch{Name: "wine-new", Category: "wine", NewWithinDays: 14}
+	if !w.isStrong(fresh) || w.isStrong(old) || w.isStrong(none) {
+		t.Fatal("new_within_days 14: want the 6-day-old release strong, the old one and the undated one not")
+	}
+	great := pipeline.Scored{Item: item.Item{Attributes: map[string]string{}}}
+	great.Signal.Verdict = "great"
+	if w.isStrong(great) {
+		t.Fatal("a new-release-only watch must not imply the default great rule")
+	}
+}

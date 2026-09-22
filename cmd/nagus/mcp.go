@@ -368,6 +368,7 @@ var rowDetailKeys = []string{
 	"discount_pct", "list_price_cents", "acreage", "location",
 	// release (TTB label approvals)
 	"brand", "fanciful_name", "class_type", "approval_date", "permit",
+	"published_at",
 }
 
 func rowDetails(attrs map[string]string) map[string]string {

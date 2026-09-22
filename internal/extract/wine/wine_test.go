@@ -518,6 +518,20 @@ func TestExtract_StructuredSourceFieldsWin(t *testing.T) {
 	}
 }
 
+func TestExtract_PublishedAtCarried(t *testing.T) {
+	s := sanitized("2024 Syrah", "")
+	s.Aspects = map[string]string{"published_at": "2026-09-15"}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil || it.Attributes["published_at"] != "2026-09-15" {
+		t.Fatalf("published_at %q err %v", it.Attributes["published_at"], err)
+	}
+	s.Aspects = map[string]string{"published_at": "soon"}
+	it, _ = New().Extract(context.Background(), s)
+	if it.Attributes["published_at"] != "" {
+		t.Fatalf("a malformed date must be dropped: %q", it.Attributes["published_at"])
+	}
+}
+
 // Stores reuse product records across releases, so structured fields can be
 // stale; the title wins when it says something (live data, 2026-09-21).
 func TestExtract_TitleBeatsStaleStructuredFields(t *testing.T) {

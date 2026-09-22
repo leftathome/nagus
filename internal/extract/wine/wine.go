@@ -44,6 +44,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
@@ -162,6 +163,12 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// not the red its grape implies).
 	if c := sourceColour(s.Aspects["wine_type"]); c != "" {
 		it.Attributes["colour"] = c
+	}
+
+	// When the store published the product (Shopify published_at): a recent
+	// date is a new-release signal a watch can ping on (new_within_days).
+	if d, err := time.Parse("2006-01-02", s.Aspects["published_at"]); err == nil {
+		it.Attributes["published_at"] = d.Format("2006-01-02")
 	}
 
 	// Critic attributions -> aggregated normalized quality score.

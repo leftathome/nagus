@@ -58,7 +58,15 @@ type Watch struct {
 	// the store's own list price) as strong. It is a SALE signal, not a value
 	// verdict: it says the seller cut the price, not that the price is good.
 	MinDiscountPct float64 `json:"min_discount_pct,omitempty"`
+	// NewWithinDays, when > 0, additionally marks any item the store published
+	// within this many days (attribute published_at, from the store's own
+	// product record) as strong. It is a NEW-RELEASE signal: a winery putting
+	// a new wine up for sale, whatever its price (nagus-cux).
+	NewWithinDays int `json:"new_within_days,omitempty"`
 }
+
+// now is the clock NewWithinDays is measured against (tests pin it).
+var now = time.Now
 
 // Active reports whether this inquiry is still being looked for at time now.
 // An inquiry with no expiry is always active.
@@ -112,7 +120,7 @@ func LoadConfig(path string) (Config, error) {
 // isStrong reports whether a scored item clears the watch's ping threshold.
 func (w Watch) isStrong(sc pipeline.Scored) bool {
 	verdicts := w.StrongVerdicts
-	if len(verdicts) == 0 && w.MinScore <= 0 && w.MinDiscountPct <= 0 {
+	if len(verdicts) == 0 && w.MinScore <= 0 && w.MinDiscountPct <= 0 && w.NewWithinDays <= 0 {
 		verdicts = []string{"great"} // default threshold
 	}
 	for _, v := range verdicts {
@@ -125,6 +133,12 @@ func (w Watch) isStrong(sc pipeline.Scored) bool {
 	}
 	if w.MinDiscountPct > 0 {
 		if d, err := strconv.ParseFloat(sc.Item.Attributes["discount_pct"], 64); err == nil && d >= w.MinDiscountPct {
+			return true
+		}
+	}
+	if w.NewWithinDays > 0 {
+		if p, err := time.Parse("2006-01-02", sc.Item.Attributes["published_at"]); err == nil &&
+			now().Sub(p) <= time.Duration(w.NewWithinDays)*24*time.Hour {
 			return true
 		}
 	}
