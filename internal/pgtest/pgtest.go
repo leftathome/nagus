@@ -60,12 +60,29 @@ func DSN(t testing.TB, name string) string {
 		}
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
-	if _, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{db}.Sanitize()); err != nil {
+	// TEMPLATE template0, and retry 55006: packages create their databases
+	// concurrently, and copying the default template1 while another session
+	// touches it fails with "source database template1 is being accessed by
+	// other users" (MR !10, pipeline #2691). template0 accepts no connections.
+	create := "CREATE DATABASE " + pgx.Identifier{db}.Sanitize() + " TEMPLATE template0"
+	for {
+		_, err = conn.Exec(ctx, create)
 		var pgErr *pgconn.PgError
-		// 42P04 duplicate_database: an earlier test in this package made it.
-		if !errors.As(err, &pgErr) || pgErr.Code != "42P04" {
+		switch {
+		case err == nil:
+		case errors.As(err, &pgErr) && pgErr.Code == "42P04":
+			// duplicate_database: an earlier test in this package made it.
+		case errors.As(err, &pgErr) && pgErr.Code == "55006":
+			select {
+			case <-ctx.Done():
+				t.Fatalf("pgtest: create database %s: %v", db, err)
+			case <-time.After(200 * time.Millisecond):
+			}
+			continue
+		default:
 			t.Fatalf("pgtest: create database %s: %v", db, err)
 		}
+		break
 	}
 	u.Path = "/" + db
 	return u.String()
