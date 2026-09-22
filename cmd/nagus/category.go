@@ -12,6 +12,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/dynamics365"
 	"github.com/leftathome/nagus/internal/connector/orderport"
 	"github.com/leftathome/nagus/internal/connector/shopify"
+	"github.com/leftathome/nagus/internal/connector/ttbcola"
 	"github.com/leftathome/nagus/internal/connector/vinoshipper"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
@@ -23,7 +24,9 @@ import (
 )
 
 // supportedCategory reports whether a category bundle is wired into the CLI.
-func supportedCategory(cat string) bool { return cat == "hdd" || cat == "land" || cat == "wine" }
+func supportedCategory(cat string) bool {
+	return cat == "hdd" || cat == "land" || cat == "wine" || cat == "release"
+}
 
 // categoryOpts is the per-category runtime config. hdd fields come from the
 // -offline flag; land scoring/enrichment config comes from env (NAGUS_LAND_*,
@@ -223,6 +226,12 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		}
 		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
 			FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "ttbcola":
+		if len(s.ColaBrands) == 0 && s.Fixture == "" {
+			return nil, fmt.Errorf("source %q: ttbcola needs colaBrands (brand names as registered with TTB)", s.Name)
+		}
+		return ttbcola.NewConnector(ttbcola.Config{Name: s.Name, Brands: s.ColaBrands, LookbackDays: s.ColaLookbackDays,
+			FixturePath: s.Fixture, Logf: o.logf}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
@@ -374,6 +383,9 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		return ing, nil
+	case "release":
+		// A release signal is not an offer: no offer layer, no retention purge.
+		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 	}
@@ -403,6 +415,8 @@ func buildSurface(cat string, cc CategoryConfig, st store.Store, o categoryOpts)
 			return nil, err
 		}
 		return category.NewWineSurface(deps), nil
+	case "release":
+		return category.NewReleaseSurface(category.ReleaseDeps{Store: st, FreshDays: cc.ReleaseFreshDays, Logf: o.logf}), nil
 	default:
 		return nil, fmt.Errorf("unsupported category %q", cat)
 	}

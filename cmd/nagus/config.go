@@ -87,6 +87,11 @@ type SourceConfig struct {
 	// dynamics365: baseUrl is the site root; catalogPath (required) is the
 	// category page, e.g. /chateau-ste-michelle/shop/all-wines/5637155140.c.
 	CatalogPath string `json:"catalogPath,omitempty"`
+	// ttbcola (category release): brand names as registered with TTB
+	// ("QUILCEDA CREEK"; "%" is a wildcard) and the approval window searched
+	// each poll (default 45 days).
+	ColaBrands       []string `json:"colaBrands,omitempty"`
+	ColaLookbackDays int      `json:"colaLookbackDays,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
 	// lwin.stamp switch alone is not enough: a newly added source would
@@ -131,6 +136,9 @@ type CategoryConfig struct {
 	MinWineScoreCount int                `json:"minWineScoreCount,omitempty"`
 	WineShipTo        string             `json:"wineShipTo,omitempty"`
 	WineFXRates       map[string]float64 `json:"wineFxRates,omitempty"`
+	// release: how many days after approval a label counts as new (verdict
+	// new-label; default 30), after which it is a quiet old-label candidate.
+	ReleaseFreshDays int `json:"releaseFreshDays,omitempty"`
 }
 
 // RunConfig is the whole deployment declaration: what to ingest and what to
