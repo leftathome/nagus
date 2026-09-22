@@ -531,3 +531,29 @@ func TestExtract_PublishedAtCarried(t *testing.T) {
 		t.Fatalf("a malformed date must be dropped: %q", it.Attributes["published_at"])
 	}
 }
+
+// Stores reuse product records across releases, so structured fields can be
+// stale; the title wins when it says something (live data, 2026-09-21).
+func TestExtract_TitleBeatsStaleStructuredFields(t *testing.T) {
+	cases := []struct {
+		title, vintage, varietal string
+		aspects                  map[string]string
+		wantVintage, wantVar     string
+	}{
+		{"2022 Broncho Malbec", "", "", map[string]string{"vintage": "2021", "varietal": "Malbec"}, "2022", "Malbec"},
+		{"2022 Mosier Hills Mencia Mayor", "", "", map[string]string{"vintage": "2021", "varietal": "Syrah"}, "2022", "Mencia"},
+		// The title names nothing: structured fields fill the gap.
+		{"Esprit de Tablas", "", "", map[string]string{"vintage": "2021", "varietal": "Rhone Blend"}, "2021", "Rhone Blend"},
+	}
+	for _, c := range cases {
+		s := sanitized(c.title, "Aromas recall Sauvignon Blanc from the 2019 harvest.")
+		s.Aspects = c.aspects
+		it, err := New().Extract(context.Background(), s)
+		if err != nil {
+			t.Fatalf("%s: %v", c.title, err)
+		}
+		if it.Attributes["vintage"] != c.wantVintage || it.Attributes["varietal"] != c.wantVar {
+			t.Errorf("%s: vintage %q varietal %q, want %q %q", c.title, it.Attributes["vintage"], it.Attributes["varietal"], c.wantVintage, c.wantVar)
+		}
+	}
+}
