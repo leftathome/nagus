@@ -70,7 +70,7 @@ func (t *channelTagger) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		}
 		raws[i].Aspects["wine_channel"] = string(t.src.Channel)
 		raws[i].Aspects["source_origin"] = t.src.Origin.Code()
-		raws[i].Aspects["ship_legal_to"] = legalTo
+		raws[i].Aspects["ship_legal_to"] = narrowShipsTo(legalTo, raws[i].Aspects["ships_to"])
 		if p := t.producerFor(raws[i]); p != "" {
 			raws[i].Aspects["wine_producer"] = p
 		}
@@ -246,4 +246,25 @@ func (t *channelTagger) producerFor(r listing.Raw) string {
 		return strings.TrimSpace(r.Aspects["vendor"])
 	}
 	return ""
+}
+
+// narrowShipsTo intersects the rules' legal destinations with the destinations
+// the SELLER says it ships to (Vinoshipper publishes both its producer states
+// and per-wine exclusions). The seller's list can only narrow legality, never
+// widen it: a state the rules forbid stays forbidden whatever a feed claims.
+func narrowShipsTo(legal, seller string) string {
+	if strings.TrimSpace(seller) == "" {
+		return legal
+	}
+	ok := map[string]bool{}
+	for _, j := range strings.Fields(seller) {
+		ok[strings.ToUpper(j)] = true
+	}
+	var out []string
+	for _, j := range strings.Fields(legal) {
+		if ok[strings.ToUpper(j)] {
+			out = append(out, j)
+		}
+	}
+	return strings.Join(out, " ")
 }

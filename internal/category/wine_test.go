@@ -519,3 +519,17 @@ func TestChannelTaggerProducer(t *testing.T) {
 		})
 	}
 }
+
+// A seller's own ships-to list narrows legality and can never widen it.
+func TestNarrowShipsTo(t *testing.T) {
+	legal := "US-CA US-OR US-WA"
+	if got := narrowShipsTo(legal, ""); got != legal {
+		t.Fatalf("no seller list must leave legality alone: %q", got)
+	}
+	if got := narrowShipsTo(legal, "US-CA US-WA US-TX"); got != "US-CA US-WA" {
+		t.Fatalf("got %q, want the intersection (TX is not legal by the rules)", got)
+	}
+	if got := narrowShipsTo(legal, "US-TX"); got != "" {
+		t.Fatalf("a seller list with no legal state must leave nothing: %q", got)
+	}
+}

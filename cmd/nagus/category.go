@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/leftathome/nagus/internal/category"
+	"github.com/leftathome/nagus/internal/connector/commerce7"
+	"github.com/leftathome/nagus/internal/connector/orderport"
 	"github.com/leftathome/nagus/internal/connector/shopify"
+	"github.com/leftathome/nagus/internal/connector/vinoshipper"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
@@ -196,6 +199,23 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		return buildZillapiConnector(s, cc, o)
 	case "shopify":
 		return buildShopifyConnector(s, o)
+	case "vinoshipper":
+		if s.VinoshipperAccount <= 0 && s.Fixture == "" {
+			return nil, fmt.Errorf("source %q: vinoshipper needs vinoshipperAccount (see nagus fingerprint)", s.Name)
+		}
+		return vinoshipper.NewConnector(vinoshipper.Config{Name: s.Name, Account: s.VinoshipperAccount, FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "commerce7":
+		if s.Commerce7Tenant == "" && s.Fixture == "" {
+			return nil, fmt.Errorf("source %q: commerce7 needs commerce7Tenant (see nagus fingerprint)", s.Name)
+		}
+		return commerce7.NewConnector(commerce7.Config{Name: s.Name, Tenant: s.Commerce7Tenant, StoreURL: s.BaseURL,
+			MaxPages: s.MaxPages, FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "orderport":
+		if s.BaseURL == "" && s.Fixture == "" {
+			return nil, fmt.Errorf("source %q: orderport needs baseUrl (the <store>.orderport.net root)", s.Name)
+		}
+		return orderport.NewConnector(orderport.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
+			FixturePath: s.Fixture, Logf: o.logf}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}
