@@ -668,3 +668,21 @@ func TestCompareAtPriceOnlyWhenOnSale(t *testing.T) {
 		}
 	}
 }
+
+// published_at travels as a UTC date: a recent one is a new-release signal.
+func TestPublishedAtIsADateAspect(t *testing.T) {
+	raws := mustFetch(t, Config{BaseURL: "https://serverpartdeals.com", FixturePath: fixture})
+	var found bool
+	for _, r := range raws {
+		if strings.HasPrefix(r.Title, "Western Digital Ultrastar DC HC580 WUH722422AL5204") {
+			found = true
+			// 2026-07-07T16:44:10-04:00 is 20:44 UTC the same day.
+			if r.Aspects["published_at"] != "2026-07-07" {
+				t.Fatalf("published_at %q, want 2026-07-07", r.Aspects["published_at"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("fixture product missing")
+	}
+}

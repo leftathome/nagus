@@ -428,6 +428,9 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if m := c.mpnOf(v); m != "" {
 				aspects["mpn"] = m
 			}
+			if t, err := time.Parse(time.RFC3339, p.PublishedAt); err == nil {
+				aspects["published_at"] = t.UTC().Format("2006-01-02")
+			}
 			if cmp := compareAtCents(v.CompareAtPrice); cmp > priceCents(v.Price) && priceCents(v.Price) > 0 {
 				aspects["compare_at_cents"] = strconv.FormatInt(cmp, 10)
 			}
@@ -485,6 +488,9 @@ type product struct {
 	ProductType string    `json:"product_type"`
 	Tags        []string  `json:"tags"`
 	Variants    []variant `json:"variants"`
+	// PublishedAt is when the store published the product (RFC 3339). A
+	// recent date is a new-release signal (nagus-cux).
+	PublishedAt string `json:"published_at"`
 }
 
 type variant struct {

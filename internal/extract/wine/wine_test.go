@@ -517,3 +517,17 @@ func TestExtract_StructuredSourceFieldsWin(t *testing.T) {
 		t.Fatalf("bad structured values were used: %v", it.Attributes)
 	}
 }
+
+func TestExtract_PublishedAtCarried(t *testing.T) {
+	s := sanitized("2024 Syrah", "")
+	s.Aspects = map[string]string{"published_at": "2026-09-15"}
+	it, err := New().Extract(context.Background(), s)
+	if err != nil || it.Attributes["published_at"] != "2026-09-15" {
+		t.Fatalf("published_at %q err %v", it.Attributes["published_at"], err)
+	}
+	s.Aspects = map[string]string{"published_at": "soon"}
+	it, _ = New().Extract(context.Background(), s)
+	if it.Attributes["published_at"] != "" {
+		t.Fatalf("a malformed date must be dropped: %q", it.Attributes["published_at"])
+	}
+}
