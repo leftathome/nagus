@@ -14,7 +14,6 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
-	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
 	"github.com/leftathome/nagus/internal/store"
 )
@@ -58,6 +57,9 @@ type geoEnricher interface {
 // LandDeps are the injectable dependencies of the land bundle.
 type LandDeps struct {
 	Store store.Store
+	// Sanitizer is the trust boundary listings cross before extraction; nil
+	// is the in-process Passthrough (see sanitizerOr).
+	Sanitizer listing.Sanitizer
 	// Geo resolves free gov geo signals; nil -> a live geo.NewEnricher.
 	Geo geoEnricher
 	// Parcel resolves structure/assessed-value/acreage; nil -> no parcel signals
@@ -116,7 +118,7 @@ func NewLandSurface(deps LandDeps) *pipeline.Surface {
 func NewLandIngester(conn listing.Connector, deps LandDeps) *pipeline.Ingester {
 	return &pipeline.Ingester{
 		Connector:        conn,
-		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(land)"},
+		Sanitizer:        sanitizerOr(deps.Sanitizer, "land"),
 		Extractor:        extland.New(),
 		Store:            deps.Store,
 		StaleAfter:       deps.StaleAfter,

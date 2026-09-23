@@ -8,7 +8,6 @@ import (
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/pipeline"
-	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
 	"github.com/leftathome/nagus/internal/store"
 )
@@ -34,6 +33,9 @@ const DefaultReleaseFreshDays = 30
 // ReleaseDeps are the injectable dependencies of the release bundle.
 type ReleaseDeps struct {
 	Store store.Store
+	// Sanitizer is the trust boundary listings cross before extraction; nil
+	// is the in-process Passthrough (see sanitizerOr).
+	Sanitizer listing.Sanitizer
 	// FreshDays overrides DefaultReleaseFreshDays.
 	FreshDays int
 	Now       func() time.Time
@@ -48,7 +50,7 @@ func ReleaseFilter() score.Filter { return score.Filter{Category: extrelease.Cat
 func NewReleaseIngester(conn listing.Connector, deps ReleaseDeps) *pipeline.Ingester {
 	return &pipeline.Ingester{
 		Connector: conn,
-		Sanitizer: sanitize.Passthrough{Name: "sanitize.passthrough(release)"},
+		Sanitizer: sanitizerOr(deps.Sanitizer, "release"),
 		Extractor: extrelease.New(),
 		Store:     deps.Store,
 		Logf:      deps.Logf,

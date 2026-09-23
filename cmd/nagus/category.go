@@ -10,6 +10,7 @@ import (
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/commerce7"
 	"github.com/leftathome/nagus/internal/connector/dynamics365"
+	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/connector/orderport"
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/ttbcola"
@@ -63,6 +64,10 @@ type categoryOpts struct {
 	lwin *lwinSource
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
+	// sanitizer is the trust boundary every ingested listing crosses; nil is
+	// the in-process Passthrough. Set from NAGUS_GLOVEBOX_SANITIZE_URL and
+	// NAGUS_GLOVEBOX_TOKEN by sanitizerFromEnv (nagus-9ib).
+	sanitizer listing.Sanitizer
 
 	ebayClientID string
 	ebaySecret   string
@@ -226,6 +231,17 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		}
 		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
 			FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "imap":
+		p, err := imapmail.Lookup(s.IMAPParser)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
+		}
+		return imapmail.NewConnector(imapmail.Config{
+			Name: s.Name, From: s.IMAPFrom, DKIMDomain: s.IMAPDKIMDomain, Mailbox: s.IMAPMailbox,
+			LookbackDays: s.IMAPLookbackDays, Parser: p, Logf: o.logf,
+			Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
+			Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
+		})
 	case "ttbcola":
 		if len(s.ColaBrands) == 0 && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: ttbcola needs colaBrands (brand names as registered with TTB)", s.Name)
@@ -352,13 +368,13 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 	switch s.Category {
 	case "hdd":
 		return category.NewHDDIngester(conn, category.HDDDeps{
-			Store: st, HTTPClient: o.http, Logf: o.logf,
+			Store: st, HTTPClient: o.http, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		}), nil
 	case "land":
 		return category.NewLandIngester(conn, category.LandDeps{
-			Store: st, Logf: o.logf,
+			Store: st, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		}), nil
@@ -368,6 +384,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		deps.StaleAfter = staleAfter
+		deps.Sanitizer = o.sanitizer
 		deps.Offers = o.offers
 		deps.OfferRetention = offerRetention
 		deps.OfferExpireAfter = expireAfter
@@ -386,7 +403,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		return ing, nil
 	case "release":
 		// A release signal is not an offer: no offer layer, no retention purge.
-		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf}), nil
+		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf, Sanitizer: o.sanitizer}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 	}

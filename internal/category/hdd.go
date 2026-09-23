@@ -16,7 +16,6 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
-	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
 	"github.com/leftathome/nagus/internal/store"
 	valhdd "github.com/leftathome/nagus/internal/valuation/hdd"
@@ -35,6 +34,9 @@ const DefaultMinCapacityTB = 6.0
 // take sensible defaults (live reference source, DefaultMinCapacityTB).
 type HDDDeps struct {
 	Store store.Store
+	// Sanitizer is the trust boundary listings cross before extraction; nil
+	// is the in-process Passthrough (see sanitizerOr).
+	Sanitizer listing.Sanitizer
 	// Reference resolves category-reference $/TB. When nil, a live
 	// hdd.ShopifySource against DefaultReferenceProductsURL is used. The
 	// vertical-slice proof injects StaticReference so it runs without network.
@@ -128,7 +130,7 @@ func NewHDDSurface(deps HDDDeps) *pipeline.Surface {
 func NewHDDIngester(conn listing.Connector, deps HDDDeps) *pipeline.Ingester {
 	return &pipeline.Ingester{
 		Connector:        conn,
-		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(hdd)"},
+		Sanitizer:        sanitizerOr(deps.Sanitizer, "hdd"),
 		Extractor:        exthdd.New(),
 		Store:            deps.Store,
 		StaleAfter:       deps.StaleAfter,

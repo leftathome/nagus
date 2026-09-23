@@ -1,0 +1,9 @@
+package: glovebox
+generate:
+  models: true
+  client: true
+output-options:
+  # glovebox's schema is named SanitizeResponse, which is also the name the
+  # generator gives the response wrapper for operation "sanitize".
+  response-type-suffix: Result
+output: glovebox.gen.go
