@@ -156,6 +156,30 @@ quark:
       key: eso/quark/consumers
       property: nagus_bearer_token
 
+# glovebox: the out-of-process sanitize gate every ingested listing crosses
+# (nagus-9ib). OFF while sanitizeURL is empty: nagus keeps its in-process
+# Passthrough. With sanitizeURL set and the token synced, every listing is
+# classified and only verdict=pass is kept (fail closed). With the URL set but
+# NO token (a secret that has not synced), nagus still starts -- Recreate makes
+# a pod that will not start an outage -- but drops every new listing and says
+# why; it never runs ungated.
+glovebox:
+  # glovebox's sanitize listener, e.g.
+  # http://glovebox-glovebox-ingest.glovebox.svc.cluster.local:9093
+  sanitizeURL: ""
+  # nagus's bearer token (source-id "nagus" in glovebox's registry), as
+  # NAGUS_GLOVEBOX_TOKEN. The same value lives at
+  # secret/glovebox/ingest-tokens/nagus for glovebox's side.
+  tokenExternalSecret:
+    enabled: false
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    remoteRef:
+      key: eso/nagus/glovebox-sanitize
+      property: TOKEN
+
 # lwin: the Liv-ex LWIN wine dictionary (CC BY), used to resolve wine listings
 # to canonical LWIN identities. OFF while url is empty.
 #
