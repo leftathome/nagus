@@ -161,6 +161,23 @@ spec:
                   optional: true
             {{- end }}
             {{- end }}
+            {{- if .Values.glovebox.sanitizeURL }}
+            # glovebox sanitize gate (nagus-9ib). URL + token = the gate; URL
+            # without a token = every new listing dropped, never ungated.
+            - name: NAGUS_GLOVEBOX_SANITIZE_URL
+              value: {{ .Values.glovebox.sanitizeURL | quote }}
+            {{- if .Values.glovebox.tokenExternalSecret.enabled }}
+            - name: NAGUS_GLOVEBOX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-glovebox" (include "nagus.fullname" .) }}
+                  key: NAGUS_GLOVEBOX_TOKEN
+                  # Optional: a missing token must never hold the pod in
+                  # CreateContainerConfigError (Recreate -> outage). The binary
+                  # fails CLOSED on it instead.
+                  optional: true
+            {{- end }}
+            {{- end }}
             {{- if .Values.lwin.url }}
             # LWIN wine dictionary, mirrored onto the data volume from the
             # published export and re-checked against it after maxAge. Loads in
