@@ -13,7 +13,6 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
-	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/score"
 	"github.com/leftathome/nagus/internal/shipping"
 	"github.com/leftathome/nagus/internal/store"
@@ -130,6 +129,9 @@ type WineScoreConfig struct {
 // WineDeps are the injectable dependencies of the wine bundle.
 type WineDeps struct {
 	Store store.Store
+	// Sanitizer is the trust boundary listings cross before extraction; nil
+	// is the in-process Passthrough (see sanitizerOr).
+	Sanitizer listing.Sanitizer
 	// LWIN, when non-nil, resolves listings to LWIN canonical identities at
 	// extract time. Nil = wine items carry no canonical id (identity join
 	// disabled) -- the pipeline still works, per the graceful-degradation
@@ -251,7 +253,7 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 	return &pipeline.Ingester{
 		Connector: &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
 			producerFromBody: deps.ProducerFromBody},
-		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(wine)"},
+		Sanitizer:        sanitizerOr(deps.Sanitizer, "wine"),
 		Extractor:        &extwine.Extractor{Resolver: deps.LWIN, Stamp: deps.LWINStamp},
 		Store:            deps.Store,
 		StaleAfter:       deps.StaleAfter,

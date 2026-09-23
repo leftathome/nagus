@@ -1,0 +1,57 @@
+openapi: 3.0.3
+info:
+  title: Glovebox Sanitize Gate
+  version: "1.0.0"
+  description: >
+    Synchronous prompt-injection sanitize gate. Classifies untrusted text and
+    returns a verdict; it does not rewrite content. Non-2xx = caller drops
+    (fail closed).
+paths:
+  /v1/sanitize:
+    post:
+      operationId: sanitize
+      summary: Classify untrusted text for prompt-injection.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SanitizeRequest' }
+      responses:
+        '200':
+          description: Scanned. Verdict + score + matched signals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SanitizeResponse' }
+        '400': { description: Malformed JSON or missing content. }
+        '401': { description: Missing or invalid bearer token. }
+        '413': { description: Body exceeds the size cap. }
+        '429': { description: Rate limited. }
+        '500': { description: Engine/scan error (fail closed). }
+        '503': { description: Scanner not ready. }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    SanitizeRequest:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, description: Untrusted text to classify. }
+        content_type: { type: string, default: text/plain, description: MIME type driving preprocessing (text/html strips tags). }
+    SanitizeResponse:
+      type: object
+      required: [verdict, total_score, signals]
+      properties:
+        verdict: { type: string, enum: [pass, quarantine] }
+        total_score: { type: number, format: double }
+        signals:
+          type: array
+          items: { $ref: '#/components/schemas/Signal' }
+    Signal:
+      type: object
+      required: [name, weight, matched]
+      properties:
+        name: { type: string }
+        weight: { type: number, format: double }
+        matched: { type: string }

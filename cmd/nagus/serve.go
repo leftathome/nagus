@@ -322,6 +322,11 @@ func runServe(args []string) error {
 
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
+	san, err := sanitizerFromEnv(nil, logf)
+	if err != nil {
+		return err
+	}
+	opts.sanitizer = san
 
 	// Offer layer (nagus-q6u). OPT-IN and on the SAME BACKEND as the item store,
 	// so the two are peer stores. On postgres it is a table set in the same

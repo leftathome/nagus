@@ -145,6 +145,10 @@ func runIngest(args []string) error {
 	defer closeSt()
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, "  "+format+"\n", a...) }
 	opts := categoryOptsFromEnv(false, http.DefaultClient, logf)
+	// A manual ingest crosses the same trust boundary as the service.
+	if opts.sanitizer, err = sanitizerFromEnv(nil, logf); err != nil {
+		return err
+	}
 	// runIngest's -client-id/-client-secret flags are this subcommand's own
 	// credential source (unlike serve, which only reads NAGUS_EBAY_CLIENT_ID/
 	// SECRET env); preserve that by taking the flags outright, matching the old

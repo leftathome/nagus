@@ -63,6 +63,10 @@ type categoryOpts struct {
 	lwin *lwinSource
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
+	// sanitizer is the trust boundary every ingested listing crosses; nil is
+	// the in-process Passthrough. Set from NAGUS_GLOVEBOX_SANITIZE_URL and
+	// NAGUS_GLOVEBOX_TOKEN by sanitizerFromEnv (nagus-9ib).
+	sanitizer listing.Sanitizer
 
 	ebayClientID string
 	ebaySecret   string
@@ -352,13 +356,13 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 	switch s.Category {
 	case "hdd":
 		return category.NewHDDIngester(conn, category.HDDDeps{
-			Store: st, HTTPClient: o.http, Logf: o.logf,
+			Store: st, HTTPClient: o.http, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		}), nil
 	case "land":
 		return category.NewLandIngester(conn, category.LandDeps{
-			Store: st, Logf: o.logf,
+			Store: st, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		}), nil
@@ -368,6 +372,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		deps.StaleAfter = staleAfter
+		deps.Sanitizer = o.sanitizer
 		deps.Offers = o.offers
 		deps.OfferRetention = offerRetention
 		deps.OfferExpireAfter = expireAfter
@@ -386,7 +391,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		return ing, nil
 	case "release":
 		// A release signal is not an offer: no offer layer, no retention purge.
-		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf}), nil
+		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf, Sanitizer: o.sanitizer}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
 	}
