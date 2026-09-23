@@ -52,8 +52,11 @@ It also makes nagus-9ib real: the sanitize client replaces
 - [x] nagus-9ib: generated glovebox sanitize client; fail-closed
       `listing.Sanitizer`; env-driven (`NAGUS_GLOVEBOX_SANITIZE_URL`,
       `NAGUS_GLOVEBOX_TOKEN`), passthrough when unset.
-- [ ] nagus-239: `imap` source type (sender filter, lookback, Message-ID key),
-      tested against an in-process IMAP server.
+- [x] nagus-239: `imap` source type (sender filter, lookback, Message-ID key),
+      tested against an in-process IMAP server. A message is accepted only
+      when the TOPMOST Authentication-Results header (our MX's) reports a
+      DKIM pass aligned to the sender's domain: a From header proves nothing
+      on an open channel.
 - [ ] gitops: ExternalSecrets for the two Vault paths; nagus env; the
       sanitize URL (glovebox 0.8.0 serves `/v1/sanitize` on port 9093).
 - [ ] Per-sender parsers, one at a time, each from a real captured email.

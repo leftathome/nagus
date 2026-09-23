@@ -96,6 +96,15 @@ type SourceConfig struct {
 	// each poll (default 45 days).
 	ColaBrands       []string `json:"colaBrands,omitempty"`
 	ColaLookbackDays int      `json:"colaLookbackDays,omitempty"`
+	// imap: one sender on the shared deals mailbox (credentials from env
+	// NAGUS_IMAP_HOST/PORT/USERNAME/PASSWORD/TLS). imapFrom is the sender's
+	// address, matched exactly and DKIM-verified; imapParser names the
+	// parser written from a real captured email of that sender.
+	IMAPFrom         string `json:"imapFrom,omitempty"`
+	IMAPParser       string `json:"imapParser,omitempty"`
+	IMAPDKIMDomain   string `json:"imapDkimDomain,omitempty"`
+	IMAPMailbox      string `json:"imapMailbox,omitempty"`
+	IMAPLookbackDays int    `json:"imapLookbackDays,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
 	// lwin.stamp switch alone is not enough: a newly added source would

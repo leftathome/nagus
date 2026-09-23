@@ -10,6 +10,7 @@ import (
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/commerce7"
 	"github.com/leftathome/nagus/internal/connector/dynamics365"
+	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/connector/orderport"
 	"github.com/leftathome/nagus/internal/connector/shopify"
 	"github.com/leftathome/nagus/internal/connector/ttbcola"
@@ -230,6 +231,17 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		}
 		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
 			FixturePath: s.Fixture, Logf: o.logf}), nil
+	case "imap":
+		p, err := imapmail.Lookup(s.IMAPParser)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
+		}
+		return imapmail.NewConnector(imapmail.Config{
+			Name: s.Name, From: s.IMAPFrom, DKIMDomain: s.IMAPDKIMDomain, Mailbox: s.IMAPMailbox,
+			LookbackDays: s.IMAPLookbackDays, Parser: p, Logf: o.logf,
+			Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
+			Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
+		})
 	case "ttbcola":
 		if len(s.ColaBrands) == 0 && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: ttbcola needs colaBrands (brand names as registered with TTB)", s.Name)
