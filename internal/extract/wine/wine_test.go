@@ -557,3 +557,22 @@ func TestExtract_TitleBeatsStaleStructuredFields(t *testing.T) {
 		}
 	}
 }
+
+// Retailers put critic scores in brackets in the title (Bottle Barn, live
+// 2026-09-22): "2013 Vega-Sicilia Unico [JS98][WA97][WS96]", "[V90]". WA and
+// V are only trusted inside brackets -- "WA" is also Washington State.
+func TestExtract_BracketedCriticCodes(t *testing.T) {
+	s := sanitized("2013 Vega-Sicilia Unico Ribera del Duero [JS98][WA97][WS96]", "Tempranillo from Ribera del Duero, WA 98104 warehouse.")
+	it, err := New().Extract(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Attributes["wine_score_count"] != "3" {
+		t.Fatalf("want 3 scores (JS, RP via WA, WS), got count %q score %q", it.Attributes["wine_score_count"], it.Attributes["wine_score"])
+	}
+	v := sanitized("2024 Ca' La Bionda Valpolicella Classico [V90]", "")
+	it, _ = New().Extract(context.Background(), v)
+	if it.Attributes["wine_score"] == "" {
+		t.Fatalf("bracketed Vinous score not parsed: %v", it.Attributes)
+	}
+}

@@ -87,6 +87,10 @@ type SourceConfig struct {
 	// dynamics365: baseUrl is the site root; catalogPath (required) is the
 	// category page, e.g. /chateau-ste-michelle/shop/all-wines/5637155140.c.
 	CatalogPath string `json:"catalogPath,omitempty"`
+	// ProducerFromBody reads each listing's producer from a structured
+	// description ("Producer: X Region: Y"), for stores that publish it
+	// there. A retailer sells many producers, so wineProducer cannot serve.
+	ProducerFromBody bool `json:"producerFromBody,omitempty"`
 	// ttbcola (category release): brand names as registered with TTB
 	// ("QUILCEDA CREEK"; "%" is a wildcard) and the approval window searched
 	// each poll (default 45 days).

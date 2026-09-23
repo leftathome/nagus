@@ -202,6 +202,13 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["discount_pct"] = strconv.FormatInt((cmp-s.PriceCents)*100/cmp, 10)
 	}
 
+	// The producer, when the source declared or published one: rows show
+	// it, and joins that cannot use LWIN (a label approval names a brand,
+	// not a vintage) join on it.
+	if p := strings.TrimSpace(s.Aspects["wine_producer"]); p != "" {
+		it.Attributes["producer"] = p
+	}
+
 	// LWIN identity resolution (optional).
 	if e.Resolver != nil {
 		producer := strings.TrimSpace(s.Aspects["wine_producer"])
@@ -434,6 +441,17 @@ var foldASCII = strings.NewReplacer(
 // in prose is far more likely to be noise than an attribution.
 var criticCodeRe = regexp.MustCompile(`\b(WS|JS|RP|WE|JD|VM|DEC)\s*[:\-]?\s*(\d{2,3})\+?\b`)
 
+// criticBracketRe matches the bracketed shorthand retailers put in titles:
+// "2013 Vega-Sicilia Unico [JS98][WA97][WS96]", "[V90]". Bracketed is its own
+// rule because two of these codes are unsafe as bare words: "WA" is also
+// Washington State and "V" is a letter, so they are only trusted inside the
+// brackets. WA (Wine Advocate) canonicalizes to RP and V to VM, matching
+// criticNames, so a listing carrying both spellings cannot double-count.
+var criticBracketRe = regexp.MustCompile(`\[(WS|JS|RP|WA|WE|JD|VM|V|DEC)\s*(\d{2,3})\+?\]`)
+
+// bracketCritic canonicalizes a bracketed code.
+var bracketCritic = map[string]string{"WA": "RP", "V": "VM"}
+
 // criticJRRe matches Jancis Robinson's 20-point shorthand, allowing halves
 // ("JR 17.5").
 var criticJRRe = regexp.MustCompile(`\b(JR)\s*[:\-]?\s*(\d{1,2}(?:\.\d)?)\b`)
@@ -476,6 +494,15 @@ func parseCriticScores(text string) []valwine.RawScore {
 	for _, m := range criticCodeRe.FindAllStringSubmatch(text, -1) {
 		if v, err := strconv.ParseFloat(m[2], 64); err == nil {
 			out = append(out, valwine.RawScore{Critic: m[1], Score: v, Scale: 100})
+		}
+	}
+	for _, m := range criticBracketRe.FindAllStringSubmatch(text, -1) {
+		code := m[1]
+		if c, ok := bracketCritic[code]; ok {
+			code = c
+		}
+		if v, err := strconv.ParseFloat(m[2], 64); err == nil {
+			out = append(out, valwine.RawScore{Critic: code, Score: v, Scale: 100})
 		}
 	}
 	for _, m := range criticJRRe.FindAllStringSubmatch(text, -1) {
