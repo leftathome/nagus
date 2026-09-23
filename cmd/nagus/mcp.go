@@ -364,11 +364,14 @@ func scoredItemsToRows(items []pipeline.Scored) []searchRow {
 // extracted, category-specific facts a message needs. A whitelist, so a new
 // attribute never reaches consumers (or the agent) by accident.
 var rowDetailKeys = []string{
-	"vintage", "varietal", "colour", "bottle_ml", "wine_score", "wine_score_count",
+	"producer", "vintage", "varietal", "colour", "bottle_ml", "wine_score", "wine_score_count",
 	"discount_pct", "list_price_cents", "acreage", "location",
 	// release (TTB label approvals)
 	"brand", "fanciful_name", "class_type", "approval_date", "permit",
 	"published_at",
+	// where a wine offer can legally ship: a row surfaced for one destination
+	// (a gift, another user's state) must say which destinations it is valid for
+	"ship_legal_to",
 }
 
 func rowDetails(attrs map[string]string) map[string]string {

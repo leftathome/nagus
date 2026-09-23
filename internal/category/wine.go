@@ -3,6 +3,7 @@ package category
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,6 +48,28 @@ type channelTagger struct {
 	rules shipping.Rules
 	// producer is the source's declared producer ("" = none declared).
 	producer string
+	// producerFromBody reads the producer out of a structured description
+	// ("Producer: Domaine Tempier Region: Bandol ..."), for stores that
+	// publish it there. Per-source opt-in: the operator asserts that THIS
+	// store's descriptions carry the producer, which is not a guess nagus
+	// makes on its own.
+	producerFromBody bool
+}
+
+// producerLabelRe matches a description that opens with the producer, as
+// Bottle Barn's do. The value ends at the next structured label or at 60
+// characters -- long enough for "Chateau Lynch-Bages", short enough that a
+// malformed description cannot smuggle a paragraph into an identity hint.
+var producerLabelRe = regexp.MustCompile(`(?i)\bproducer\s*:\s*([^:]{2,60}?)\s*(?:\b(?:region|varietal|blend|country|vintage|appellation|winemaker|year)\s*:|$)`)
+
+// producerFromBody extracts the producer a store published in its own
+// structured description, or "".
+func producerFromBody(body string) string {
+	m := producerLabelRe.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 // TagWineChannel wraps conn so every listing it emits carries the source's
@@ -138,6 +161,11 @@ type WineDeps struct {
 	Offers           offer.Store
 	OfferRetention   offer.Retention
 	OfferExpireAfter time.Duration
+	// ProducerFromBody reads each listing's producer from a structured
+	// description ("Producer: X Region: Y"). A retailer sells many producers,
+	// so one declared Producer cannot serve; the producer is an identity HINT
+	// (quark resolves identity; nagus only extracts what the listing says).
+	ProducerFromBody bool
 }
 
 // WineFilter builds the deterministic hard-filter for the wine category.
@@ -221,7 +249,8 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 		return nil, fmt.Errorf("wine: %w", err)
 	}
 	return &pipeline.Ingester{
-		Connector:        &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer},
+		Connector: &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
+			producerFromBody: deps.ProducerFromBody},
 		Sanitizer:        sanitize.Passthrough{Name: "sanitize.passthrough(wine)"},
 		Extractor:        &extwine.Extractor{Resolver: deps.LWIN, Stamp: deps.LWINStamp},
 		Store:            deps.Store,
@@ -239,6 +268,11 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 // vendor field names whoever the retailer bought from, or nothing useful, and
 // is never trusted as the producer.
 func (t *channelTagger) producerFor(r listing.Raw) string {
+	if t.producer == "" && t.producerFromBody {
+		if p := producerFromBody(r.Body); p != "" {
+			return p
+		}
+	}
 	if t.producer != "" {
 		return t.producer
 	}

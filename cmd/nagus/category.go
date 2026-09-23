@@ -376,6 +376,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			return nil, fmt.Errorf("source %q: %w (declare wineChannel and origin on the source; shipping legality is a conscious per-source declaration)", s.Name, err)
 		}
 		deps.Producer = s.WineProducer
+		deps.ProducerFromBody = s.ProducerFromBody
 		// Stamping needs BOTH the global switch and this source's opt-in.
 		deps.LWINStamp = deps.LWINStamp && s.LWINStamp
 		ing, err := category.NewWineIngester(conn, src, deps)
