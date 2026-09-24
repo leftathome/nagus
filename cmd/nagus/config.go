@@ -100,11 +100,14 @@ type SourceConfig struct {
 	// NAGUS_IMAP_HOST/PORT/USERNAME/PASSWORD/TLS). imapFrom is the sender's
 	// address, matched exactly and DKIM-verified; imapParser names the
 	// parser written from a real captured email of that sender.
-	IMAPFrom         string `json:"imapFrom,omitempty"`
-	IMAPParser       string `json:"imapParser,omitempty"`
-	IMAPDKIMDomain   string `json:"imapDkimDomain,omitempty"`
-	IMAPMailbox      string `json:"imapMailbox,omitempty"`
-	IMAPLookbackDays int    `json:"imapLookbackDays,omitempty"`
+	// imapForwarders are household addresses whose DKIM-verified hand
+	// forwards of this sender's mail count as the sender's (nagus-zsi).
+	IMAPFrom         string   `json:"imapFrom,omitempty"`
+	IMAPParser       string   `json:"imapParser,omitempty"`
+	IMAPDKIMDomain   string   `json:"imapDkimDomain,omitempty"`
+	IMAPMailbox      string   `json:"imapMailbox,omitempty"`
+	IMAPLookbackDays int      `json:"imapLookbackDays,omitempty"`
+	IMAPForwarders   []string `json:"imapForwarders,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
 	// lwin.stamp switch alone is not enough: a newly added source would
