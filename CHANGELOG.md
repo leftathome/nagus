@@ -22,6 +22,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when quark's catalogue generation grows. Enable only after quark accepts
   `text` (quark MR !6): an older quark rejects the unknown field.
 
+### Changed
+
+- **A Shopify SKU is no longer sent to quark as the part number** (quark
+  QUARK-02; operator-approved re-key). serverpartdeals SKUs carry seller
+  segments after the manufacturer part number (`HUS726040AL4215-DELL_DELLG13`,
+  `00JHTD_DELLG14_SR_12`), so one drive became many quark products -- 266 keys
+  over 61 base part numbers on the live store -- and no listing title could
+  ever match a key. The MPN is now the longest title token the SKU starts
+  with, else the SKU's part-number-shaped leading segment, else none. Offers
+  whose hint changes are re-resolved by quark automatically; the old
+  SKU-keyed products stay in quark unreferenced (nothing is merged or
+  deleted). The committed serverpartdeals baseline moves from 35 to 25
+  products: ten groups were each one drive in different caddies, audited.
+
 ## [0.5.1] - 2026-09-24
 
 ### Fixed

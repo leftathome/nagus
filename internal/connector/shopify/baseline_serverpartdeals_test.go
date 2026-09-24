@@ -42,7 +42,15 @@ import (
 // in stock, so the production filter on this page yields 22 offers and ZERO
 // multi-offer groups -- a parity check over that would pass while testing
 // nothing about dedup. Over every HDD listing the page holds 104 offers that
-// group into 35 drives, every one of them listed in more than one condition.
+// group into 25 drives, every one of them listed in more than one condition.
+//
+// 35 -> 25 (2026-09-24, QUARK-02 re-key, operator-approved): the MPN is now the
+// manufacturer part number the SKU embeds, not the whole SKU. The ten merged
+// groups are each ONE physical drive sold in different caddies or with no tray
+// (ST12000NM002J HP G8/G11/no-tray; WUH721818ALE600 HP variants; Dell parts
+// 0908XX, 0KP22D, 0TX8WW, 0VJ7CD, 0VTHDD across G13/G14/no-tray) -- audited
+// title by title. The seller segments after the part number were splitting
+// one drive into several products.
 const (
 	baselineFixture = "testdata/serverpartdeals_2026-09-12.json"
 	baselineHints   = "testdata/serverpartdeals_2026-09-12.hints.json"
@@ -54,8 +62,8 @@ var updateHints = flag.Bool("update-hints", false, "rewrite "+baselineHints+" (t
 const (
 	wantOffers            = 104 // every HDD listing on the page, in stock or not
 	wantKeyedOffers       = 104 // brand: tag + SKU-as-MPN on all of them
-	wantDistinctProducts  = 35
-	wantMultiOfferGroups  = 35 // every drive is listed in 2+ conditions
+	wantDistinctProducts  = 25
+	wantMultiOfferGroups  = 25 // every drive is listed in 2+ conditions or caddies
 	wantNonASCIIHintCount = 0  // so quark's gate 1 has no grounds to diverge
 )
 
