@@ -367,17 +367,21 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 
 	switch s.Category {
 	case "hdd":
-		return category.NewHDDIngester(conn, category.HDDDeps{
+		ing := category.NewHDDIngester(conn, category.HDDDeps{
 			Store: st, HTTPClient: o.http, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
-		}), nil
+		})
+		ing.TextHints = s.QuarkTextHints
+		return ing, nil
 	case "land":
-		return category.NewLandIngester(conn, category.LandDeps{
+		ing := category.NewLandIngester(conn, category.LandDeps{
 			Store: st, Logf: o.logf, Sanitizer: o.sanitizer,
 			StaleAfter: staleAfter, Offers: o.offers,
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
-		}), nil
+		})
+		ing.TextHints = s.QuarkTextHints
+		return ing, nil
 	case "wine":
 		deps, err := wineDepsFrom(cc, st, o)
 		if err != nil {

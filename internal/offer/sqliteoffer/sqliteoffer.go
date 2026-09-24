@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS offers (
 	hint_mpn         TEXT NOT NULL DEFAULT '',
 	hint_gtin        TEXT NOT NULL DEFAULT '',
 	hint_model       TEXT NOT NULL DEFAULT '',
+	hint_text        TEXT NOT NULL DEFAULT '',
 	first_seen_ns    INTEGER NOT NULL DEFAULT 0,
 	last_seen_ns     INTEGER NOT NULL DEFAULT 0,
 	min_price_cents  INTEGER NOT NULL DEFAULT 0,
@@ -84,6 +85,8 @@ var resolutionColumns = []struct{ name, ddl string }{
 	{"product_id", `TEXT NOT NULL DEFAULT ''`},
 	{"resolution_generation", `INTEGER NOT NULL DEFAULT 0`},
 	{"resolved_at_ns", `INTEGER NOT NULL DEFAULT 0`},
+	// QUARK-02 text hints: '' keeps every existing fingerprint unchanged.
+	{"hint_text", `TEXT NOT NULL DEFAULT ''`},
 }
 
 // resolutionIndexes run AFTER migrateResolution, because on an existing
@@ -224,9 +227,9 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions see the row as it was BEFORE this update, so these
@@ -243,12 +246,13 @@ ON CONFLICT(id) DO UPDATE SET
   aspects_json=excluded.aspects_json,
   hint_brand=excluded.hint_brand, hint_mpn=excluded.hint_mpn,
   hint_gtin=excluded.hint_gtin, hint_model=excluded.hint_model,
+  hint_text=excluded.hint_text,
   first_seen_ns=excluded.first_seen_ns, last_seen_ns=excluded.last_seen_ns,
   min_price_cents=excluded.min_price_cents, status=excluded.status,
   outcome=excluded.outcome, expired_at_ns=excluded.expired_at_ns`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
 		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
-		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model,
+		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
 	)
@@ -353,10 +357,10 @@ func (s *Store) ApplyRetention(ctx context.Context, sourceID string, r offer.Ret
 
 // sameHint is true when the stored hint equals the incoming one, column by
 // column. Used inside the upsert's CASE expressions.
-const sameHint = `(offers.hint_brand = excluded.hint_brand AND offers.hint_mpn = excluded.hint_mpn AND offers.hint_gtin = excluded.hint_gtin AND offers.hint_model = excluded.hint_model)`
+const sameHint = `(offers.hint_brand = excluded.hint_brand AND offers.hint_mpn = excluded.hint_mpn AND offers.hint_gtin = excluded.hint_gtin AND offers.hint_model = excluded.hint_model AND offers.hint_text = excluded.hint_text)`
 
 // storedFingerprint computes offer.ProductHint.Fingerprint in SQL.
-const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model)`
+const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model || CASE WHEN hint_text <> '' THEN '|' || hint_text ELSE '' END)`
 
 // PendingResolution returns never-asked offers first, then refusals recorded
 // under a generation below retryBelowGeneration, each in id order.
@@ -395,7 +399,7 @@ WHERE id = ? AND `+storedFingerprint+` = ?`,
 const selectCols = `SELECT
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
-  hint_brand, hint_mpn, hint_gtin, hint_model,
+  hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
   resolution_state, product_id, resolution_generation, resolved_at_ns`
 
@@ -409,7 +413,7 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
-			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model,
+			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
 		); err != nil {

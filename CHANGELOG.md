@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Title text hints for quark** (quark QUARK-02). A source may set
+  `quarkTextHints: true`: when it states no product identifiers (eBay search
+  results carry the part number only in the title), the listing TITLE is sent
+  to quark as hint text, and quark links it to a product only if the title
+  names a key quark already holds. The title is attached only after the
+  glovebox gate passed the listing (offers are otherwise recorded before the
+  gate), only when every structured hint field is empty, and the gate is still
+  called once per listing. Offers gain an additive `hint_text` column
+  (Postgres `ADD COLUMN IF NOT EXISTS`, SQLite `table_info`); a hint without
+  text keeps its exact old fingerprint, so nothing re-resolves on upgrade.
+  quark's `text` route stamps resolved; `unmatched` stamps refused, retried
+  when quark's catalogue generation grows. Enable only after quark accepts
+  `text` (quark MR !6): an older quark rejects the unknown field.
+
 ## [0.5.1] - 2026-09-24
 
 ### Fixed

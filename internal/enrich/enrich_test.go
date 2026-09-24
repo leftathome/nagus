@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +44,15 @@ func (f *fakeQuark) Resolve(_ context.Context, hints []quark.Hint, retry bool) (
 	}
 	out := quark.Response{CatalogGeneration: f.generation, Results: make([]quark.Result, len(hints))}
 	for i, h := range hints {
+		if h.Text != "" {
+			// QUARK-02: text naming ST12000NM002J resolves; anything else is unmatched.
+			if strings.Contains(h.Text, "ST12000NM002J") {
+				out.Results[i] = quark.Result{Route: quark.RouteText, ProductID: "p-ST12000NM002J"}
+			} else {
+				out.Results[i] = quark.Result{Route: quark.RouteUnmatched}
+			}
+			continue
+		}
 		if h.MPN == "" {
 			out.Results[i] = quark.Result{Route: quark.RouteRefused}
 			continue
@@ -288,5 +298,36 @@ func TestLastCleanPassTracksOnlyCleanPasses(t *testing.T) {
 	e.pass(context.Background())
 	if got := e.Snapshot().LastCleanPass; got != t0.Unix() {
 		t.Fatalf("a failed pass moved LastCleanPass to %d", got)
+	}
+}
+
+// QUARK-02: a text-only hint is sent (not recorded locally as unidentifiable);
+// quark's text route stamps resolved, unmatched stamps refused (retryable when
+// quark's catalogue grows).
+func TestTextHintsAreSentAndStamped(t *testing.T) {
+	s := offer.NewMemoryStore()
+	mk := func(key, text string) offer.Offer {
+		o := offer.Offer{SourceID: "ebay:ebay", SourceKey: key, PriceCents: 100, LastSeen: t0,
+			ProductHint: offer.ProductHint{Text: text}}
+		if err := s.Put(context.Background(), o); err != nil {
+			t.Fatal(err)
+		}
+		o.ID = offer.DeterministicID(o.SourceID, key)
+		return o
+	}
+	hit := mk("hit", "HP/Seagate Exos X18 ST12000NM002J 12TB")
+	miss := mk("miss", "WD Red Pro 8TB NAS")
+	q := &fakeQuark{}
+	if _, err := newEnricher(s, q).RunPass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.calls) != 1 || len(q.calls[0].hints) != 2 || q.calls[0].hints[0].Text == "" {
+		t.Fatalf("text hints not sent: %+v", q.calls)
+	}
+	if r := state(t, s, hit); r.State != offer.ResolutionResolved || r.ProductID != "p-ST12000NM002J" {
+		t.Errorf("text route: %+v", r)
+	}
+	if r := state(t, s, miss); r.State != offer.ResolutionRefused {
+		t.Errorf("unmatched route: %+v, want refused (retryable)", r)
 	}
 }

@@ -102,6 +102,11 @@ type ProductHint struct {
 	MPN   string
 	GTIN  string
 	Model string
+	// Text is the listing title, set ONLY for a source that opted in
+	// (quarkTextHints), ONLY when every field above is empty, and ONLY after
+	// the listing passed the glovebox gate. quark looks it up against keys it
+	// already holds (QUARK-02); it never mints from text.
+	Text string
 }
 
 // Fingerprint identifies the exact hint an offer carried when it was resolved.
@@ -112,13 +117,20 @@ type ProductHint struct {
 // decide what counts as the same identifier. The separator cannot occur in a
 // single field's meaning, and the empty hint has a stable fingerprint of its
 // own ("|||"), because "the source says nothing" is also a hint.
+//
+// Text is appended only when present, so every hint without text keeps the
+// fingerprint it always had -- adding the field re-resolves nothing.
 func (h ProductHint) Fingerprint() string {
-	return h.Brand + "|" + h.MPN + "|" + h.GTIN + "|" + h.Model
+	fp := h.Brand + "|" + h.MPN + "|" + h.GTIN + "|" + h.Model
+	if h.Text != "" {
+		fp += "|" + h.Text
+	}
+	return fp
 }
 
 // Empty reports whether the hint states nothing at all.
 func (h ProductHint) Empty() bool {
-	return h.Brand == "" && h.MPN == "" && h.GTIN == "" && h.Model == ""
+	return h.Brand == "" && h.MPN == "" && h.GTIN == "" && h.Model == "" && h.Text == ""
 }
 
 // ResolutionState is where an offer stands with quark, the service that owns

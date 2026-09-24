@@ -50,6 +50,10 @@ const (
 	RouteMinted      = "minted"
 	RouteRefused     = "refused"
 	RouteQuarantined = "quarantined"
+	// RouteText: the hint's text named exactly one key quark holds (QUARK-02).
+	RouteText = "text"
+	// RouteUnmatched: text named no known key, or keys of several products.
+	RouteUnmatched = "unmatched"
 )
 
 // Hint is quark's Hint wire shape. Values are untrusted listing text; quark's
@@ -60,6 +64,7 @@ type Hint struct {
 	MPN      string `json:"mpn,omitempty"`
 	GTIN     string `json:"gtin,omitempty"`
 	Model    string `json:"model,omitempty"`
+	Text     string `json:"text,omitempty"`
 }
 
 // Result is one resolution, positionally aligned with the request.

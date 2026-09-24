@@ -108,6 +108,11 @@ type SourceConfig struct {
 	IMAPMailbox      string   `json:"imapMailbox,omitempty"`
 	IMAPLookbackDays int      `json:"imapLookbackDays,omitempty"`
 	IMAPForwarders   []string `json:"imapForwarders,omitempty"`
+	// QuarkTextHints sends a listing's title to quark as hint text when the
+	// source states no product identifiers (quark QUARK-02). For marketplaces
+	// whose part numbers live only in the title (eBay). Title attached only
+	// after the glovebox gate passed it.
+	QuarkTextHints bool `json:"quarkTextHints,omitempty"`
 	// LWINStamp opts this source in to writing LWIN canonical ids, once its
 	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
 	// lwin.stamp switch alone is not enough: a newly added source would
