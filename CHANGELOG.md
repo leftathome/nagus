@@ -6,6 +6,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-24
+
+### Upgrade notes
+
+- **Chart 0.5.1 -> 0.10.0; appVersion is still `0.4.0`.** In order: 0.6.0 adds
+  the quark resolution pass, 0.7.0 adds the ServiceMonitor and PrometheusRule,
+  0.8.0 adds LWIN mirroring, 0.9.0 adds the glovebox sanitize gate values, and
+  0.10.0 adds the token-as-file mount and the sanitize alerts. Every new feature
+  is off by default (`quark.url`, `glovebox.sanitizeURL` and `lwin.url` all
+  default to empty), so a release that sets none of them renders its old
+  behavior. The exceptions are the monitoring objects and the memory limit,
+  listed next.
+- **`serviceMonitor.enabled` and `alerts.enabled` default to `true`.** They
+  render only where the prometheus-operator CRDs exist, so a cluster without
+  them sees no change. Thresholds you can tune: `alerts.quark.stallSeconds`
+  (1800), `alerts.quark.for`, `alerts.sanitize.dropRatio` (0.9),
+  `alerts.sanitize.minListings` (20) and `alerts.sanitize.for` (15m).
+- **The container memory limit went from 256Mi to 384Mi**, and `GOMEMLIMIT`
+  now follows the limit. The LWIN dictionary uses about 55 MiB resident and
+  peaks around 180 MiB while it is being built. Check any values override that
+  pins `resources.limits.memory`.
+- **LWIN stamping is now a per-source opt-in** (nagus-a8t). A source writes
+  canonical ids only when the global `lwin.stamp` / `NAGUS_LWIN_STAMP` switch is
+  on AND the source sets `lwinStamp: true`. If a source was stamping before, it
+  stays shadow-only until you add `lwinStamp: true` to it.
+- **`/watches` now returns 200 with a per-watch `error` field** where it used to
+  return a 500 for the whole response. A consumer that relied on a non-200
+  status to detect a broken watch now has to read `error` on each watch.
+- **Offer store schema: additive migration on first start.** Offers gain
+  resolution columns (Postgres uses `ADD COLUMN IF NOT EXISTS`; SQLite checks
+  `table_info`). The `provisional_key` column is kept but no longer written, and
+  its index is dropped with `DROP INDEX IF EXISTS`. No destructive DDL runs.
+- **Items that a category now rejects are deleted on the next ingest.** This
+  covers SSDs in `hdd`, and merchandise or listings with no wine evidence in
+  `wine`. Expect the item count to drop once after upgrade.
+
 ### Added
 
 - **Wine category on a $0/mo data stack** (see
@@ -120,6 +156,160 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs, since expiry and retention are properties of the SOURCE. Configuring one
   with the offer layer disabled is a startup error, not a silent no-op.
 
+- **quark product-identity resolution** (nagus-6r6, quark QUARK-07; chart
+  0.6.0). nagus asks quark which product each offer names and stamps the
+  answer on the offer. This happens as asynchronous enrichment in its own
+  goroutine, so a slow, down or misconfigured quark can never fail an ingest or
+  a surface.
+  - Offers gain `Resolution{State, ProductID, Generation, At}` with the states
+    `unattempted | resolved | refused | quarantined | unidentifiable`.
+    Ingest's upsert never erases a resolution. The stored answer is kept while
+    the product hint is unchanged and reset when the hint changes, all in one
+    atomic `ON CONFLICT` statement. An answer is stamped only against the
+    fingerprint of the hint that was sent, so if a listing changes while the
+    call is in flight, the stale answer is discarded.
+  - A refusal is re-offered only after quark's catalog generation has moved
+    past the generation it was refused under. Never-asked offers are sent
+    first, so a generation bump cannot starve them.
+  - **An offer with an entirely empty hint is `unidentifiable`, recorded
+    locally and never sent.** Measured against the real quark image, 32 of 54
+    offers were hint-less. Sending them would have held quark's
+    `refused_ratio` alert at 0.59, so it would have fired permanently.
+  - Env: `NAGUS_QUARK_URL`, `NAGUS_QUARK_INTERVAL` (default 10m),
+    `NAGUS_QUARK_TOKEN`, `NAGUS_QUARK_BATCH_SIZE` and `NAGUS_QUARK_TIMEOUT`. The
+    pass is OFF, with the reason logged, when the URL, the token or the offer
+    layer is missing. Chart: `quark.url`, `quark.interval` and
+    `quark.tokenExternalSecret`. The token ref is `optional: true` because with
+    `strategy: Recreate` a required ref to an unsynced Secret would take down
+    every surface.
+- **Product ids on rows.** Rows from `/search`, `/watches` and MCP
+  `search_items` carry quark's `product_id` when the offer is resolved. Two
+  rows with the same id are one product sold by different sellers. If the
+  lookup fails, the field is left empty and the read still succeeds.
+- **Metrics and alerts** (nagus-ff4, chart 0.7.0). New ServiceMonitor and
+  PrometheusRule with the alerts `NagusDown`, `NagusQuarkUnauthorized` (any 401
+  in 15m, which is always a token problem) and `NagusQuarkEnrichmentStalled`.
+  The stall alert keys on `nagus_quark_last_clean_pass_timestamp_seconds`
+  rather than on error counters: an idle nagus and a broken one both stop
+  moving counters, but only the broken one stops finishing clean passes.
+  `/metrics` also gains `nagus_quark_*` pass counters and
+  `nagus_lwin_{records,loaded_timestamp_seconds,refresh_failures_total,stamping}`.
+- **LWIN is mirrored from the published Liv-ex export** (nagus-93q, chart
+  0.8.0). Earlier, nagus waited for someone to supply a CSV by hand. Details:
+  - `lwin.LoadXLSX` streams the workbook with no new dependency. Only Live
+    Wine/Fortified Wine rows load: 185,383 records, about 6s to build.
+  - `internal/refdata` handles the mirror: a conditional ETag download, a size
+    cap, and validation before it replaces the file. A failed refresh keeps the
+    last good copy. It is written so quark can reuse it.
+  - One dictionary is shared per process and swapped atomically by a daily
+    refresh. It loads in the background, so startup and hdd never wait on
+    Liv-ex. A wine source's FIRST ingest waits for it (bounded at 10m;
+    nagus-0k0); without that wait, each restart cost 12h of identity data.
+  - Chart keys: `lwin.url`, `lwin.cachePath`, `lwin.maxAge` (720h) and
+    `lwin.stamp` (default false, which is shadow mode). Shadow items record
+    `lwin_route`, `lwin_candidate` and `lwin_score`.
+- **LWIN matching uses the store's producer** (nagus-86s). Producer-storefront
+  titles never name the producer, so title-only matching was mostly wrong: 48
+  of 49 auto-matches on live listings. Now:
+  - A wine source may declare `wineProducer`. Otherwise, a producer-channel
+    source uses the product vendor. A retailer's vendor is never trusted.
+  - The producer is a HARD constraint on candidates.
+  - Auto-routing needs 80% coverage of the title's distinctive tokens, and
+    geography (SUB_REGION, SITE) breaks ties.
+  - An uncovered title word that names a sibling wine from the same producer
+    blocks auto-routing and sends the match to adjudication.
+
+  Result on Robert Mondavi: 24 auto matches, 0 wrong.
+- **Retailer producer hints and bracketed critic codes.** `producerFromBody`
+  is a per-source opt-in that reads "Producer: X Region: Y" from a structured
+  description. Without it, a retailer listing whose vendor field is literally
+  "WINE" carries no producer. The critic parser also accepts
+  `[JS98][WA97][WS96]` and `[V90]`. WA and V are recognized only inside
+  brackets, since bare "WA" means Washington state. Rows carry
+  `ship_legal_to`, because a row surfaced for a gift or another household
+  member has to say where the bottle can legally ship. Comparables and critic
+  scores are left to quark (see
+  `docs/design/2026-09-23-wine-market-signals-boundary.md`).
+- **Wine connectors: Commerce7, Vinoshipper, OrderPort and Dynamics 365
+  Commerce** (nagus-b0u, nagus-tub, nagus-oc4, nagus-29b, nagus-390). Each
+  reads a public storefront endpoint and paces requests politely:
+  - OrderPort falls back to the store's own listing link.
+  - Dynamics 365 decodes the embedded list state and honors the site's 10s
+    Crawl-Delay.
+  - Multi-bottle bundles and sets are skipped.
+  - When the source provides structured vintage, varietal and bottle size,
+    those fields feed the extractor. A seller's ships-to list can only narrow
+    `ship_legal_to`, never widen it.
+
+  A shared `webfetch` client sends a descriptive User-Agent and caps
+  `Retry-After`.
+- **`nagus fingerprint DOMAIN...`** detects a store's commerce platform and
+  the endpoint a connector would read. It honors robots.txt.
+- **Store-sale deal signal.** The Shopify connector carries
+  `compare_at_price`, and the wine extractor derives `list_price_cents` and
+  `discount_pct`. A watch's `min_discount_pct` marks a store sale as strong.
+  This is a SALE signal (the seller cut the price), not a value verdict, and
+  the delivery message says so.
+- **New-release signal from Shopify `published_at`** (nagus-cux). A watch's
+  `new_within_days` marks anything the store published within that window as
+  strong, whatever the price. Setting only `new_within_days` does not also
+  apply the default great-verdict rule.
+- **Per-category row details.** Rows gain `category` and a whitelisted
+  `details` map covering vintage, varietal, colour, bottle size, score,
+  discount, list price, `published_at`, producer and land fields. Delivery can
+  then format each category properly instead of printing every listing as a
+  hard drive.
+- **TTB COLA label approvals as a `release` category** (nagus-0ek).
+  Allocation-only producers have no store to watch, but every label needs a
+  TTB Certificate of Label Approval first. The `ttbcola` connector searches the
+  registry per brand over a lookback window, pausing 5s between requests.
+  - Config: `sources[].colaBrands`, `colaLookbackDays` (default 45) and
+    `categories.release.releaseFreshDays`.
+  - An approval stays `new-label` for 30 days, so a watch can ping on
+    `strong_verdicts: ["new-label"]`.
+  - ttbonline.gov omits its intermediate certificate. nagus embeds the missing
+    intermediate and still verifies the full chain, hostname and key usage
+    against the system roots.
+- **IMAP deals-mailbox source** (nagus-239, nagus-zsi). Some sellers publish
+  offers only by email. A source declares exactly one sender (`imapFrom`), plus
+  optionally `imapParser`, `imapDkimDomain`, `imapMailbox`, `imapLookbackDays`
+  and `imapForwarders`. Server env: `NAGUS_IMAP_HOST`, `NAGUS_IMAP_PORT`,
+  `NAGUS_IMAP_TLS`, `NAGUS_IMAP_USERNAME` and `NAGUS_IMAP_PASSWORD` -- the
+  chart does not render these; supply them from a Secret loaded with
+  `envFrom` (the source ExternalSecret).
+  - The mailbox is read-only (`EXAMINE`) and stateless: messages are keyed by
+    Message-ID. Attachments are never read, and oversized messages are skipped.
+  - `imapForwarders` lists household addresses in config only. A forward is
+    accepted when it is DKIM-verified for the forwarder's own domain and its
+    forwarded original names the source's sender. Such items are tagged
+    `mail_forwarded_by`.
+  - Each sender needs a Parser written from a real captured email. None ship
+    yet, so an imap source fails at startup and says why.
+
+### Changed
+
+- **quark product ids replace the local provisional key.** Deleted:
+  `ComputeProvisionalKey`, `Offer.ProvisionalKey` and `Query.ProvisionalKey`.
+  This meets spec D4 (no permanent local fallback). Production held 252 offers
+  resolved to 234 quark ids with 0 unattempted. Grouping now uses
+  `product_id`. A frozen, test-local copy of the old algorithm remains only for
+  the serverpartdeals parity baseline.
+- **quark batches: 100 hints per call, 2m timeout** (previously 500 and 30s).
+  quark served about 270ms per hint on orac, so every call over roughly 110
+  hints timed out. quark had already applied the work, nagus discarded the
+  answer, and the backlog never drained. A test pins the default batch at the
+  measured latency to 2x headroom inside the timeout.
+- **Wine extraction prefers the title over stale structured fields.** Stores
+  reuse product records across releases, for example a 2022 title carrying a
+  2021 vintage. The precedence is now title, then structured field, then
+  description. The varietal table gains grapes seen on live stores, such as
+  Mencia, Semillon, Roussanne and Gamay.
+- **Category rules keep SSDs out of `hdd` and merchandise out of `wine`**
+  (nagus-17k). On live data, 59 of 421 hdd rows were SSDs, and 7 of them ranked
+  'great' against spinning-disk references. A wine item with no vintage,
+  varietal or colour is also rejected: all 12 such items in the live corpus
+  were merchandise. SSHD hybrids stay in `hdd`.
+
 ### Fixed
 
 - **Rate-limited pages are retried, and expiry now requires complete coverage.**
@@ -167,6 +357,95 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the old config. Fixed with `checksum/config`, `checksum/watches` and
   `checksum/demo` pod-template annotations over the RENDERED templates, so the
   checksum also moves when a template's own rendering logic changes.
+
+- **One bad watch no longer silences every watch.** `EvaluateAll` used to abort
+  on the first failing watch, which turned `/watches` into a 500, and the
+  delivery cron then pinged nothing. Each watch now carries its own fixed
+  `error` text (watch name and category, never a raw store error).
+- **Items their category now rejects are removed.** Shopify sources have no
+  freshness purge, so SSDs and merchandise stored before the rules existed
+  would otherwise have stayed forever. Item stores gain `Delete(id)` on all
+  three adapters, and an extract error wrapping `listing.ErrNotInCategory`
+  deletes the previously stored item. Ordinary extract errors do not.
+- **The glovebox gate trips on a rejected token** (nagus-lg7, chart 0.10.0).
+  Previously nagus retried glovebox for every listing after the first 401,
+  which tripped glovebox's brute-force limiter, and nothing paged. Now the
+  first 401 or 403 opens a 5m cooldown: listings drop without a call, one log
+  line names the Vault fields to compare, and a single probe follows.
+- **The glovebox token is a re-read file** (nagus-4g3). The pod started before
+  its ExternalSecret synced, read an empty env var once, and dropped everything
+  until someone restarted it by hand. The token is now an optional mounted
+  Secret file (`NAGUS_GLOVEBOX_TOKEN_FILE`). It is re-read whenever the gate has
+  no token and after every trip, so a late sync or a rotation heals without a
+  restart. `NAGUS_GLOVEBOX_TOKEN` still works.
+- **IMAP DKIM is verified by nagus itself.** The deals MX writes only ARC sets,
+  no Authentication-Results header, so an A-R-only check would have silently
+  rejected every message. See Security.
+- **CI: main was red for six weeks because of an image reference, not the
+  code.** The gate image `golang:1.26.6` is a fat index that the in-cluster zot
+  mirror cannot sync, so every job pod died as `runner_system_failure` and
+  no image was published from 2026-08-02 on. The gate now pins the same
+  single-platform digest as the Dockerfile's amd64 build leg, so the gate and
+  the shipped binary use one toolchain string. The CI postgres service is
+  pinned by digest too, keeping its `postgres` alias.
+- **CI: vulncheck download failures are no longer findings** (nagus-1gb).
+  govulncheck is installed with retries and backoff. Exit 3 (vulnerabilities
+  found) fails at once; any other non-zero exit is retried up to three times.
+- **CI: Postgres test isolation** (nagus-0wj). Each test package gets its own
+  database, created from `template0` with retry on error 55006. Each package
+  builds its store once and isolates cases with `DELETE` instead of `TRUNCATE`,
+  and the test waits up to 90s for the service. A setup timeout logs
+  `pg_blocking_pids`.
+- **Reproducible serverpartdeals dedup baseline.** A committed capture
+  (`testdata/serverpartdeals_2026-09-12.json`) yields 104 offers and 35
+  products. The emitted hints fixture is copied verbatim into quark's parity
+  check. The earlier "250 -> 132" figure came from a capture that was never
+  committed.
+
+### Security
+
+- **glovebox sanitize gate for every source, fail closed** (nagus-9ib; chart
+  0.9.0). Passthrough was honest only while no listing text reached an LLM.
+  Watch rows now reach an agent, and a mailbox is an open channel. The gate
+  classifies title, body and aspects, and only `verdict=pass` keeps an item,
+  with its original bytes. Quarantine, errors and transport failures all drop
+  the item. 429 and 503 are retried first.
+  - The client is generated from glovebox's own OpenAPI spec.
+  - Env: `NAGUS_GLOVEBOX_SANITIZE_URL` plus `NAGUS_GLOVEBOX_TOKEN` or
+    `NAGUS_GLOVEBOX_TOKEN_FILE`. Chart: `glovebox.sanitizeURL` and
+    `glovebox.tokenExternalSecret`.
+  - Half-configured (URL without a token): nagus starts, serves what it holds,
+    and drops every NEW listing. It never runs ungated and never crashloops.
+  - Chart 0.10.0 adds `nagus_sanitize_total{outcome}` and the alerts
+    `NagusSanitizeUnauthorized`, `NagusSanitizeNoToken` and
+    `NagusSanitizeDroppingEverything`. The last is critical: more than
+    `alerts.sanitize.dropRatio` of at least `alerts.sanitize.minListings`
+    listings dropped over 30m.
+- **The mailbox trusts only verified senders.** A From header is trivially
+  forged, so a message is accepted only when one of these holds:
+  - nagus verifies a DKIM signature aligned to the sender's domain (via
+    go-msgauth; `l=` and rsa-sha1 are refused, and From must be signed);
+  - the TOPMOST Authentication-Results header comes from a trusted authserv-id
+    and reports `dkim=pass`.
+
+  Deeper A-R headers and unverified ARC seals are sender-writable and are
+  never consulted. Tests cover forged deeper A-R headers, authserv suffix
+  tricks, forged ARC and tampered messages. `golang.org/x/crypto` went to
+  v0.57.0.
+- **MCP: no listing values in the text block; fixed internal errors; strict
+  arguments** (nagus-w1p).
+  - `search_items` and `get_item` results, including seller-authored titles,
+    now travel only in `structuredContent`. The text block, which a client may
+    put straight into model context, carries a count and a pointer, and it no
+    longer echoes a missing id.
+  - Internal failures return a fixed message and log the detail to stderr
+    instead of returning `err.Error()`, which could carry a DSN fragment or a
+    path.
+  - Arguments are decoded with `DisallowUnknownFields`, so the server enforces
+    `additionalProperties: false`.
+  - The openclaw bridge already renders `structuredContent`, so household
+    agents see the same data as before. For them, glovebox remains the
+    injection defence.
 
 ## [0.4.0] - 2026-07-31
 

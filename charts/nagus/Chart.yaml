@@ -7,6 +7,12 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
+# 0.11.0: appVersion 0.5.0 (release: wine category, quark ids, sanitize gate,
+#         imap source, MCP hardening). No template change.
+# 0.10.0: glovebox token as a re-read file; sanitize alerts (nagus-lg7, 4g3).
+# 0.9.0: glovebox sanitize gate values (nagus-9ib).
+# 0.8.0: LWIN mirroring from the Liv-ex export (nagus-93q).
+# 0.7.0: ServiceMonitor + PrometheusRule (nagus-ff4).
 # 0.6.0: quark resolution pass (nagus-6r6) -- quark.url / quark.interval /
 # quark.tokenExternalSecret render NAGUS_QUARK_URL, NAGUS_QUARK_INTERVAL and an
 # optional NAGUS_QUARK_TOKEN from an ExternalSecret. Off while quark.url is empty.
@@ -26,8 +32,8 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.10.0
-appVersion: "0.4.0"
+version: 0.11.0
+appVersion: "0.5.0"
 kubeVersion: ">=1.27.0-0"
 keywords:
   - acquisition
