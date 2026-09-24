@@ -18,6 +18,7 @@ import (
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/enrich"
+	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/store"
@@ -30,7 +31,9 @@ import (
 // surfaces candidates, it never acts (eyes, not hands; design section 11).
 type server struct {
 	// enricher is the asynchronous quark resolution pass; nil when off.
-	enricher        *enrich.Enricher
+	enricher *enrich.Enricher
+	// sanitizer is the glovebox gate every listing crosses; nil = Passthrough.
+	sanitizer       listing.Sanitizer
 	ingesters       []*pipeline.Ingester
 	surfaces        map[string]*pipeline.Surface
 	store           store.Store
@@ -137,6 +140,9 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.enricher != nil {
 		writeEnrichMetrics(w, s.enricher.Snapshot())
+	}
+	if s.sanitizer != nil {
+		writeSanitizeMetrics(w, s.sanitizer)
 	}
 	if s.lwin != nil {
 		writeLWINMetrics(w, s.lwin)
@@ -383,6 +389,7 @@ func runServe(args []string) error {
 		}
 	}
 	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore, lwin: opts.lwin,
+		sanitizer:   opts.sanitizer,
 		ingestGates: wineIngestGates(cfg.Sources, opts.lwin, lwinStartWait, logf)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

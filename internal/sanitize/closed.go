@@ -3,6 +3,7 @@ package sanitize
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/leftathome/nagus/internal/listing"
 )
@@ -13,12 +14,17 @@ import (
 // it already holds -- the Deployment is Recreate, so refusing to start would be
 // an outage of every surface -- and the reason is in every drop.
 type Closed struct {
-	Reason string
+	Reason  string
+	dropped atomic.Int64
 }
 
-var _ listing.Sanitizer = Closed{}
+var _ listing.Sanitizer = (*Closed)(nil)
 
 // Sanitize always drops.
-func (c Closed) Sanitize(context.Context, listing.Raw) (listing.Sanitized, error) {
+func (c *Closed) Sanitize(context.Context, listing.Raw) (listing.Sanitized, error) {
+	c.dropped.Add(1)
 	return listing.Sanitized{}, fmt.Errorf("sanitize: gate misconfigured (%s), dropping (fail closed)", c.Reason)
 }
+
+// Dropped is how many listings the closed gate has refused.
+func (c *Closed) Dropped() int64 { return c.dropped.Load() }
