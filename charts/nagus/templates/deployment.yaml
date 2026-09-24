@@ -167,15 +167,12 @@ spec:
             - name: NAGUS_GLOVEBOX_SANITIZE_URL
               value: {{ .Values.glovebox.sanitizeURL | quote }}
             {{- if .Values.glovebox.tokenExternalSecret.enabled }}
-            - name: NAGUS_GLOVEBOX_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ printf "%s-glovebox" (include "nagus.fullname" .) }}
-                  key: NAGUS_GLOVEBOX_TOKEN
-                  # Optional: a missing token must never hold the pod in
-                  # CreateContainerConfigError (Recreate -> outage). The binary
-                  # fails CLOSED on it instead.
-                  optional: true
+            # The token is a mounted FILE, re-read by the gate whenever it has
+            # none and after every trip (nagus-4g3): a Secret that syncs after
+            # this pod started (an ExternalSecret created in the same rollout)
+            # heals without a restart, and rotation needs none.
+            - name: NAGUS_GLOVEBOX_TOKEN_FILE
+              value: /run/secrets/nagus-glovebox/NAGUS_GLOVEBOX_TOKEN
             {{- end }}
             {{- end }}
             {{- if .Values.lwin.url }}
@@ -250,6 +247,11 @@ spec:
               mountPath: /etc/nagus-config
               readOnly: true
             {{- end }}
+            {{- if and .Values.glovebox.sanitizeURL .Values.glovebox.tokenExternalSecret.enabled }}
+            - name: glovebox-token
+              mountPath: /run/secrets/nagus-glovebox
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           {{- if and (eq .Values.storage.backend "sqlite") .Values.storage.sqlite.persistence.enabled }}
@@ -260,6 +262,16 @@ spec:
           {{- end }}
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.glovebox.sanitizeURL .Values.glovebox.tokenExternalSecret.enabled }}
+        # Optional: the pod must start even if the Secret has not synced yet
+        # (Recreate -> a pod that cannot start is an outage). The kubelet fills
+        # the volume when the Secret appears; the gate re-reads it.
+        - name: glovebox-token
+          secret:
+            secretName: {{ printf "%s-glovebox" (include "nagus.fullname" .) }}
+            optional: true
+            defaultMode: 0400
+        {{- end }}
         {{- if .Values.demo.enabled }}
         - name: demo
           configMap:

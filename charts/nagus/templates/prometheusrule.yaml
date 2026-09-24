@@ -13,6 +13,46 @@ metadata:
     {{- include "nagus.labels" . | nindent 4 }}
 spec:
   groups:
+    {{- if .Values.glovebox.sanitizeURL }}
+    - name: nagus.sanitize
+      interval: 1m
+      rules:
+        # A rejected token is a TOKEN problem, never transient: glovebox's
+        # secret/glovebox/ingest-tokens/nagus#token must equal nagus's
+        # eso/nagus/glovebox-sanitize#TOKEN. The gate trips on it, so every
+        # listing is being dropped while this fires.
+        - alert: NagusSanitizeUnauthorized
+          # sum: one alert for one problem, not one per outcome label.
+          expr: sum by (namespace) (increase(nagus_sanitize_total{namespace="{{ $ns }}", outcome=~"unauthorized|tripped"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "glovebox is rejecting nagus's sanitize token; new listings are being dropped"
+            description: "Check that secret/glovebox/ingest-tokens/nagus (field token) and eso/nagus/glovebox-sanitize (field TOKEN) hold the same 64-hex value; glovebox picks up changes within 5m or on SIGHUP."
+        - alert: NagusSanitizeNoToken
+          expr: sum by (namespace) (increase(nagus_sanitize_total{namespace="{{ $ns }}", outcome=~"no_token|misconfigured"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "nagus's sanitize gate has no token or is half-configured; new listings are being dropped"
+            description: "The nagus-glovebox ExternalSecret has not synced, or only one of the gate URL and token is set."
+        # The failure this exists for: a gate that silently eats every listing
+        # while every surface looks healthy (2026-09-23: nothing paged). Critical
+        # so it reaches email, not just Loki.
+        - alert: NagusSanitizeDroppingEverything
+          expr: |
+            (
+              sum(increase(nagus_sanitize_total{namespace="{{ $ns }}", outcome!="pass"}[30m]))
+              / sum(increase(nagus_sanitize_total{namespace="{{ $ns }}"}[30m]))
+            ) > {{ .Values.alerts.sanitize.dropRatio }}
+            and sum(increase(nagus_sanitize_total{namespace="{{ $ns }}"}[30m])) > {{ .Values.alerts.sanitize.minListings }}
+          for: {{ .Values.alerts.sanitize.for }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "the glovebox sanitize gate is dropping {{ "{{ $value | humanizePercentage }}" }} of listings"
+            description: "No new deals reach watches while this fires. See the nagus log lines starting 'sanitize:' and nagus_sanitize_total by outcome."
+    {{- end }}
     - name: nagus.availability
       interval: 1m
       rules:

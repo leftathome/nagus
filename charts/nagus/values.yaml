@@ -340,6 +340,12 @@ serviceMonitor:
 
 alerts:
   enabled: true
+  sanitize:
+    # NagusSanitizeDroppingEverything: more than dropRatio of at least
+    # minListings listings dropped over 30m, sustained for `for`.
+    dropRatio: 0.9
+    minListings: 20
+    for: 15m
   quark:
     # No clean resolution pass for this long fires NagusQuarkEnrichmentStalled.
     # 3x the default 10m pass interval: one slow or failed pass is not news,
