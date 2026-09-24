@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-24
+
+### Fixed
+
+- **A search limit now applies after ranking, not before** (nagus-cb8). The
+  surface passed the caller's `limit` to the store, which returned the first
+  N rows in storage order; the hard filter then dropped most of them and
+  scoring ranked what was left. On the live hdd corpus, `limit=3` returned 0
+  rows, `limit=10` returned 1, and a top-N could omit the best deals
+  entirely. Every candidate (up to `DefaultMaxCandidates`, 5000; reaching it
+  is logged) is now filtered, valued and ranked, and only then truncated.
+  `matched` and `filtered` describe the whole candidate set. This affects
+  `/search`, MCP `search_items`, and watches with a `limit`. Found by the
+  v0.5.0 production smoke test; present since 2026-07-27.
+
 ## [0.5.0] - 2026-09-24
 
 ### Upgrade notes
