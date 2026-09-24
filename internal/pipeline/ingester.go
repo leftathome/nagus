@@ -43,6 +43,14 @@ type Ingester struct {
 	// purchasable. Deletion is OfferRetention's job alone.
 	OfferExpireAfter time.Duration
 
+	// TextHints sends a listing's TITLE to quark as hint text when the source
+	// states no product identifiers (quark QUARK-02: eBay titles carry part
+	// numbers in the title only). The title is attached ONLY after the listing
+	// passed the sanitize gate -- offers are otherwise recorded before it, and
+	// quark consumes sanitized text (spec D7) -- and only when every structured
+	// hint field is empty. Needs an evaluating ingester (a Sanitizer).
+	TextHints bool
+
 	// StaleAfter, when > 0, enables a post-ingest freshness purge of this
 	// source's items older than the window (eBay License 8.1(b)). 0 disables it.
 	StaleAfter time.Duration
@@ -88,11 +96,25 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 	// condition: without an extractor there is nothing to evaluate INTO.
 	evaluates := i.Extractor != nil && i.Store != nil
 	for _, r := range raws {
-		// Offer FIRST, and unconditionally: the whole point is to accumulate
+		// For a text-hint source the gate runs FIRST, so the title is attached
+		// to the offer's hint only when glovebox passed it. The verdict is
+		// reused below: one gate call per listing either way.
+		var san listing.Sanitized
+		var sanErr error
+		gated := false
+		if i.TextHints && evaluates && i.Sanitizer != nil {
+			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
+			gated = true
+		}
+		// Offer next, and unconditionally: the whole point is to accumulate
 		// what a source is selling even when no category extracts it. A listing
 		// that fails extraction below is still a real offer that existed.
 		if i.Offers != nil {
-			if err := i.Offers.Put(ctx, offerFromRaw(r, now)); err != nil {
+			o := offerFromRaw(r, now)
+			if gated && sanErr == nil && o.ProductHint.Empty() {
+				o.ProductHint.Text = r.Title
+			}
+			if err := i.Offers.Put(ctx, o); err != nil {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: err.Error()})
 				i.logf("ingest: offer store dropped %s: %v", r.SourceKey, err)
 			} else {
@@ -103,10 +125,12 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			// Offers were recorded above; there is deliberately nothing else to do.
 			continue
 		}
-		san, err := i.Sanitizer.Sanitize(ctx, r)
-		if err != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: err.Error()})
-			i.logf("ingest: sanitize dropped %s: %v", r.SourceKey, err)
+		if !gated {
+			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
+		}
+		if sanErr != nil {
+			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: sanErr.Error()})
+			i.logf("ingest: sanitize dropped %s: %v", r.SourceKey, sanErr)
 			continue
 		}
 		it, err := i.Extractor.Extract(ctx, san)

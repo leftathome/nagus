@@ -256,3 +256,50 @@ func unidentifiableIsNeverPending(t *testing.T, s offer.Store) {
 		t.Fatalf("after the source began stating a hint, pending = %d, want 1", len(pending))
 	}
 }
+
+// QUARK-02 text hints. An offer recorded unidentifiable (no identifiers) must
+// become askable again when the source starts supplying title text, and the
+// stored fingerprint must include the text so quark's answer stamps.
+func textHintRoundTripsAndReopens(t *testing.T, s offer.Store) {
+	o := Offer("ebay:ebay", "v1|123", 100, T0)
+	put(t, s, o)
+	if !record(t, s, o, offer.Resolution{State: offer.ResolutionUnidentifiable, At: T1}) {
+		t.Fatal("RecordResolution(unidentifiable) did not apply")
+	}
+	withText := Offer("ebay:ebay", "v1|123", 100, T0)
+	withText.LastSeen = T2
+	withText.ProductHint = offer.ProductHint{Text: "Seagate Exos X18 ST12000NM002J 12TB"}
+	put(t, s, withText)
+	pending, err := s.PendingResolution(context.Background(), 0, 0)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("after title text arrived, pending = %d (%v), want 1", len(pending), err)
+	}
+	if pending[0].ProductHint.Text != withText.ProductHint.Text {
+		t.Fatalf("hint text not stored: %+v", pending[0].ProductHint)
+	}
+	if !record(t, s, withText, offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-12", At: T2}) {
+		t.Fatal("an answer for the text hint did not stamp: stored fingerprint lacks the text")
+	}
+	if got := get(t, s, withText); got.Resolution.ProductID != "p-12" {
+		t.Fatalf("resolution %+v", got.Resolution)
+	}
+	// Same text re-ingested: resolution survives.
+	put(t, s, withText)
+	if got := get(t, s, withText); got.Resolution.ProductID != "p-12" {
+		t.Fatalf("re-ingest of the same text erased resolution: %+v", got.Resolution)
+	}
+}
+
+// An answer computed for an OLD title must not stamp once the title changed.
+func textHintStaleAnswerIsDiscarded(t *testing.T, s offer.Store) {
+	old := Offer("ebay:ebay", "v1|9", 100, T0)
+	old.ProductHint = offer.ProductHint{Text: "ST12000NM002J 12TB"}
+	put(t, s, old)
+	changed := Offer("ebay:ebay", "v1|9", 100, T0)
+	changed.LastSeen = T1
+	changed.ProductHint = offer.ProductHint{Text: "WUH721818ALE600 18TB"}
+	put(t, s, changed)
+	if record(t, s, old, offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-old", At: T1}) {
+		t.Fatal("an answer for the old title stamped the offer")
+	}
+}
