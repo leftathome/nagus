@@ -14,8 +14,12 @@ nagus + quark interoperability and functionality and cut releases of both.
 - [x] nagus-w1p: MCP text block carries no listing values; fixed internal
       errors; strict arguments (MR !23, merged). openclaw's MCP bridge renders
       structuredContent, so agents see the same data.
-- [ ] nagus v0.5.0: CHANGELOG (89 commits since v0.4.0), chart 0.11.0 /
-      appVersion 0.5.0, tag on GitLab (mirror carries it to GitHub).
+- [x] nagus v0.5.0: CHANGELOG (89 commits since v0.4.0), chart 0.11.0 /
+      appVersion 0.5.0. Deployed to prod first (gitops 4b68978) and
+      smoke-tested through the openclaw gateway's network path, then tagged
+      on 889371ac (mirror carried the tag to GitHub).
+- [ ] nagus v0.5.1: the smoke test found search `limit` applied BEFORE
+      ranking (nagus-cb8, present since July): fix, deploy, smoke, tag.
 - [ ] QUARK-02 known-key text matching
 - [ ] QUARK-03 catalog loaders
 - [ ] QUARK-04 wine LWIN migration (nagus/internal/identity/lwin -> quark)

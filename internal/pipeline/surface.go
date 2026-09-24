@@ -16,12 +16,27 @@ import (
 // One Surface == one category (its Filter/Valuate are category-specific). The
 // hard-filter runs BEFORE enrich so paid work touches only survivors (ordering
 // invariant). Read-only: eyes, not hands.
+//
+// The caller's Limit is applied AFTER ranking (nagus-cb8). It used to go to the
+// store, which returned the first Limit rows in STORAGE order; the filter then
+// dropped most of them and scoring ranked an arbitrary slice -- limit=3 on the
+// live hdd corpus returned 0 rows, and the best deals could be absent from any
+// top-N. The store is now asked for up to MaxCandidates, everything is
+// filtered, valued and ranked, and only then truncated to Limit. Matched and
+// Filtered describe the whole candidate set.
 type Surface struct {
 	Store   store.Store
 	Filter  score.Filter
 	Valuate func(ctx context.Context, it item.Item) (score.DealSignal, error)
 	Logf    func(format string, args ...any)
+	// MaxCandidates bounds the store read per request; 0 = DefaultMaxCandidates.
+	// Reaching it is logged: ranking then covers only part of the category.
+	MaxCandidates int
 }
+
+// DefaultMaxCandidates bounds one surface request's store read. The largest
+// live category held 1,343 items on 2026-09-24.
+const DefaultMaxCandidates = 5000
 
 func (s *Surface) logf(format string, args ...any) {
 	if s.Logf != nil {
@@ -31,9 +46,18 @@ func (s *Surface) logf(format string, args ...any) {
 
 // Surface queries the stored corpus and returns ranked, scored survivors.
 func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, error) {
+	limit := q.Limit
+	candidates := s.MaxCandidates
+	if candidates <= 0 {
+		candidates = DefaultMaxCandidates
+	}
+	q.Limit = candidates
 	items, err := s.Store.Search(ctx, q)
 	if err != nil {
 		return SurfaceResult{}, err
+	}
+	if len(items) >= candidates {
+		s.logf("surface: %s: candidate cap %d reached; ranking covers only part of the category", q.Category, candidates)
 	}
 	out := SurfaceResult{Matched: len(items)}
 	for _, it := range items {
@@ -61,5 +85,8 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 		}
 		return out.Items[a].Item.ID < out.Items[b].Item.ID
 	})
+	if limit > 0 && len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+	}
 	return out, nil
 }
