@@ -419,16 +419,45 @@ func TestConditionVariantsShareOneMPN(t *testing.T) {
 		Name: "spd", SKUIsMPN: true, SKUSuffixes: []string{"_SR", "_MR", "_NB"},
 	})
 	got := map[string]bool{}
+	const title = "WD Ultrastar DC HC550 WUH722424AL5201 24TB SAS 12Gb/s 3.5in HDD"
 	for _, sku := range []string{"WUH722424AL5201-0F62801_SR", "WUH722424AL5201-0F62801_MR", "WUH722424AL5201-0F62801_NB"} {
-		got[c.mpnOf(variant{SKU: sku})] = true
+		got[c.mpnOf(title, variant{SKU: sku})] = true
 	}
 	if len(got) != 1 {
 		t.Fatalf("condition variants produced %d distinct MPNs, want 1: %v", len(got), got)
 	}
 	for k := range got {
-		if k != "WUH722424AL5201-0F62801" {
-			t.Errorf("MPN = %q, want the suffix stripped", k)
+		if k != "WUH722424AL5201" {
+			t.Errorf("MPN = %q, want the manufacturer part number without the seller's segments", k)
 		}
+	}
+}
+
+// The SKU is not the MPN even when it starts with one (QUARK-02 measurement):
+// seller segments after the part number fragmented one drive into many quark
+// products. Cases taken from the live store's SKU shapes.
+func TestMPNIsTheManufacturerPartNumberNotTheSKU(t *testing.T) {
+	c := NewConnector(Config{Name: "spd", SKUIsMPN: true, SKUSuffixes: []string{"_SR", "_MR", "_NB"}})
+	for _, tc := range []struct{ title, sku, want string }{
+		// the title states it: the title token wins
+		{"HGST Ultrastar 7K6000 HUS726040AL4215 4TB SAS 3.5in", "HUS726040AL4215-DELL_DELLG13", "HUS726040AL4215"},
+		// numbered seller variants of one Dell part collapse
+		{"Dell G14 00JHTD 4TB 7.2K SAS 12Gb/s 3.5in Refurbished HDD", "00JHTD_DELLG14_SR_12", "00JHTD"},
+		{"Dell G14 00JHTD 4TB 7.2K SAS 12Gb/s 3.5in Refurbished HDD", "00JHTD_DELLG14_SR_1", "00JHTD"},
+		// a hyphenated manufacturer number stays whole when the title states it
+		{"WD Red Plus WD60EFRX-68MYMN1 6TB 5400RPM SATA", "WD60EFRX-68MYMN1_SR", "WD60EFRX-68MYMN1"},
+		// Dell names its own number; the SKU leads with the maker's
+		{"Dell G14 06WR5M 960GB SATA 6Gb/s 2.5in Refurbished SSD", "KHK6XLSE960G-DELL_DELLG14_SR", "KHK6XLSE960G"},
+		// nothing part-number-shaped: no key rather than a wrong one
+		{"Western Digital Ultrastar Data 102-Bay 4U JBOD", "H4102-J_SR", ""},
+		{"Some Drive", "DELL_SPECIAL", ""},
+	} {
+		if got := c.mpnOf(tc.title, variant{SKU: tc.sku}); got != tc.want {
+			t.Errorf("mpnOf(%q, %q) = %q, want %q", tc.title, tc.sku, got, tc.want)
+		}
+	}
+	if got := NewConnector(Config{Name: "x"}).mpnOf("Seagate ST8000NM023B 8TB", variant{SKU: "ST8000NM023B"}); got != "" {
+		t.Errorf("a store not declared SKUIsMPN must emit no MPN, got %q", got)
 	}
 }
 
