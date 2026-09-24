@@ -57,6 +57,28 @@ It also makes nagus-9ib real: the sanitize client replaces
       when the TOPMOST Authentication-Results header (our MX's) reports a
       DKIM pass aligned to the sender's domain: a From header proves nothing
       on an open channel.
-- [ ] gitops: ExternalSecrets for the two Vault paths; nagus env; the
-      sanitize URL (glovebox 0.8.0 serves `/v1/sanitize` on port 9093).
+- [x] gitops: ExternalSecrets for the two Vault paths; nagus env; the
+      sanitize URL (glovebox serves `/v1/sanitize` on port 9093). Gate live
+      2026-09-23; hardened in chart 0.10.0 (nagus-lg7, nagus-4g3).
+- [x] nagus-zsi (2026-09-24): ForwardEmail writes NO Authentication-Results
+      header -- only ARC sets -- so the A-R check alone would have rejected
+      every message. nagus now verifies DKIM signatures itself (go-msgauth;
+      l= and rsa-sha1 refused), keeping the A-R path as the second mode.
+      ARC is not trusted without verifying the seal chain.
+- [x] Household forwards (nagus-zsi option 3): `imapForwarders` on a source.
+      A message From a listed forwarder, DKIM-verified for the forwarder's
+      domain, whose forwarded original names the source's sender, is that
+      sender's mail (aspect `mail_forwarded_by`). Verified against a real
+      Gmail hand-forward (real signature, real DNS) via the opt-in
+      `TestRealCapturedMessage`; the message itself is never committed.
 - [ ] Per-sender parsers, one at a time, each from a real captured email.
+      - wine.com, first sample (2026-09-23 "More Champagne & Sparkling to
+        love"): a RichRelevance personalized-recommendation mail. The six
+        wines are images rendered at open time
+        (image.richrelevance.com/rrmail/image/recs?...) behind tracked
+        redirects; the mail carries NO names, prices or ids. Not parseable
+        without fetching the tracked images/links (which reports the open
+        and is exactly the act-on-mail-links behaviour we refuse). Its only
+        concrete offer is store-wide (free shipping over $150, code, expiry).
+        Needs a wine.com SALE/list mail as the parser sample.
+      - Total Wine: no sample yet (filter forwarding only applies to new mail).

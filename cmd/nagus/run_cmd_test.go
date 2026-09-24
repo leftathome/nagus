@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leftathome/nagus/internal/connector/imapmail"
+	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/store/sqlitestore"
 )
@@ -149,6 +151,37 @@ func TestWiringBuildConnectorForSourceEbayErrorNamesSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unhappy-src") {
 		t.Errorf("err = %v, want it to name the source", err)
+	}
+}
+
+type wiringIMAPParser struct{}
+
+func (wiringIMAPParser) Parse(imapmail.Message) ([]listing.Raw, error) { return nil, nil }
+
+func TestWiringBuildConnectorForSourceIMAPForwarders(t *testing.T) {
+	imapmail.Register("wiring-test", wiringIMAPParser{})
+	t.Setenv("NAGUS_IMAP_HOST", "imap.example")
+	t.Setenv("NAGUS_IMAP_USERNAME", "deals@totally.apocryph.al")
+	t.Setenv("NAGUS_IMAP_PASSWORD", "pw")
+	var s SourceConfig
+	if err := json.Unmarshal([]byte(`{"name":"winecom","type":"imap","imapFrom":"winecom@e.wine.com",
+		"imapParser":"wiring-test","imapForwarders":["forwarder@example.org"]}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.IMAPForwarders) != 1 || s.IMAPForwarders[0] != "forwarder@example.org" {
+		t.Fatalf("imapForwarders not decoded: %+v", s)
+	}
+	conn, err := buildConnectorForSource(s, CategoryConfig{}, categoryOpts{})
+	if err != nil {
+		t.Fatalf("buildConnectorForSource(imap): %v", err)
+	}
+	if got := conn.SourceID(); got != "imap:winecom" {
+		t.Errorf("SourceID() = %q, want imap:winecom", got)
+	}
+	// the sender itself is not a forwarder
+	s.IMAPForwarders = []string{"winecom@e.wine.com"}
+	if _, err := buildConnectorForSource(s, CategoryConfig{}, categoryOpts{}); err == nil {
+		t.Error("the sender listed as its own forwarder must be rejected")
 	}
 }
 

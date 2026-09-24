@@ -11,11 +11,27 @@
 //   - One source per SENDER. A source declares one From address and reads
 //     only that sender's mail; everything else in the mailbox is ignored.
 //     Legality (wineChannel/origin) is per seller, so it is per source.
-//   - A From header is trivially forged. A message is accepted only when the
-//     TOPMOST Authentication-Results header -- the one our receiving MX
-//     prepended on arrival -- comes from a trusted authserv-id and reports
-//     dkim=pass for the sender's domain (or its parent, relaxed alignment).
-//     Deeper A-R headers are attacker-writable and are never consulted.
+//   - A From header is trivially forged. A message is accepted only with a
+//     DKIM pass for the sender's domain (or its parent, relaxed alignment),
+//     established either way (nagus-zsi):
+//     1. nagus verifies a DKIM-Signature itself (public key from DNS). This
+//     is the path that works on deals@: ForwardEmail writes NO
+//     Authentication-Results header, only ARC sets, so path 2 alone
+//     rejected every message. Filter-forwarding (Gmail) keeps the
+//     original signature intact. Signatures with l= (a partially signed
+//     body) and rsa-sha1 are refused by the verifier.
+//     2. The TOPMOST Authentication-Results header -- the one a receiving
+//     MX prepends on arrival -- comes from a trusted authserv-id and
+//     reports dkim=pass. Deeper A-R headers are attacker-writable and are
+//     never consulted. Kept for a provider that does write A-R.
+//     ARC sets are deliberately NOT trusted without verifying the seal chain:
+//     lower instances are sender-writable.
+//   - Forwarded mail (nagus-zsi, option 3). A source may name Forwarders --
+//     the household's own mailboxes, from config only. A message From a
+//     forwarder, with a DKIM pass for the FORWARDER's domain, whose forwarded
+//     original names this source's sender, is that sender's mail: a person
+//     forwarding a newsletter by hand vouches for it. It is credited to the
+//     sender, marked mail_forwarded_by.
 //   - Read-only and stateless: the mailbox is EXAMINEd, never modified; each
 //     poll searches the sender's mail over a lookback window, and the
 //     Message-ID keys every offer, so a re-read is idempotent.
@@ -27,12 +43,16 @@
 package imapmail
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
+	netmail "net/mail"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +62,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	_ "github.com/emersion/go-message/charset" // non-UTF-8 bodies
 	"github.com/emersion/go-message/mail"
+	"github.com/emersion/go-msgauth/dkim"
 
 	"github.com/leftathome/nagus/internal/listing"
 )
@@ -61,12 +82,15 @@ var DefaultTrustedAuthServ = []string{"forwardemail.net"}
 
 // Message is one verified email, handed to the sender's Parser.
 type Message struct {
-	ID      string // Message-ID, without angle brackets
-	From    string // the verified sender address, lower-cased
-	Subject string
-	Date    time.Time
-	Text    string // the text/plain part, if any
-	HTML    string // the text/html part, if any
+	ID   string // Message-ID, without angle brackets
+	From string // the verified sender address, lower-cased
+	// ForwardedBy is the forwarder address when this is a hand-forwarded copy
+	// of the sender's mail; empty for mail the sender sent directly.
+	ForwardedBy string
+	Subject     string
+	Date        time.Time
+	Text        string // the text/plain part, if any
+	HTML        string // the text/html part, if any
 }
 
 // Parser turns one sender's message into offers. Each implementation is
@@ -118,11 +142,16 @@ type Config struct {
 	// TrustedAuthServ are authserv-ids whose Authentication-Results header is
 	// trusted; empty = DefaultTrustedAuthServ.
 	TrustedAuthServ []string
-	LookbackDays    int
-	MaxBytes        int64
-	Parser          Parser
-	Now             func() time.Time
-	Logf            func(string, ...any)
+	// Forwarders are addresses whose DKIM-verified forwards of this sender's
+	// mail are accepted as the sender's (the household's own mailboxes).
+	Forwarders []string
+	// LookupTXT resolves DKIM public keys; nil = the system resolver.
+	LookupTXT    func(domain string) ([]string, error)
+	LookbackDays int
+	MaxBytes     int64
+	Parser       Parser
+	Now          func() time.Time
+	Logf         func(string, ...any)
 }
 
 // Connector implements listing.Connector.
@@ -157,8 +186,17 @@ func NewConnector(cfg Config) (*Connector, error) {
 		}
 	}
 	if cfg.DKIMDomain == "" {
-		cfg.DKIMDomain = cfg.From[strings.LastIndex(cfg.From, "@")+1:]
+		cfg.DKIMDomain = domainOf(cfg.From)
 	}
+	fwd := make([]string, 0, len(cfg.Forwarders))
+	for _, f := range cfg.Forwarders {
+		f = strings.ToLower(strings.TrimSpace(f))
+		if !strings.Contains(f, "@") || f == cfg.From {
+			return nil, fmt.Errorf("imapmail: forwarder %q must be an address other than the sender", f)
+		}
+		fwd = append(fwd, f)
+	}
+	cfg.Forwarders = fwd
 	cfg.DKIMDomain = strings.ToLower(cfg.DKIMDomain)
 	if len(cfg.TrustedAuthServ) == 0 {
 		cfg.TrustedAuthServ = DefaultTrustedAuthServ
@@ -202,15 +240,25 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		return nil, fmt.Errorf("imapmail %s: examine %q: %w", c.cfg.Name, c.cfg.Mailbox, err)
 	}
 	now := c.cfg.Now()
-	criteria := &imap.SearchCriteria{
-		Since:  now.AddDate(0, 0, -c.cfg.LookbackDays),
-		Header: []imap.SearchCriteriaHeaderField{{Key: "From", Value: c.cfg.From}},
+	// One search per address (the sender, then each forwarder), unioned.
+	seen := map[imap.UID]bool{}
+	var uids []imap.UID
+	for _, addr := range append([]string{c.cfg.From}, c.cfg.Forwarders...) {
+		criteria := &imap.SearchCriteria{
+			Since:  now.AddDate(0, 0, -c.cfg.LookbackDays),
+			Header: []imap.SearchCriteriaHeaderField{{Key: "From", Value: addr}},
+		}
+		found, err := cl.UIDSearch(criteria, nil).Wait()
+		if err != nil {
+			return nil, fmt.Errorf("imapmail %s: search %s: %w", c.cfg.Name, addr, err)
+		}
+		for _, u := range found.AllUIDs() {
+			if !seen[u] {
+				seen[u] = true
+				uids = append(uids, u)
+			}
+		}
 	}
-	found, err := cl.UIDSearch(criteria, nil).Wait()
-	if err != nil {
-		return nil, fmt.Errorf("imapmail %s: search: %w", c.cfg.Name, err)
-	}
-	uids := found.AllUIDs()
 	var out []listing.Raw
 	skipped := map[string]int{}
 	if len(uids) > 0 {
@@ -248,6 +296,9 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 					raws[i].Aspects = map[string]string{}
 				}
 				raws[i].Aspects["mail_message_id"] = msg.ID
+				if msg.ForwardedBy != "" {
+					raws[i].Aspects["mail_forwarded_by"] = msg.ForwardedBy
+				}
 				raws[i].SeenAt = now
 			}
 			out = append(out, raws...)
@@ -276,8 +327,9 @@ func (c *Connector) dial() (*imapclient.Client, error) {
 	}
 }
 
-// verify parses a message and accepts it only from the declared sender with
-// a DKIM pass our MX recorded. A non-empty reason means it was skipped.
+// verify parses a message and accepts it only from the declared sender (or a
+// declared forwarder) with a DKIM pass for that address's domain. A non-empty
+// reason means it was skipped.
 func (c *Connector) verify(raw []byte) (Message, string) {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
@@ -285,13 +337,26 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 	}
 	h := mr.Header
 	from, err := h.AddressList("From")
-	if err != nil || len(from) != 1 || strings.ToLower(from[0].Address) != c.cfg.From {
+	if err != nil || len(from) != 1 {
 		return Message{}, "not from the declared sender"
 	}
-	if !c.dkimVerified(h.Values("Authentication-Results")) {
+	addr := strings.ToLower(from[0].Address)
+	forwarder := ""
+	domain := c.cfg.DKIMDomain
+	if addr != c.cfg.From {
+		for _, f := range c.cfg.Forwarders {
+			if addr == f {
+				forwarder, domain = f, domainOf(f)
+			}
+		}
+		if forwarder == "" {
+			return Message{}, "not from the declared sender"
+		}
+	}
+	if !c.dkimVerified(h.Values("Authentication-Results"), domain) && !c.dkimSigned(raw, domain) {
 		if c.cfg.Logf != nil {
 			c.cfg.Logf("imapmail %s: REJECTED a message claiming to be from %s without a verified DKIM pass for %s (possible spoof)",
-				c.cfg.Name, c.cfg.From, c.cfg.DKIMDomain)
+				c.cfg.Name, addr, domain)
 		}
 		return Message{}, "no verified dkim pass"
 	}
@@ -301,7 +366,7 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 	}
 	subject, _ := h.Subject()
 	date, _ := h.Date()
-	msg := Message{ID: id, From: c.cfg.From, Subject: subject, Date: date}
+	msg := Message{ID: id, From: c.cfg.From, Subject: subject, Date: date, ForwardedBy: forwarder}
 	for {
 		p, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -330,13 +395,91 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 			}
 		}
 	}
+	if forwarder != "" {
+		orig := forwardedFrom(msg.Text)
+		if orig == "" {
+			orig = forwardedFrom(htmlText(msg.HTML))
+		}
+		if orig != c.cfg.From {
+			return Message{}, "forward of another sender"
+		}
+	}
 	return msg, ""
+}
+
+// forwardMarker opens the quoted original in a forward: Gmail's
+// "---------- Forwarded message ---------" and Apple Mail's
+// "Begin forwarded message:".
+var forwardMarker = regexp.MustCompile(`(?im)^[\s>]*(?:-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:)\s*$`)
+
+// forwardedFrom returns the lower-cased address on the first From: line of
+// the first forwarded original in text, or "".
+func forwardedFrom(text string) string {
+	loc := forwardMarker.FindStringIndex(text)
+	if loc == nil {
+		return ""
+	}
+	lines := strings.Split(text[loc[1]:], "\n")
+	for i, ln := range lines {
+		if i > 12 {
+			break
+		}
+		ln = strings.TrimLeft(strings.TrimSpace(ln), "> ")
+		v, ok := strings.CutPrefix(ln, "From:")
+		if !ok {
+			continue
+		}
+		if a, err := netmail.ParseAddress(strings.TrimSpace(v)); err == nil {
+			return strings.ToLower(a.Address)
+		}
+		return ""
+	}
+	return ""
+}
+
+var (
+	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>|</(?:div|p|tr|li)>`)
+	htmlTag   = regexp.MustCompile(`<[^>]*>`)
+)
+
+// htmlText is a rough text rendering, enough to find a forward header in an
+// HTML-only forward.
+func htmlText(s string) string {
+	s = htmlBreak.ReplaceAllString(s, "\n")
+	return html.UnescapeString(htmlTag.ReplaceAllString(s, ""))
+}
+
+// dkimSigned verifies the message's DKIM signatures itself and reports whether
+// one that verifies is aligned to domain. Bare LF line endings are restored to
+// CRLF first: DKIM canonicalization is defined over CRLF.
+func (c *Connector) dkimSigned(raw []byte, domain string) bool {
+	norm := bytes.ReplaceAll(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))
+	verifs, err := dkim.VerifyWithOptions(bytes.NewReader(norm), &dkim.VerifyOptions{LookupTXT: c.cfg.LookupTXT, MaxVerifications: 5})
+	if err != nil {
+		return false
+	}
+	for _, v := range verifs {
+		if v.Err == nil && aligned(strings.ToLower(v.Domain), domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// aligned is relaxed DKIM alignment: the signing domain d is the domain
+// itself or one of its parents.
+func aligned(d, domain string) bool {
+	return d != "" && (d == domain || strings.HasSuffix(domain, "."+d))
+}
+
+func domainOf(addr string) string {
+	return strings.ToLower(addr[strings.LastIndex(addr, "@")+1:])
 }
 
 // dkimVerified reads ONLY the topmost Authentication-Results header: headers
 // are prepended in transit, so the first is the one our receiving MX wrote.
 // Any deeper one could have been written by the sender and proves nothing.
-func (c *Connector) dkimVerified(ars []string) bool {
+func (c *Connector) dkimVerified(ars []string, domain string) bool {
 	if len(ars) == 0 {
 		return false
 	}
@@ -362,8 +505,7 @@ func (c *Connector) dkimVerified(ars []string) bool {
 		}
 		for _, kv := range f[1:] {
 			if d, ok := strings.CutPrefix(kv, "header.d="); ok {
-				d = strings.Trim(d, `"`)
-				if d == c.cfg.DKIMDomain || strings.HasSuffix(c.cfg.DKIMDomain, "."+d) {
+				if aligned(strings.Trim(d, `"`), domain) {
 					return true
 				}
 			}
