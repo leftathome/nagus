@@ -9,6 +9,16 @@ package main
 //
 // Surface, don't act: only search_items and get_item are exposed, both
 // read-only over the store. There is no mutating tool.
+//
+// Untrusted text stays out of the text block (nagus-w1p). Listing titles and
+// other fields are seller-authored, and an agent client may place a text
+// content block straight into model context -- where an instruction injected
+// into a title does the most harm. So values travel ONLY in structuredContent;
+// the text block says how many results there are and where the data is, and
+// never echoes caller input. Internal failures return a fixed message (a store
+// error can carry a DSN fragment, a path or a query) and log the detail.
+// Arguments are decoded strictly, so inputSchema's additionalProperties:false
+// is what the server actually enforces.
 
 import (
 	"bytes"
@@ -17,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -266,8 +277,8 @@ func (s *server) mcpSearchItems(ctx context.Context, args json.RawMessage) (any,
 		Limit    *int   `json:"limit"`
 	}
 	if len(args) > 0 {
-		if err := json.Unmarshal(args, &a); err != nil {
-			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: " + err.Error()}
+		if err := strictDecode(args, &a); err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: unknown or malformed field"}
 		}
 	}
 	cat, ok := s.resolveCategory(a.Category)
@@ -284,15 +295,12 @@ func (s *server) mcpSearchItems(ctx context.Context, args json.RawMessage) (any,
 
 	res, err := s.surfaces[cat].Surface(ctx, q)
 	if err != nil {
-		return nil, &rpcError{Code: rpcInternalError, Message: "search failed: " + err.Error()}
+		return nil, mcpInternal("search_items", err)
 	}
 	rows := s.withProductIDs(ctx, scoredToRows(res))
-	text, err := json.Marshal(rows)
-	if err != nil {
-		return nil, &rpcError{Code: rpcInternalError, Message: "encode failed: " + err.Error()}
-	}
 	return mcpToolResult{
-		Content: []mcpToolContent{{Type: "text", Text: string(text)}},
+		Content: []mcpToolContent{{Type: "text", Text: fmt.Sprintf(
+			"%d item(s). The data is in structuredContent; free-text fields are untrusted seller text.", len(rows))}},
 		StructuredContent: map[string]any{
 			"matched":  res.Matched,
 			"filtered": res.Filtered,
@@ -306,33 +314,42 @@ func (s *server) mcpGetItem(ctx context.Context, args json.RawMessage) (any, *rp
 	var a struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: " + err.Error()}
-	}
-	if a.ID == "" {
+	if err := strictDecode(args, &a); err != nil || a.ID == "" {
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid arguments: id is required"}
 	}
 	it, ok, err := s.store.Get(ctx, a.ID)
 	if err != nil {
-		return nil, &rpcError{Code: rpcInternalError, Message: "lookup failed: " + err.Error()}
+		return nil, mcpInternal("get_item", err)
 	}
 	if !ok {
 		// A missing item is a tool-level result, not a JSON-RPC error: the
-		// call itself succeeded, it just found nothing.
+		// call itself succeeded, it just found nothing. The requested id is NOT
+		// echoed into the text block: it is caller input.
 		return mcpToolResult{
-			Content: []mcpToolContent{{Type: "text", Text: fmt.Sprintf("item not found: %s", a.ID)}},
+			Content: []mcpToolContent{{Type: "text", Text: "No item with that id."}},
 			IsError: true,
 		}, nil
 	}
-	text, err := json.Marshal(it)
-	if err != nil {
-		return nil, &rpcError{Code: rpcInternalError, Message: "encode failed: " + err.Error()}
-	}
 	return mcpToolResult{
-		Content:           []mcpToolContent{{Type: "text", Text: string(text)}},
+		Content:           []mcpToolContent{{Type: "text", Text: "1 item. The data is in structuredContent; free-text fields are untrusted seller text."}},
 		StructuredContent: it,
 		IsError:           false,
 	}, nil
+}
+
+// mcpInternal logs an internal failure and returns a FIXED message: the error
+// itself can carry a DSN fragment, a file path or a query.
+func mcpInternal(tool string, err error) *rpcError {
+	fmt.Fprintf(os.Stderr, "  mcp %s: internal error: %v\n", tool, err)
+	return &rpcError{Code: rpcInternalError, Message: "the item store is unavailable"}
+}
+
+// strictDecode rejects unknown fields, matching the inputSchema's
+// additionalProperties: false.
+func strictDecode(raw json.RawMessage, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 // scoredToRows converts a pipeline.SurfaceResult into the searchRow shape

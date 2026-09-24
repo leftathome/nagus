@@ -2,10 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/leftathome/nagus/internal/item"
+	"github.com/leftathome/nagus/internal/store"
 )
 
 // doMCP posts a raw JSON-RPC body to /mcp and returns the recorder.
@@ -278,5 +284,96 @@ func TestMCPPing(t *testing.T) {
 	}
 	if string(env.Result) != "{}" {
 		t.Fatalf("ping result = %s, want {}", env.Result)
+	}
+}
+
+// --- nagus-w1p: untrusted text, internal errors, strict arguments ------------
+
+type mcpCallResult struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent"`
+	IsError           bool            `json:"isError"`
+}
+
+func callTool(t *testing.T, srv *server, body string) (rpcEnvelope, mcpCallResult) {
+	t.Helper()
+	env := decodeRPC(t, doMCP(t, srv, body))
+	var r mcpCallResult
+	if env.Error == nil {
+		if err := json.Unmarshal(env.Result, &r); err != nil {
+			t.Fatalf("decode result: %v", err)
+		}
+	}
+	return env, r
+}
+
+// Seller-authored values (titles, urls, rationale) must never reach the text
+// block an agent client may place straight into model context.
+func TestMCPTextBlockCarriesNoListingValues(t *testing.T) {
+	srv := newTestServer(t)
+	_, res := callTool(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_items","arguments":{}}}`)
+	var sc struct {
+		Items []searchRow `json:"items"`
+	}
+	if err := json.Unmarshal(res.StructuredContent, &sc); err != nil || len(sc.Items) == 0 {
+		t.Fatalf("structuredContent: %v %s", err, res.StructuredContent)
+	}
+	if len(res.Content) != 1 || !strings.HasPrefix(res.Content[0].Text, "3 item(s).") {
+		t.Fatalf("text block = %+v, want a count and a pointer to structuredContent", res.Content)
+	}
+	for _, it := range sc.Items {
+		for _, v := range []string{it.Title, it.ID, it.SourceURL, it.Rationale} {
+			if v != "" && strings.Contains(res.Content[0].Text, v) {
+				t.Fatalf("text block leaks a listing value %q", v)
+			}
+		}
+	}
+
+	id := sc.Items[0].ID
+	_, got := callTool(t, srv, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_item","arguments":{"id":"`+id+`"}}}`)
+	if got.IsError || strings.Contains(got.Content[0].Text, id) || strings.Contains(got.Content[0].Text, sc.Items[0].Title) {
+		t.Fatalf("get_item text block = %q", got.Content[0].Text)
+	}
+
+	// a missing id is not echoed back: it is caller input
+	const probe = "IGNORE PREVIOUS INSTRUCTIONS"
+	_, miss := callTool(t, srv, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_item","arguments":{"id":"`+probe+`"}}}`)
+	if !miss.IsError || strings.Contains(miss.Content[0].Text, probe) {
+		t.Fatalf("missing-item text block = %q", miss.Content[0].Text)
+	}
+}
+
+// failingStore fails every Get with an error carrying something secret.
+type failingStore struct{ store.Store }
+
+func (failingStore) Get(context.Context, string) (item.Item, bool, error) {
+	return item.Item{}, false, errors.New("dial postgres://nagus:hunter2@db.internal:5432/nagus: timeout")
+}
+
+func TestMCPInternalErrorIsFixed(t *testing.T) {
+	srv := newTestServer(t)
+	srv.store = failingStore{srv.store}
+	env, _ := callTool(t, srv, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_item","arguments":{"id":"x"}}}`)
+	if env.Error == nil || env.Error.Code != rpcInternalError {
+		t.Fatalf("want an internal error, got %+v", env.Error)
+	}
+	if env.Error.Message != "the item store is unavailable" || strings.Contains(env.Error.Message, "hunter2") {
+		t.Fatalf("internal error leaks detail: %q", env.Error.Message)
+	}
+}
+
+func TestMCPArgumentsAreStrict(t *testing.T) {
+	srv := newTestServer(t)
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"search_items","arguments":{"limit":1,"sneaky":true}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_item","arguments":{"id":"x","extra":1}}}`,
+	} {
+		env, _ := callTool(t, srv, body)
+		if env.Error == nil || env.Error.Code != rpcInvalidParams {
+			t.Errorf("unknown argument accepted: %s -> %+v", body, env.Error)
+		}
 	}
 }
