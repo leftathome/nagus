@@ -425,7 +425,7 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if b := c.brandOf(p); b != "" {
 				aspects["brand"] = b
 			}
-			if m := c.mpnOf(v); m != "" {
+			if m := c.mpnOf(p.Title, v); m != "" {
 				aspects["mpn"] = m
 			}
 			if t, err := time.Parse(time.RFC3339, p.PublishedAt); err == nil {
@@ -523,10 +523,29 @@ func (c *Connector) brandOf(p product) string {
 	return ""
 }
 
-// mpnOf returns the manufacturer part number from the variant SKU, with any
-// configured condition suffix stripped, or "" when this store's SKUs are not
-// MPNs.
-func (c *Connector) mpnOf(v variant) string {
+// mpnOf returns the manufacturer part number a store's SKU embeds, or "" when
+// this store's SKUs are not MPNs or none can be found.
+//
+// A SKU is not an MPN even when it starts with one (quark QUARK-02
+// measurement, 2026-09-24): serverpartdeals SKUs carry seller segments after
+// the part number -- `HUS726040AL4215-DELL_DELLG13`, `00JHTD_DELLG14_SR_12`,
+// `KHK6XLSE960G-DELL_DELLG14_CONVERT_SR` -- so sending the whole SKU fragmented
+// one drive into many quark "products" (266 keys over 61 base part numbers on
+// the live store) and gave text matching nothing a title could ever contain.
+// The part number is, in order:
+//
+//  1. the longest part-number-shaped token of the product TITLE that the SKU
+//     starts with (followed by end, '-' or '_') -- this keeps a hyphenated
+//     manufacturer number whole (`WD60EFRX-68MYMN1`) whenever the title
+//     states it;
+//  2. else the SKU's leading segment before the first '-' or '_', if it is
+//     part-number-shaped (>= 6 chars with a letter and a digit): Dell-branded
+//     titles name Dell's own number (`06WR5M`) while the SKU leads with the
+//     maker's (`KHK6XLSE960G`);
+//  3. else nothing -- no key is better than a wrong one.
+//
+// Configured condition suffixes (_SR/_MR/_NB) are stripped first.
+func (c *Connector) mpnOf(title string, v variant) string {
 	if !c.cfg.SKUIsMPN {
 		return ""
 	}
@@ -543,7 +562,57 @@ func (c *Connector) mpnOf(v variant) string {
 			break
 		}
 	}
-	return strings.TrimSpace(sku)
+	sku = strings.ToUpper(strings.TrimSpace(sku))
+	best := ""
+	for _, t := range partNumberTokens(title) {
+		if len(t) <= len(best) || !strings.HasPrefix(sku, t) {
+			continue
+		}
+		if len(sku) == len(t) || sku[len(t)] == '-' || sku[len(t)] == '_' {
+			best = t
+		}
+	}
+	if best != "" {
+		return best
+	}
+	lead := sku
+	if i := strings.IndexAny(sku, "-_"); i >= 0 {
+		lead = sku[:i]
+	}
+	if len(lead) >= 6 && partNumberShaped(lead) {
+		return lead
+	}
+	return ""
+}
+
+// partNumberTokens splits a title on whitespace and punctuation, keeping '-'
+// inside a token, and returns the upper-cased tokens that look like part
+// numbers.
+func partNumberTokens(title string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(strings.ToUpper(title), func(r rune) bool {
+		return !(r == '-' || r == '.' || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	}) {
+		f = strings.Trim(f, ".-")
+		if len(f) >= 5 && partNumberShaped(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// partNumberShaped reports a string holding both a letter and a digit.
+func partNumberShaped(s string) bool {
+	var letter, digit bool
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+			letter = true
+		case r >= '0' && r <= '9':
+			digit = true
+		}
+	}
+	return letter && digit
 }
 
 // cutPrefixFold is strings.CutPrefix with case-insensitive matching.
