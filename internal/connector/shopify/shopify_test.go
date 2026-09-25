@@ -507,7 +507,7 @@ func TestTruncationAtThePageCapIsReported(t *testing.T) {
 
 	var logged []string
 	c := NewConnector(Config{
-		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3,
+		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3, PageDelay: -1,
 		Now:  func() time.Time { return fixedNow },
 		Logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
 	})
@@ -532,7 +532,7 @@ func TestNoTruncationWarningWhenTheCatalogueEnds(t *testing.T) {
 	defer srv.Close()
 	var logged []string
 	c := NewConnector(Config{
-		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3,
+		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 3, PageDelay: -1,
 		Now:  func() time.Time { return fixedNow },
 		Logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
 	})
@@ -647,7 +647,7 @@ func TestFetchCompleteReportsTruncation(t *testing.T) {
 		_, _ = w.Write([]byte(full)) // always full -> never ends
 	}))
 	defer srv.Close()
-	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 2, Now: func() time.Time { return fixedNow }})
+	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 2, PageDelay: -1, Now: func() time.Time { return fixedNow }})
 	if _, err := c.Fetch(context.Background()); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
