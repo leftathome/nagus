@@ -198,7 +198,14 @@ of different geography routes to adjudication. What changed for nagus:
   openclaw/Telegram path). An explicit "NV" in a title counts as wine
   evidence at extract only beside another wine cue (sparkling and
   house-style words, a colour or a varietal) -- NV is also a US state and a
-  company suffix. No nagus code groups or compares by product id today
+  company suffix. A fortified-wine style (port, sherry, madeira, marsala and
+  their styles) is wine evidence on its own, except beside a cask word or on
+  a spirit or beer title ("Sherry Cask Bourbon"). Culinary products
+  (vinegar, cooking wine, cake, cheese, jelly, olive oil; and a fortified
+  word on a sauce, jam, trifle mix, fudge or chocolate) are classified
+  not-wine/CULINARY (`wine.ErrCulinary`), not merchandise: they are reserved
+  for a possible future grocery category, which must claim them before the
+  ingest's out-of-category purge deletes them. No nagus code groups or compares by product id today
   (audited 2026-09-25: `offer.Query.ProductID` has no caller outside the
   stores' own tests; product ids only reach rows); the key is exposed so
   that no consumer has to.

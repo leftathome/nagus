@@ -178,6 +178,9 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			if errors.Is(err, listing.ErrNotInCategory) && i.Store != nil {
 				// An item stored before the category rule existed must not
 				// outlive it: Shopify sources have no freshness purge.
+				// This includes the wine extractor's culinary rejections
+				// (wine.ErrCulinary): a future grocery category must route
+				// those listings to itself BEFORE this purge drops them.
 				if derr := i.Store.Delete(ctx, offer.DeterministicID(r.SourceID, r.SourceKey)); derr != nil {
 					i.logf("ingest: removing out-of-category item %s: %v", r.SourceKey, derr)
 				}

@@ -70,6 +70,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that says NV on a product quark calls `vintage` gets no key
   (`conflict_nv`). A year right after disgorged, bottled, Est., since or
   anniversary is not taken as the vintage.
+- **Fortified wine is wine; culinary is its own rejection.** Port, sherry,
+  madeira, marsala and their styles (colheita, LBV, fino, manzanilla,
+  amontillado, oloroso, PX) are wine evidence without NV -- but not beside a
+  cask word or on a spirit/beer title ("Sherry Cask Bourbon"), and "port"
+  the place or connector is set aside. Culinary products (vinegar, cooking
+  wine, cake, cheese, jelly, olive oil; a fortified word on a sauce, jam,
+  trifle mix, fudge or chocolate) are rejected as `wine.ErrCulinary`, not
+  merchandise (`wine.ErrMerchandise`): both wrap `wine.ErrNotWine` and are
+  told apart in the extract skip reason, reserved for a possible future
+  grocery category.
 
 ### Added
 

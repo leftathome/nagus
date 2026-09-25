@@ -47,6 +47,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
@@ -83,8 +84,11 @@ func (e *Extractor) Category() string {
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
+	if culinaryRe.MatchString(s.Title) {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+	}
 	if isMerchandise(s.Title) {
-		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrMerchandise)
 	}
 	text := s.Title
 	if s.Body != "" {
@@ -216,7 +220,7 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// A fortified-wine style is wine evidence on its own, NV or not (operator
 	// ruling 2026-09-25, "Port is wine"; LWIN files every one of them as
 	// "Fortified Wine", which quark loads). See fortifiedWine for the guards.
-	fortified := fortifiedWine(s.Title)
+	fortified, culinaryFortified := fortifiedWine(s.Title)
 
 	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
 	// marker, no disgorgement, no fortified style -- means merchandise the
@@ -228,6 +232,11 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
 	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged && !fortified {
+		if culinaryFortified {
+			// "Sherry Trifle Mix", "Marsala Chicken Sauce": a food made
+			// with the wine.
+			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+		}
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
@@ -289,10 +298,79 @@ var fortifiedRe = regexp.MustCompile(`(?i)\b(port|colheita|lbv|late bottled vint
 // The wine extractor rarely sees either; the tech half is defensive.
 var notWinePortRe = regexp.MustCompile(`(?i)\bport\s+(townsend|angeles|orchard|ludlow|hadlock|huron|arthur|jefferson|washington|charlotte|richey|chester|clinton|royal|elizabeth|moresby|louis|lincoln|hueneme|aransas|lavaca|isabel|st\.?\s+lucie)\b|\b(usb|usb-c|hdmi|ethernet|charging|charger|serial|audio|thunderbolt|lightning|network|power|display)\s+ports?\b`)
 
+// spiritOrBeerRe is a spirit or a beer anywhere in a title: a fortified-wine
+// word there names the cask it was finished in, or a distillery ("Sherry
+// Cask Bourbon", "Port Dundas Grain Whisky", "Sherry Barrel Imperial
+// Porter"). It only withdraws the fortified cue: a title with a vintage, a
+// varietal or a colour is judged on those ("Porter Creek Vineyards Pinot
+// Noir 2021").
+var spiritOrBeerRe = regexp.MustCompile(`(?i)\b(whisky|whiskey|scotch|bourbon|rum|gin|vodka|tequila|mezcal|brandy|cognac|armagnac|single malt|stout|porter|ale|ipa|lager|beer|cider)\b`)
+
+// CULINARY PRODUCTS are not wine and are NOT merchandise: nagus may watch
+// groceries one day, and a grocery category would claim them. The wine
+// extractor rejects them with ErrCulinary (still ErrNotWine), so logs and
+// skips count them apart from merchandise. Two lists:
+//
+//   - culinaryRe always rejects: nothing called vinegar or cheese is a
+//     bottle of wine, whatever colour or varietal the title names ("Camino
+//     Red Wine Vinegar", live on broc-cellars). Checked against the live
+//     corpus: it rejects no wine.
+//   - culinaryWordRe is words that real wine names also use ("JaM Cellars",
+//     "The Chocolate Block", "2021 Mix"): they only withdraw the fortified
+//     cue ("Sherry Trifle Mix", "Marsala Chicken Sauce").
+var culinaryRe = regexp.MustCompile(`(?i)\b(vinegar|cooking (wine|sherry)|cakes?|cheeses?|jelly|olive oil)\b`)
+
+var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?)\b`)
+
+// caskWordRe is a cask word: within two tokens of a fortified-wine word it
+// names a cask finish, not the wine ("Port Cask Finish", "Sherry Oak").
+var caskWordRe = regexp.MustCompile(`(?i)^(cask|casks|barrel|barrels|oak|wood|finish|finished)$`)
+
 // fortifiedWine reports whether a title names a fortified-wine style once
-// the English-word uses of "port" are set aside.
-func fortifiedWine(title string) bool {
-	return fortifiedRe.MatchString(notWinePortRe.ReplaceAllString(foldASCII(title), " "))
+// the English-word uses of "port" are set aside, and no cask finish, spirit
+// or beer says the word is about something else. culinary reports a
+// fortified-wine word withdrawn because the title is a food made with it.
+func fortifiedWine(title string) (fortified, culinary bool) {
+	t := notWinePortRe.ReplaceAllString(foldASCII(title), " ")
+	named := false
+	for _, m := range fortifiedRe.FindAllStringIndex(t, -1) {
+		start, end := m[0], m[1]
+		// A hyphen-joined token is not the word: "Port-a-Potty".
+		if (start > 0 && t[start-1] == '-') || (end < len(t) && t[end] == '-') {
+			continue
+		}
+		if nearCaskWord(t[:start], t[end:]) {
+			continue
+		}
+		named = true
+		break
+	}
+	switch {
+	case !named || spiritOrBeerRe.MatchString(t):
+		return false, false
+	case culinaryWordRe.MatchString(t):
+		return false, true
+	}
+	return true, false
+}
+
+// nearCaskWord reports whether one of the two tokens before or after a match
+// is a cask word.
+func nearCaskWord(before, after string) bool {
+	notWord := func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+	b, a := strings.FieldsFunc(before, notWord), strings.FieldsFunc(after, notWord)
+	if len(b) > 2 {
+		b = b[len(b)-2:]
+	}
+	if len(a) > 2 {
+		a = a[:2]
+	}
+	for _, w := range append(b, a...) {
+		if caskWordRe.MatchString(w) {
+			return true
+		}
+	}
+	return false
 }
 
 // disgorgedRe marks a disgorgement date: sparkling wine only.
@@ -637,14 +715,23 @@ func explicitNV(title string, otherWineCue bool) bool {
 	return false
 }
 
-// ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
-// pipeline records it as an extract skip.
-var ErrNotWine = fmt.Errorf("%w: not a wine (merchandise listing)", listing.ErrNotInCategory)
+// ErrNotWine rejects a listing that is not a bottle of wine. The ingest
+// pipeline records it as an extract skip (the reason is the error text) and
+// deletes any item stored under it. The two named reasons below wrap it; a
+// bare ErrNotWine is a title with no wine evidence at all.
+var ErrNotWine = fmt.Errorf("%w: not a wine", listing.ErrNotInCategory)
+
+// ErrMerchandise is a listing on the merchandise lists: a tote, a glass.
+var ErrMerchandise = fmt.Errorf("%w (merchandise)", ErrNotWine)
+
+// ErrCulinary is a culinary product: not wine, and not merchandise either
+// -- reserved for a possible future grocery category (see culinaryRe).
+var ErrCulinary = fmt.Errorf("%w (culinary; reserved for a future grocery category)", ErrNotWine)
 
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|olive oil)\b|^\s*shipping\b)`)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?)\b|^\s*shipping\b)`)
 
 // packagingMerchRe are words that name merchandise ON THEIR OWN ("Champagne
 // Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine

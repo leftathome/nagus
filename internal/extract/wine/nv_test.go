@@ -229,3 +229,91 @@ func TestExtract_DeclaredWineTypeIsEvidence(t *testing.T) {
 		}
 	}
 }
+
+// A fortified-wine word on a cask-finished spirit or beer is not wine
+// evidence (nagus !28 port review F-1); a hyphen-joined token is not the
+// word (F-3). These are not culinary.
+func TestExtract_CaskFinishedSpiritsAreNotWine(t *testing.T) {
+	for _, title := range []string{
+		"Port Cask Finish Single Malt Scotch",
+		"Sherry Cask Bourbon",
+		"Glenmorangie Quinta Ruban Port Cask",
+		"Balvenie DoubleWood 12 Sherry Cask",
+		"Angel's Envy Port Barrel Finished Bourbon",
+		"Madeira Cask Finish Rum",
+		"Oloroso Sherry Cask Whisky",
+		"Sherry Oak 12 Year Macallan",
+		"Port Dundas Grain Whisky",
+		"Port Barrel Aged Stout",
+		"Sherry Barrel Imperial Porter",
+		// A cask word alone.
+		"Tawny Port Wood Finish",
+		// F-3: hyphen-joined.
+		"Port-a-Potty",
+		"port-a-john rental",
+	} {
+		_, err := New().Extract(context.Background(), sanitized(title, ""))
+		if !errors.Is(err, ErrNotWine) || errors.Is(err, ErrCulinary) {
+			t.Errorf("%q: err = %v, want ErrNotWine and not ErrCulinary", title, err)
+		}
+	}
+	// The guards withdraw only the fortified cue: other evidence stands.
+	for _, title := range []string{
+		"Porter Creek Vineyards Pinot Noir 2021",
+		"Port",
+		"PX",
+	} {
+		if _, err := New().Extract(context.Background(), sanitized(title, "")); err != nil {
+			t.Errorf("%q: %v, want wine", title, err)
+		}
+	}
+}
+
+// Culinary products are not wine and not merchandise: they fail with
+// ErrCulinary (reserved for a future grocery category; nagus !28 port
+// review F-2), which is still ErrNotWine but never ErrMerchandise.
+func TestExtract_CulinaryIsItsOwnReason(t *testing.T) {
+	for _, title := range []string{
+		// A fortified word on food.
+		"Sherry Vinegar",
+		"Cooking Sherry",
+		"Marsala Cooking Wine",
+		"Marsala Chicken Sauce",
+		"Madeira Cake",
+		"Madeira Wine Cake",
+		"Sherry Trifle Mix",
+		"Port Wine Cheese",
+		"Port Wine Jelly",
+		"Port Fig Jam",
+		"Port Fudge",
+		"Sherry Chocolates",
+		// The always-reject culinary list: a colour, varietal or year in
+		// the title does not rescue it ("Camino Red Wine Vinegar" is live
+		// on broc-cellars).
+		"Camino Red Wine Vinegar",
+		"Zinfandel Cooking Wine",
+		"Chardonnay Cake",
+		"Cabernet Sauvignon Cheese",
+		"Merlot Wine Jelly",
+		"2025 Fox Hill Olive Oil",
+		"2024 Turley Estate Olive Oil",
+	} {
+		_, err := New().Extract(context.Background(), sanitized(title, ""))
+		if !errors.Is(err, ErrCulinary) || !errors.Is(err, ErrNotWine) || errors.Is(err, ErrMerchandise) {
+			t.Errorf("%q: err = %v, want ErrCulinary (and ErrNotWine, not ErrMerchandise)", title, err)
+		}
+	}
+	// Merchandise keeps its own reason.
+	for _, title := range []string{"Newport Wine Tote", "Port Glass Set of 2", "Port Sipper", "Champagne Flute"} {
+		_, err := New().Extract(context.Background(), sanitized(title, ""))
+		if !errors.Is(err, ErrMerchandise) || errors.Is(err, ErrCulinary) {
+			t.Errorf("%q: err = %v, want ErrMerchandise, not ErrCulinary", title, err)
+		}
+	}
+	// Words real wine names use are not culinary on their own.
+	for _, title := range []string{"JaM Cellars Butter Chardonnay 2022", "The Chocolate Block 2021", "6PK Gift Box Wood MRW, 2021 Mix"} {
+		if _, err := New().Extract(context.Background(), sanitized(title, "")); err != nil {
+			t.Errorf("%q: %v, want wine", title, err)
+		}
+	}
+}
