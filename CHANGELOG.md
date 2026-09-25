@@ -110,8 +110,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "Jelly Roll Zinfandel", "Vinegar Hill Syrah" and "Mustard Seed Red 2020"
   are wine. A food word in a producer name ("Butter Chardonnay by JaM",
   "JaM Cellars Butter") is not a food. A year never rescues one, from the
-  title or the body. A food sold in a bundle ("Spritz Pack w/ ... Fruit
-  Syrup") is merchandise, and mead ("Honey Wine") plain not-wine.
+  title or the body. A food in a wine pack or bundle ("Spritz Pack w/ ...
+  Fruit Syrup") is merchandise; a food set or duo stays culinary; mead
+  ("Honey Wine") is plain not-wine.
 - **Port styles and guards** (nagus-tmr). Oak or wood before a port word is
   a style ("Oak Aged Port", "Wood Port"), and after a named style too ("Old
   Oak Tawny Port", "Tawny Port, oak aged"); cask, barrel and finish still
@@ -127,7 +128,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unless a bottle size or an explicit pack of wine is in the title -- when
   the object is the title's head noun ("Charm City Syrah 2020" is wine).
   Tees, socks, stickers, magnets, mugs, perfume, sweaters, posters, prints,
-  paddles and jerseys (not New Jersey) are merchandise.
+  paddles and jerseys (not New Jersey) follow the same head-noun rule:
+  "Sancerre Tee" is merchandise, "Sweater Weather Red Blend 2022" wine.
 - **Bare "Cabernet" is a varietal** (red), after every other grape.
 
 ### Fixed

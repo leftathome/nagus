@@ -809,13 +809,7 @@ var ErrCulinary = fmt.Errorf("%w (culinary; reserved for a future grocery catego
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|tees?|socks?|stickers?|magnets?|mugs?|perfumes?|sweaters?|posters?|prints?|paddles?)\b|^\s*shipping\b)`)
-
-// jerseyRe is a jersey, but not the state ("New Jersey Chardonnay").
-var (
-	jerseyRe    = regexp.MustCompile(`(?i)\bjerseys?\b`)
-	newJerseyRe = regexp.MustCompile(`(?i)\bnew\s+jersey\b`)
-)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?)\b|^\s*shipping\b)`)
 
 // packagingMerchRe are words that name merchandise ON THEIR OWN ("Champagne
 // Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine
@@ -829,7 +823,9 @@ var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|buckets?|sab(er|
 // is merchandise whatever varietal, year or pack count the title carries --
 // unlike packagingMerchRe -- unless a bottle size ("750ml", "1.5L",
 // "Magnum") or an explicit wine pack ("6 Bottles", "Wine Set") says it is
-// wine. Followed by a wine cue it is a name ("Charm City Syrah 2020").
+// wine. Followed by a wine cue it is a name ("Charm City Syrah 2020",
+// "Sweater Weather Red Blend 2022", "Tee Time Chardonnay 2021"): so the
+// clothes, mugs, stickers and prints are object nouns too, not keywords.
 
 // bottleCueRe is a bottle size or an explicit pack of wine.
 var bottleCueRe = regexp.MustCompile(`(?i)\b(\d{3,4}\s*ml|\d+(\.\d+)?\s*(l|liter|litre)s?|magnums?|jeroboams?|half[ -]bottles?|\d+\s*-?\s*(bottles?|btls?)|wine\s+(packs?|sets?|bundles?|cases?|collection|trio|duo)|(packs?|cases?|sets?)\s+of\s+\d+\s+(bottles|wines))\b`)
@@ -845,7 +841,7 @@ var packCountRe = regexp.MustCompile(`(?i)\b\d+\s*-?\s*(pk|pack)s?\b`)
 // Oil"). packagingMerchRe wins only when the title carries no pack count, no
 // vintage year and no varietal -- a gift box of wine is wine.
 func isMerchandise(title string) bool {
-	if merchandiseRe.MatchString(title) || (jerseyRe.MatchString(title) && !newJerseyRe.MatchString(title)) {
+	if merchandiseRe.MatchString(title) {
 		return true
 	}
 	if objectHead(title) && !bottleCueRe.MatchString(title) {

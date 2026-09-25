@@ -67,8 +67,9 @@ func declaredNonWine(aspects map[string]string, title string) error {
 // year is not one ("Apricot Jam 2021"). A conjunction between them ("Honey
 // and Port") means the wine is not the head. A food word that is plainly
 // part of a producer name -- after "by", or before Cellars, Vineyards,
-// Winery, Wines, Estate or Family ("Butter Chardonnay by JaM", "JaM Cellars
-// Butter") -- is not a food at all.
+// Winery or Wines ("Butter Chardonnay by JaM", "JaM Cellars Butter") -- is
+// not a food at all. ("Estate" and "Family" are not in that list: "Cabernet
+// Vinegar Estate", "Cabernet Mustard Family Style" are foods.)
 //
 // A food title that is also a bundle ("Spritz Pack w/ June Taylor Seasonal
 // Fruit Syrup": a bottle and a syrup) is merchandise, not culinary, so a
@@ -91,11 +92,14 @@ var (
 var conjunctions = setOfWords("and", "with", "plus", "pairing", "paired", "for")
 
 // bundleWords mark a title as several products sold together.
-var bundleWords = setOfWords("pack", "packs", "bundle", "bundles", "set", "sets", "kit", "kits", "duo", "trio", "w", "with")
+// Only a PACK or BUNDLE (a wine bundle: "Spritz Pack w/ ... Syrup"); a food
+// "set", "duo" or "with" ("Olive Oil & Vinegar Set", "Cheese with Truffle")
+// stays culinary, for a future grocery category to claim.
+var bundleWords = setOfWords("pack", "packs", "bundle", "bundles")
 
 // producerAfter are words that, right after a food noun, make it part of a
 // producer's name ("JaM Cellars").
-var producerAfter = setOfWords("cellars", "cellar", "vineyard", "vineyards", "winery", "wines", "estate", "family")
+var producerAfter = setOfWords("cellars", "cellar", "vineyard", "vineyards", "winery", "wines")
 
 // meadWords: honey wine is mead, not grape wine and not a food.
 var meadWords = setOfWords("mead", "meads", "hydromel", "metheglin", "melomel")
@@ -210,14 +214,17 @@ func phraseAt(words []string, i int, phrase string) bool {
 }
 
 // objectNouns are objects no bottle of wine is sold as. See isMerchandise.
-var objectNouns = setOfWords("towel", "towels", "charm", "charms", "soap", "soaps", "flute", "flutes", "tool", "tools")
+var objectNouns = setOfWords("towel", "towels", "charm", "charms", "soap", "soaps", "flute", "flutes", "tool", "tools",
+	"tee", "tees", "sock", "socks", "sticker", "stickers", "magnet", "magnets", "mug", "mugs", "perfume",
+	"perfumes", "sweater", "sweaters", "poster", "posters", "print", "prints", "paddle", "paddles",
+	"jersey", "jerseys")
 
 // objectHead reports an object noun that is the title's head ("Merlot Tea
 // Towel"), not a name word before the wine ("Charm City Syrah 2020", "Tool
 // Shed Red 2019").
 func objectHead(title string) bool {
 	found, head := nounHead(normalizeWords(title), func(words []string, i int) int {
-		if objectNouns[words[i]] {
+		if objectNouns[words[i]] && !(words[i] == "jersey" && i > 0 && words[i-1] == "new") {
 			return 1
 		}
 		return 0

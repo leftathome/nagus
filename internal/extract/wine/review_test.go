@@ -187,10 +187,56 @@ func TestReview_DeclaredBothAndBundles(t *testing.T) {
 	if got := declaredNonWine(both, "June Taylor Mission Fig + Angelica Jam"); got != ErrCulinary {
 		t.Errorf("fig jam: %v, want ErrCulinary", got)
 	}
-	for _, title := range []string{"Spritz Pack w/ June Taylor Seasonal Fruit Syrup", "Cheese and Port Gift Set", "Honey with Chardonnay", "Olive Oil Duo"} {
+	for _, title := range []string{"Spritz Pack w/ June Taylor Seasonal Fruit Syrup", "Olive Oil Bundle", "Honey 3 Pack"} {
 		err := extractErr(title)
 		if !errors.Is(err, ErrMerchandise) || errors.Is(err, ErrCulinary) {
 			t.Errorf("%q: %v, want ErrMerchandise (a bundle)", title, err)
+		}
+	}
+}
+
+// Re-review (72b3ad2): a food "set", "duo" or "with" stays culinary, and
+// Estate/Family after a food noun are not a producer name.
+func TestReview2_CulinaryStaysCulinary(t *testing.T) {
+	for _, title := range []string{
+		"Olive Oil with Rosemary", "Cheese with Truffle", "Olive Oil & Vinegar Set", "Cheese and Port Gift Set",
+		"Honey with Chardonnay", "Olive Oil Duo", "Cabernet Vinegar Estate", "Cabernet Mustard Family Style",
+	} {
+		err := extractErr(title)
+		if !errors.Is(err, ErrCulinary) {
+			t.Errorf("%q: %v, want ErrCulinary", title, err)
+		}
+	}
+}
+
+// Re-review (72b3ad2): clothes, mugs, stickers, prints and the rest are
+// object nouns under the head-noun rule, not title-wide keywords: real wine
+// names use them.
+func TestReview2_ObjectWordsInWineNames(t *testing.T) {
+	for _, title := range []string{
+		"Sweater Weather Red Blend 2022", "Tee Time Chardonnay 2021", "Paddle Creek Pinot Noir 2019",
+		"Mug Shot Cabernet 2019", "Paw Prints Merlot 2020", "Poster Boy Red 2020", "Red Socks Zinfandel 2020",
+		"Sticker Shock Red 2020", "Magnet Rose 2023", "Perfume Pinot Gris 2022", "New Jersey Chardonnay",
+		"2021 Riesling from New Jersey", // the state, not a jersey
+	} {
+		if err := extractErr(title); err != nil {
+			t.Errorf("%q: %v, want wine", title, err)
+		}
+	}
+	for _, title := range []string{
+		"Sancerre Tee", "Barbaresco Socks", "Pomerol Sticker", "Sancerre Magnet", "Margaux Perfume",
+		"Brunello Cucinelli Cashmere Sweater", "Barolo Coffee Mug", "Ventoux Cycling Jersey",
+		"Santorini Sunset Poster", "Willamette Valley Red Barn Print", "Sancerre Pickleball Paddle",
+		"Merlot Tea Towel 2020", "Cabernet 2019 Coffee Mug",
+	} {
+		if err := extractErr(title); !errors.Is(err, ErrMerchandise) {
+			t.Errorf("%q: %v, want ErrMerchandise", title, err)
+		}
+	}
+	// Broad names: a bowl or velvet is not a bottle in a colour.
+	for _, title := range []string{"Santorini Blue White Bowl", "Burgundy Velvet Rouge", "Bordeaux Velvet Blanc", "Napa Valley Tee Red"} {
+		if err := extractErr(title); !errors.Is(err, ErrNotWine) {
+			t.Errorf("%q: %v, want ErrNotWine", title, err)
 		}
 	}
 }

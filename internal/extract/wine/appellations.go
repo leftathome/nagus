@@ -362,7 +362,7 @@ func titleAppellations(title string) appellationEvidence {
 // clothes in a colour. noEnglish drops "red" and "white" (englishColours).
 func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 	for _, w := range words {
-		if broadMerchNouns[w] {
+		if broadMerchNouns[w] || objectNouns[w] {
 			return false
 		}
 	}
@@ -385,4 +385,5 @@ func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 var broadMerchNouns = setOfWords("cap", "caps", "pillow", "pillows", "throw", "throws", "blanket", "blankets",
 	"swatch", "swatches", "paint", "paints", "scarf", "scarves", "bag", "bags", "napkin", "napkins", "rug",
 	"rugs", "fabric", "yarn", "lipstick", "polish", "dress", "jacket", "vest", "coat", "shoes", "tie",
-	"ribbon", "balloon", "balloons", "frame", "cushion", "cushions", "curtain", "curtains", "sofa", "chair")
+	"ribbon", "balloon", "balloons", "frame", "cushion", "cushions", "curtain", "curtains", "sofa", "chair",
+	"bowl", "bowls", "velvet")
