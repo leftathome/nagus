@@ -61,6 +61,10 @@ type SourceConfig struct {
 	// catalogue, so a huge mixed store is covered completely in a few pages
 	// (nagus-bu2). See shopify.Config.Collection.
 	Collection string `json:"collection,omitempty"`
+	// Collections walks several collections in one fetch, deduped by
+	// product id; complete only when every walk is. See
+	// shopify.Config.Collections.
+	Collections []string `json:"collections,omitempty"`
 
 	// wine (per-source). WineChannel declares HOW the source ships
 	// ("producer" | "retailer") and Origin WHERE it ships from, as an ISO

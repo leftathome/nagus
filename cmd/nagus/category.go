@@ -297,8 +297,10 @@ func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, e
 	if s.Fixture == "" && s.BaseURL == "" {
 		return nil, fmt.Errorf("source %q: shopify needs baseUrl (the storefront root) or a fixture", s.Name)
 	}
-	if s.Collection != "" && !shopify.ValidCollectionHandle(s.Collection) {
-		return nil, fmt.Errorf("source %q: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", s.Name, s.Collection)
+	for _, h := range append([]string{s.Collection}, s.Collections...) {
+		if h != "" && !shopify.ValidCollectionHandle(h) {
+			return nil, fmt.Errorf("source %q: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", s.Name, h)
+		}
 	}
 	return shopify.NewConnector(shopify.Config{
 		Name:                s.Name,
@@ -310,6 +312,7 @@ func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, e
 		SKUSuffixes:         s.SKUSuffixes,
 		MaxPages:            s.MaxPages,
 		Collection:          s.Collection,
+		Collections:         s.Collections,
 		FixturePath:         s.Fixture,
 		Logf:                o.logf,
 	}), nil

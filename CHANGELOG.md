@@ -119,13 +119,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   across all of them, so the 12-page cap reached 147 of the 260 in-stock
   drives. Rows past the cap kept their pre-re-key seller-SKU hints and quark
   ids, and offer expiry was skipped on every run. A shopify source can now
-  set `collection`, which walks `/collections/<handle>/products.json`
-  instead of the whole catalogue: serverpartdeals' `all-hard-drives`
-  collection is every in-stock drive in 2 pages. The walk completes, every
-  row is re-ingested with its manufacturer-part-number hint (a changed hint
-  resets the offer's resolution, so quark re-resolves it), and expiry runs
-  again. SourceKeys and product URLs do not change. Needs the gitops value
-  `collection: all-hard-drives` on the serverpartdeals source.
+  set `collections` (a list; `collection` is a single-entry alias), which
+  walks each `/collections/<handle>/products.json` instead of the whole
+  catalogue, deduping products by id; the fetch is complete only when EVERY
+  collection's walk is. No single serverpartdeals collection covers the
+  drives: `all-hard-drives` (260) misses the 7 in-stock drives typed
+  "HDDs > ..." (live offers today), which only `hard-drives` (266) holds,
+  and `hard-drives` misses one that only `all-hard-drives` holds; together
+  they are 267 products, every in-stock drive (measured 2026-09-25), in 4
+  pages. Every row is re-ingested with its manufacturer-part-number hint (a
+  changed hint resets the offer's resolution, so quark re-resolves it), and
+  expiry runs again. SourceKeys and product URLs do not change. Needs the
+  gitops value `collections: [all-hard-drives, hard-drives]` on the
+  serverpartdeals source.
+- **An empty collection is never a complete walk.** A collection that
+  returns no products on page 1 (emptied, hidden or renamed: Shopify
+  answers an unknown handle with an empty list) makes the fetch incomplete
+  and logs a warning, so it cannot expire every offer the source holds.
+- **A failed Shopify fetch resets completeness** at its start, as commerce7
+  and vinoshipper do, so a fetch that errors part-way never leaves the
+  previous run's "complete" standing.
 - **Shopify fetches pace themselves**: a 3s courtesy pause before every page
   after the first (`shopify.Config.PageDelay`), so a multi-page walk is a
   trickle, not the burst that trips a store's limiter. One-page stores never

@@ -80,10 +80,23 @@ func TestSinglePageStoreNeverWaits(t *testing.T) {
 func TestPageDelayIsConfigurableAndCancellable(t *testing.T) {
 	srv, hits := pagedStore(t, 5, nil)
 	var waited []time.Duration
+	cancel := false
 	c := NewConnector(Config{
 		Name: "s", BaseURL: srv.URL, Limit: 2, MaxPages: 10, PageDelay: 9 * time.Second, Now: func() time.Time { return fixedNow },
-		Sleep: func(_ context.Context, d time.Duration) error { waited = append(waited, d); return context.Canceled },
+		Sleep: func(_ context.Context, d time.Duration) error {
+			waited = append(waited, d)
+			if cancel {
+				return context.Canceled
+			}
+			return nil
+		},
 	})
+	// A first, complete walk: FetchComplete is true going into the next one,
+	// so the assertion below proves the aborted walk RESET it.
+	if _, err := c.Fetch(context.Background()); err != nil || !c.FetchComplete() {
+		t.Fatalf("first walk: err=%v complete=%v, want a complete walk", err, c.FetchComplete())
+	}
+	*hits, waited, cancel = 0, nil, true
 	if _, err := c.Fetch(context.Background()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled from the paced wait", err)
 	}
@@ -91,7 +104,7 @@ func TestPageDelayIsConfigurableAndCancellable(t *testing.T) {
 		t.Fatalf("hits=%d waited=%v, want one page then one 9s pause", *hits, waited)
 	}
 	if c.FetchComplete() {
-		t.Fatal("an aborted walk must not report complete")
+		t.Fatal("an aborted walk must not report complete, even after a complete one")
 	}
 }
 

@@ -38,8 +38,9 @@
 // and never lets offer expiry run. serverpartdeals is the case in point: more
 // than 10,000 products, hard drives scattered across every page. Rather than
 // walking 40+ pages an hour, such a store is pointed at the storefront
-// collection holding the category (Config.Collection), which Shopify serves
-// through the same products.json shape (nagus-bu2).
+// collections holding the category (Config.Collections), which Shopify
+// serves through the same products.json shape (nagus-bu2). One collection is
+// often not enough: serverpartdeals needs two to cover every drive.
 //
 // # Rate limiting
 //
@@ -98,8 +99,9 @@ const (
 	DefaultCurrency = "USD"
 	// DefaultPageDelay is the courtesy pause between successive pages of one
 	// fetch. A burst of back-to-back pages is what trips serverpartdeals'
-	// limiter; 3s keeps a 30-page walk under two minutes while staying far
-	// below any per-second budget. A single-page store never waits.
+	// limiter; at 3s a 30-page walk spends 29 x 3s = 87s pausing (plus the
+	// requests themselves), far below any per-second budget. A single-page
+	// store never waits.
 	DefaultPageDelay = 3 * time.Second
 	// DefaultUserAgent identifies the poller politely.
 	DefaultUserAgent = "nagus/0.2 (+https://github.com/leftathome/nagus)"
@@ -139,9 +141,18 @@ type Config struct {
 	// want is walked COMPLETELY and cheaply (nagus-bu2): serverpartdeals has
 	// more than 10,000 products, 40+ pages, but its "all-hard-drives"
 	// collection is every in-stock hard drive in 2 pages (measured
-	// 2026-09-25). The allow-filter still applies on top. A handle is a
-	// Shopify slug: lowercase letters, digits and hyphens only.
+	// 2026-09-25) -- except the "HDDs > ..." drives; see Collections, of
+	// which this is a single-entry alias. The allow-filter still applies on
+	// top. A handle is a Shopify slug: lowercase letters, digits and hyphens
+	// only.
 	Collection string
+	// Collections walks several collections in one fetch, for a category a
+	// single collection does not cover: serverpartdeals files 7 in-stock
+	// drives typed "HDDs > ..." only under "hard-drives", and 1 only under
+	// "all-hard-drives" (measured 2026-09-25). Products are deduped by id
+	// across collections, and the fetch is complete only when EVERY
+	// collection's walk is. Collection, if also set, is walked first.
+	Collections []string
 	// IncludeUnavailable emits variants with available=false. Default false:
 	// an out-of-stock drive is not an actionable deal, and surfacing it as one
 	// is noise.
@@ -281,6 +292,11 @@ func (c *Connector) SourceID() string {
 func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	now := c.cfg.Now()
 	var raws []listing.Raw
+	// A fetch that fails part-way must not leave the PREVIOUS run's
+	// "complete" standing (commerce7 and vinoshipper reset it the same way).
+	c.mu.Lock()
+	c.lastComplete = false
+	c.mu.Unlock()
 
 	if c.cfg.FixturePath != "" {
 		data, err := os.ReadFile(c.cfg.FixturePath)
@@ -297,54 +313,119 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	if c.cfg.BaseURL == "" {
 		return nil, errors.New("shopify: no base url configured")
 	}
-	if c.cfg.Collection != "" && !ValidCollectionHandle(c.cfg.Collection) {
-		return nil, fmt.Errorf("shopify: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", c.cfg.Collection)
+	walks := c.walks()
+	for _, h := range walks {
+		if h != "" && !ValidCollectionHandle(h) {
+			return nil, fmt.Errorf("shopify: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", h)
+		}
 	}
-	// complete records whether we walked the catalogue to its end. Exhausting
-	// MaxPages while the last page was still FULL means there is more inventory
-	// we did not fetch -- and a bounded fetch that says nothing is the worst kind
-	// of bug, because partial coverage is indistinguishable from full coverage in
-	// the output. So the cap is reported, never silent.
+	// The run is complete only if EVERY walk reached its end. A product in
+	// more than one collection is emitted once (seen, by product id).
+	complete := true
+	seen := map[int64]bool{}
+	requested := false
+	for _, h := range walks {
+		r, ok, err := c.walk(ctx, h, now, seen, &requested)
+		if err != nil {
+			return nil, err
+		}
+		raws = append(raws, r...)
+		complete = complete && ok
+	}
+	c.mu.Lock()
+	c.lastComplete = complete
+	c.mu.Unlock()
+	return raws, nil
+}
+
+// walks lists the feeds one Fetch reads: each configured collection once, in
+// order, or "" for the whole catalogue.
+func (c *Connector) walks() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, h := range append([]string{c.cfg.Collection}, c.cfg.Collections...) {
+		if h = strings.TrimSpace(h); h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+// walk pages through one feed (a collection, or the catalogue for "") and
+// reports whether it reached the feed's end. requested tracks whether any
+// page has been fetched in this Fetch, so the courtesy pause also separates
+// the last page of one collection from the first of the next.
+//
+// complete records whether we walked the feed to its end. Exhausting MaxPages
+// while the last page was still FULL means there is more inventory we did not
+// fetch -- and a bounded fetch that says nothing is the worst kind of bug,
+// because partial coverage is indistinguishable from full coverage in the
+// output. So the cap is reported, never silent.
+func (c *Connector) walk(ctx context.Context, handle string, now time.Time, seen map[int64]bool, requested *bool) ([]listing.Raw, bool, error) {
+	var raws []listing.Raw
 	complete := false
 	products := 0
 	for page := 1; page <= c.cfg.MaxPages; page++ {
-		if page > 1 && c.cfg.PageDelay > 0 {
+		if *requested && c.cfg.PageDelay > 0 {
 			// Courtesy pacing: never fetch pages back to back.
 			if err := c.cfg.Sleep(ctx, c.cfg.PageDelay); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
-		data, err := c.fetchPageWithRetry(ctx, page)
+		*requested = true
+		data, err := c.fetchPageWithRetry(ctx, handle, page)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		prods, err := decodeProducts(data)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if len(prods) == 0 {
+			if page == 1 && handle != "" {
+				// An EMPTY collection is not an empty store: the collection
+				// was emptied, hidden or renamed (Shopify answers an unknown
+				// handle with an empty list, not a 404). Calling that
+				// complete would expire every offer the source holds.
+				c.logf("shopify %s: collection %q returned NO products on page 1 -- treating the fetch as incomplete (offer expiry skipped); check that the collection still exists and is published",
+					c.SourceID(), handle)
+				return raws, false, nil
+			}
 			complete = true
 			break
 		}
 		products += len(prods)
-		raws = append(raws, c.mapProducts(prods, now)...)
+		fresh := prods[:0:0]
+		for _, p := range prods {
+			if p.ID != 0 && seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			fresh = append(fresh, p)
+		}
+		raws = append(raws, c.mapProducts(fresh, now)...)
 		if len(prods) < c.cfg.Limit {
 			// Short page: this was the last one.
 			complete = true
 			break
 		}
 	}
-	c.mu.Lock()
-	c.lastComplete = complete
-	c.mu.Unlock()
 	if !complete {
 		// products is what the store returned; raws is what survived the
 		// allow-filter and availability as per-variant listings. Reporting
 		// the second as "products" understated the walk (nagus-bu2).
-		c.logf("shopify %s: TRUNCATED at the %d-page cap (%d store products read, %d listings kept, last page full) -- products past the cap are never refreshed and offer expiry is skipped; raise maxPages above the store's page count",
-			c.SourceID(), c.cfg.MaxPages, products, len(raws))
+		feed := "catalogue"
+		if handle != "" {
+			feed = "collection " + strconv.Quote(handle)
+		}
+		c.logf("shopify %s: %s TRUNCATED at the %d-page cap (%d store products read, %d listings kept, last page full) -- products past the cap are never refreshed and offer expiry is skipped; raise maxPages above the store's page count",
+			c.SourceID(), feed, c.cfg.MaxPages, products, len(raws))
 	}
-	return raws, nil
+	return raws, complete, nil
 }
 
 // fetchPageWithRetry retries a rate-limited page, waiting as long as the SERVER
@@ -356,10 +437,10 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 // shutdown is not blocked by a sleeping fetch. Errors other than rate limiting
 // are returned immediately -- retrying a 404 or a decode failure just delays the
 // same answer.
-func (c *Connector) fetchPageWithRetry(ctx context.Context, page int) ([]byte, error) {
+func (c *Connector) fetchPageWithRetry(ctx context.Context, handle string, page int) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.cfg.MaxRetries; attempt++ {
-		data, wait, err := c.fetchPageOnce(ctx, page)
+		data, wait, err := c.fetchPageOnce(ctx, handle, page)
 		if err == nil {
 			return data, nil
 		}
@@ -398,10 +479,10 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 // fetchPageOnce returns the body, or on a 429 the server's requested wait.
-func (c *Connector) fetchPageOnce(ctx context.Context, page int) ([]byte, time.Duration, error) {
+func (c *Connector) fetchPageOnce(ctx context.Context, handle string, page int) ([]byte, time.Duration, error) {
 	path := ProductsPath
-	if c.cfg.Collection != "" {
-		path = "/collections/" + c.cfg.Collection + ProductsPath
+	if handle != "" {
+		path = "/collections/" + handle + ProductsPath
 	}
 	url := fmt.Sprintf("%s%s?limit=%d&page=%d", c.cfg.BaseURL, path, c.cfg.Limit, page)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
