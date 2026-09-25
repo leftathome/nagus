@@ -6,6 +6,81 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Deploy quark with its LWIN catalog first** (quark QUARK-04: chart 0.6.0,
+  `catalogs.lwin.url` set, first load complete). This release stops resolving
+  wine identity in nagus; until quark answers wine name hints, opted-in wine
+  offers are recorded refused (quark before QUARK-04 refuses category `wine`)
+  and are re-offered when quark's catalog generation advances.
+- **Wine items no longer carry `CanonicalID` or the `lwin_*` attributes.** Items
+  are re-extracted on each ingest, so previously stamped LWIN-11 ids disappear
+  from items within one ingest interval (720m for the producer stores). Wine
+  identity is now quark's product id on the OFFER, surfaced as a row's
+  `product_id` like every other category.
+
+- **`NAGUS_LWIN_STAMP` now renders whenever `lwin.stamp` is set**, with no
+  need for `lwin.url` (chart 0.12.0). Before, the chart emitted it only
+  inside the `lwin.url` block; the current production values set both, so
+  nothing changes there, but a values file that sets only `lwin.stamp` now
+  takes effect.
+- **Wine rows carry `comparison_key` and `vintage_status`.** A wine's
+  `product_id` is the wine across all its vintages; compare offers on
+  `comparison_key` instead (see Added).
+
+### Removed
+
+- **The LWIN resolver and mirror** (`internal/identity/lwin`,
+  `internal/refdata`, `cmd/nagus/lwin.go`) -- moved to quark (quark QUARK-04,
+  design D1), not forked. With them go the `nagus_lwin_*` metrics, the wine
+  first-ingest wait for the dictionary (nagus-0k0), and the chart's
+  `NAGUS_LWIN_URL`/`_CACHE`/`_MAX_AGE` env (chart 0.12.0; the `lwin.url`,
+  `cachePath` and `maxAge` values are retired but still accepted). nagus logs
+  once if those variables are still set.
+
+### Changed
+
+- **`lwinStamp` now selects wine sources for quark name hints.** With the
+  global `lwin.stamp` / `NAGUS_LWIN_STAMP` on, an opted-in wine source's
+  offers carry `brand` = declared producer and `text` = sanitized title (and
+  nothing else) to quark, which resolves them against its LWIN catalog and
+  returns a product id only for an auto-band match (new route `fuzzy`;
+  `adjudicate` records refused). The same three sources that stamped before
+  are identified now. `pipeline.Ingester.NameHintProducer` carries it. The
+  hint is built from what the glovebox gate passed (the sanitized title and
+  producer); when the gate does not pass a listing -- refused, or glovebox
+  down -- the offer keeps the hint and resolution it already had, so an
+  outage no longer resets resolved wine offers.
+- **Vintage-aware comparison key** (`offer.ComparisonKey`). quark states per
+  wine product whether its vintage matters (`vintage_mode`: `vintage`,
+  `non_vintage`, `unknown`, from the LWIN export's VINTAGE_CONFIG); nagus
+  stores it with the offer's resolution (additive `vintage_mode` column,
+  Postgres `ADD COLUMN IF NOT EXISTS`, SQLite `table_info`) and keys
+  comparisons on (product, vintage) for vintage wines, on the product alone
+  for non-vintage blends (Bollinger Special Cuvee "NV" and "disgorged 2019"
+  are one thing to compare; La Grande Annee 2014 and 2015 are not), and
+  gives a vintage wine listed with no year no key at all. `unknown` behaves
+  as `vintage` unless the title says NV. Rows expose `comparison_key` and
+  `vintage_status`. An explicit NV marker is wine evidence at extract
+  (attribute `nv`) only beside another wine cue (brut, cuvee, champagne,
+  cremant, cava, prosecco, sparkling, rose, blanc de blancs/noirs, or a
+  colour or varietal), never as a state after a city (", NV") or a company
+  suffix ("N.V. Beer"); the merchandise list gains key chains, foil cutters,
+  stoppers, gift boxes, pickup fees, shipping charges and olive oil. A title
+  that says NV on a product quark calls `vintage` gets no key
+  (`conflict_nv`). A year right after disgorged, bottled, Est., since or
+  anniversary is not taken as the vintage.
+- **Fortified wine is wine; culinary is its own rejection.** Port, sherry,
+  madeira, marsala and their styles (colheita, LBV, fino, manzanilla,
+  amontillado, oloroso, PX) are wine evidence without NV -- but not beside a
+  cask word or on a spirit/beer title ("Sherry Cask Bourbon"), and "port"
+  the place or connector is set aside. Culinary products (vinegar, cooking
+  wine, cake, cheese, jelly, olive oil; a fortified word on a sauce, jam,
+  trifle mix, fudge or chocolate) are rejected as `wine.ErrCulinary`, not
+  merchandise (`wine.ErrMerchandise`): both wrap `wine.ErrNotWine` and are
+  told apart in the extract skip reason, reserved for a possible future
+  grocery category.
+
 ### Added
 
 - **Title text hints for quark** (quark QUARK-02). A source may set

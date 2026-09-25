@@ -169,6 +169,12 @@ type Resolution struct {
 	// Generation is the catalog generation quark resolved under. A refusal
 	// under generation N is worth re-offering once quark reports N+1.
 	Generation int64
+	// VintageMode is quark's catalog statement, for a resolved WINE product,
+	// of whether its vintage is part of what the wine is: "vintage",
+	// "non_vintage" or "unknown" ("" when quark said nothing, as for every
+	// non-wine product). See ComparisonKey. Reset with the rest of the
+	// resolution when the hint changes.
+	VintageMode string
 	// At is when the answer was recorded.
 	At time.Time
 }

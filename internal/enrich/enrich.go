@@ -255,19 +255,22 @@ func (e *Enricher) resolveBatch(ctx context.Context, all []offer.Offer, retry bo
 	for i, r := range resp.Results {
 		stamp := offer.Resolution{Generation: resp.CatalogGeneration, At: at}
 		switch r.Route {
-		case quark.RouteExact, quark.RouteMinted, quark.RouteText:
+		case quark.RouteExact, quark.RouteMinted, quark.RouteText, quark.RouteFuzzy:
 			if r.ProductID == "" {
 				// A resolved route without an id is a contract violation; treat
 				// the hint as not yet answered rather than record a blank id.
 				continue
 			}
 			stamp.State, stamp.ProductID = offer.ResolutionResolved, r.ProductID
+			stamp.VintageMode = r.VintageMode()
 		case quark.RouteQuarantined:
 			stamp.State = offer.ResolutionQuarantined
 		default:
-			// refused, unmatched (text named no key quark holds -- yet), or a
-			// route this client does not know: not resolved, and eligible for
-			// retry when quark's catalogue grows.
+			// refused, unmatched (text named no key quark holds -- yet),
+			// adjudicate (a wine match quark would not name; it holds the
+			// candidates for review), or a route this client does not know:
+			// not resolved, and eligible for retry when quark's catalogue
+			// grows.
 			stamp.State = offer.ResolutionRefused
 		}
 		applied, rerr := e.Offers.RecordResolution(ctx, batch[i].ID, fingerprints[i], stamp)

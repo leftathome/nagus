@@ -52,12 +52,25 @@ const (
 	RouteQuarantined = "quarantined"
 	// RouteText: the hint's text named exactly one key quark holds (QUARK-02).
 	RouteText = "text"
-	// RouteUnmatched: text named no known key, or keys of several products.
+	// RouteUnmatched: text named no known key, or keys of several products;
+	// for wine, no credible catalog name match, or quark's LWIN catalog is not
+	// loaded yet (reason catalog_not_loaded).
 	RouteUnmatched = "unmatched"
+	// RouteFuzzy: a wine name hint (producer + title) matched a catalog
+	// product in quark's AUTO band (QUARK-04). The only name route that
+	// carries a product id.
+	RouteFuzzy = "fuzzy"
+	// RouteAdjudicate: a wine name hint matched credibly but not safely
+	// enough to name; quark queued it for adjudication and returned NO id.
+	RouteAdjudicate = "adjudicate"
 )
 
 // Hint is quark's Hint wire shape. Values are untrusted listing text; quark's
 // gates, not nagus, decide what identifies a product.
+//
+// A wine NAME hint (quark QUARK-04) uses the same shape: Brand is the
+// producer the source declares, Text the sanitized listing title, and every
+// other field is empty.
 type Hint struct {
 	Category string `json:"category"`
 	Brand    string `json:"brand,omitempty"`
@@ -74,6 +87,49 @@ type Result struct {
 	Confidence int    `json:"confidence"`
 	Standing   string `json:"standing,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+	// Specs are the resolved product's authoritative (catalog) facts. quark
+	// returns every free-text field inside an untrusted-data envelope, which
+	// is why Key and Value are objects. nagus reads one of them today:
+	// VintageMode.
+	Specs []Spec `json:"specs,omitempty"`
+}
+
+// Spec is one of a resolution's catalog facts.
+type Spec struct {
+	Key   Untrusted `json:"key"`
+	Value Untrusted `json:"value"`
+	Tier  string    `json:"tier"`
+}
+
+// Untrusted is quark's untrusted-data envelope (quark ADR-003).
+type Untrusted struct {
+	Value string `json:"value"`
+}
+
+// The vintage modes quark states for a wine product (QUARK-04), from the LWIN
+// export's VINTAGE_CONFIG: whether the year on the bottle is part of what the
+// wine is.
+const (
+	VintageModeVintage    = "vintage"
+	VintageModeNonVintage = "non_vintage"
+	VintageModeUnknown    = "unknown"
+)
+
+// VintageMode returns the result's catalog-tier vintage_mode, or "" when quark
+// stated none. The value is checked against the closed set, so a malformed or
+// unexpected value -- including one arriving at any tier but catalog -- is
+// never carried into nagus's comparison key.
+func (r Result) VintageMode() string {
+	for _, s := range r.Specs {
+		if s.Key.Value != "vintage_mode" || s.Tier != "catalog" {
+			continue
+		}
+		switch s.Value.Value {
+		case VintageModeVintage, VintageModeNonVintage, VintageModeUnknown:
+			return s.Value.Value
+		}
+	}
+	return ""
 }
 
 // Response is a resolve response. CatalogGeneration is 0 when quark does not

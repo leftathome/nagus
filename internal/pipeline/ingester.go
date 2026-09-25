@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/leftathome/nagus/internal/listing"
@@ -50,6 +51,19 @@ type Ingester struct {
 	// quark consumes sanitized text (spec D7) -- and only when every structured
 	// hint field is empty. Needs an evaluating ingester (a Sanitizer).
 	TextHints bool
+
+	// NameHintProducer, when set, makes this source send quark a NAME hint:
+	// the listing's producer (the raw aspect with this key) as the hint brand
+	// and its title as the hint text, REPLACING any structured hint fields.
+	// It is how wine is identified since the LWIN resolver moved to quark
+	// (quark QUARK-04): quark matches producer + title against the LWIN
+	// catalog's names and returns a product id only for an auto-band match.
+	// Structured fields are dropped rather than sent alongside because they
+	// would take quark's key path instead (a wine GTIN would mint a product
+	// beside the catalog's). As with TextHints, the title is attached only
+	// after the listing passed the sanitize gate; a listing the gate drops
+	// keeps its structured hint. Needs an evaluating ingester (a Sanitizer).
+	NameHintProducer string
 
 	// StaleAfter, when > 0, enables a post-ingest freshness purge of this
 	// source's items older than the window (eBay License 8.1(b)). 0 disables it.
@@ -102,7 +116,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		var san listing.Sanitized
 		var sanErr error
 		gated := false
-		if i.TextHints && evaluates && i.Sanitizer != nil {
+		if (i.TextHints || i.NameHintProducer != "") && evaluates && i.Sanitizer != nil {
 			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
 			gated = true
 		}
@@ -111,10 +125,34 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		// that fails extraction below is still a real offer that existed.
 		if i.Offers != nil {
 			o := offerFromRaw(r, now)
-			if gated && sanErr == nil && o.ProductHint.Empty() {
+			keep := true
+			switch {
+			case gated && sanErr == nil && i.NameHintProducer != "":
+				// What the gate passed, not the raw listing: the hint is
+				// built from the sanitized title and producer.
+				o.ProductHint = offer.ProductHint{
+					Brand: strings.TrimSpace(san.Aspects[i.NameHintProducer]),
+					Text:  san.Title,
+				}
+			case gated && i.NameHintProducer != "":
+				// The gate did not pass this listing -- refused, or glovebox
+				// unreachable. The two are treated ALIKE on purpose: a
+				// refusal keeps the old hint and product id just as an outage
+				// does. A listing that changed into something glovebox refuses
+				// keeps its last identity rather than losing it, and its item
+				// is dropped at the gate below either way, so nothing refused
+				// is surfaced. The listing's name hint is unknown for this
+				// pass, so the offer keeps the hint (and with it the
+				// resolution) it already has: replacing it would change the
+				// fingerprint and throw away a resolved wine's product id
+				// every time glovebox has an outage.
+				o.ProductHint, keep = i.previousHint(ctx, o.ID)
+			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title
 			}
-			if err := i.Offers.Put(ctx, o); err != nil {
+			if !keep {
+				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: "could not read the stored hint to preserve it"})
+			} else if err := i.Offers.Put(ctx, o); err != nil {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: err.Error()})
 				i.logf("ingest: offer store dropped %s: %v", r.SourceKey, err)
 			} else {
@@ -140,6 +178,9 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			if errors.Is(err, listing.ErrNotInCategory) && i.Store != nil {
 				// An item stored before the category rule existed must not
 				// outlive it: Shopify sources have no freshness purge.
+				// This includes the wine extractor's culinary rejections
+				// (wine.ErrCulinary): a future grocery category must route
+				// those listings to itself BEFORE this purge drops them.
 				if derr := i.Store.Delete(ctx, offer.DeterministicID(r.SourceID, r.SourceKey)); derr != nil {
 					i.logf("ingest: removing out-of-category item %s: %v", r.SourceKey, derr)
 				}
@@ -243,4 +284,19 @@ func offerFromRaw(r listing.Raw, now time.Time) offer.Offer {
 		LastSeen:    seen,
 		Status:      offer.StatusActive,
 	}
+}
+
+// previousHint is the hint the stored offer carries, or the empty hint for an
+// offer not stored yet. ok is false when the store could not be read: the
+// caller then skips the offer for this pass rather than guess.
+func (i *Ingester) previousHint(ctx context.Context, id string) (offer.ProductHint, bool) {
+	prev, found, err := i.Offers.Get(ctx, id)
+	if err != nil {
+		i.logf("ingest: reading offer %s to preserve its hint: %v", id, err)
+		return offer.ProductHint{}, false
+	}
+	if !found {
+		return offer.ProductHint{}, true
+	}
+	return prev.ProductHint, true
 }

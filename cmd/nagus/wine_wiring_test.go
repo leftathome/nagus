@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,26 +137,31 @@ func TestBuildSurfaceWineRejectsBadDestination(t *testing.T) {
 	}
 }
 
-func TestWineDepsFromLoadsLWIN(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "lwin.csv")
-	csv := "LWIN,PRODUCER_NAME,WINE,COUNTRY,REGION,COLOUR\n1101245,Leonetti Cellar,Cabernet Sauvignon,USA,Walla Walla,Red\n"
-	if err := os.WriteFile(path, []byte(csv), 0o600); err != nil {
-		t.Fatal(err)
+// The stamp switch now selects which wine sources send name hints to quark;
+// wineDepsFrom carries the global half, NewWineIngester's caller the source's.
+func TestWineDepsFromCarriesTheGlobalLWINSwitch(t *testing.T) {
+	deps, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwinStamp: true})
+	if err != nil || !deps.LWINStamp {
+		t.Fatalf("deps.LWINStamp = %v err=%v, want the global switch carried", deps.LWINStamp, err)
 	}
-	deps, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwin: &lwinSource{localPath: path, logf: t.Logf}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if deps.LWIN == nil || deps.LWIN.Len() != 1 {
-		t.Fatalf("expected a loaded LWIN resolver, got %+v", deps.LWIN)
+	deps, _ = wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{})
+	if deps.LWINStamp {
+		t.Fatal("off by default")
 	}
 }
 
-func TestWineDepsFromMissingLWINFileFailsLoudly(t *testing.T) {
-	_, err := wineDepsFrom(CategoryConfig{}, store.NewMemoryStore(), categoryOpts{lwin: &lwinSource{localPath: "/does/not/exist.csv", logf: t.Logf}})
-	if err == nil {
-		t.Fatalf("a configured-but-missing LWIN export must be a startup error, not a silent identity-less run")
+// A deployment still carrying the moved resolver's variables starts fine and
+// says, once, that they are ignored.
+func TestRetiredLWINVariablesAreReportedNotHonoured(t *testing.T) {
+	t.Setenv("NAGUS_LWIN_URL", "https://example.invalid/LWINdatabase.xlsx")
+	t.Setenv("NAGUS_LWIN_STAMP", "true")
+	var logged []string
+	stamp := lwinStampFromEnv(func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
+	if !stamp {
+		t.Fatal("NAGUS_LWIN_STAMP must still be read")
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "NAGUS_LWIN_URL") || !strings.Contains(logged[0], "quark") {
+		t.Fatalf("logged %q, want one line naming NAGUS_LWIN_URL and quark", logged)
 	}
 }
 

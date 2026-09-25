@@ -7,6 +7,9 @@ description: >-
   categories and to the shared Postgres/CNPG backend without restructuring.
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
+# 0.12.0: the LWIN dictionary moved to quark (quark QUARK-04). NAGUS_LWIN_URL,
+#   _CACHE and _MAX_AGE are no longer rendered (lwin.url/cachePath/maxAge are
+#   retired, still accepted); NAGUS_LWIN_STAMP renders whenever lwin.stamp is set.
 # 0.11.1: appVersion 0.5.1 (surface limit after ranking). No template change.
 # 0.11.0: appVersion 0.5.0 (release: wine category, quark ids, sanitize gate,
 #         imap source, MCP hardening). No template change.
@@ -33,7 +36,7 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.11.1
+version: 0.12.0
 appVersion: "0.5.1"
 kubeVersion: ">=1.27.0-0"
 keywords:

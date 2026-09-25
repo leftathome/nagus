@@ -86,7 +86,8 @@ Categories: hdd ($/TB deal-watch, eBay), land (structure-first + free gov geo
 enrichment; NAGUS_LAND_* and NAGUS_RENTCAST_KEY env), and wine (critic-score
 quality + hedonic value + per-destination ship-legality worldwide;
 NAGUS_WINE_* incl. NAGUS_WINE_SHIP_TO (an ISO 3166 jurisdiction such as
-US-WA, CA-BC or FR), NAGUS_WINE_SHIP_RULES, and NAGUS_LWIN_CSV env). ingest
+US-WA, CA-BC or FR), NAGUS_WINE_SHIP_RULES, and NAGUS_LWIN_STAMP env;
+wine identity comes from quark). ingest
 collects + stores; search/serve surface ranked candidates read-only (eyes,
 not hands).
 

@@ -20,11 +20,11 @@ nagus's own LWIN resolver. Operator review caught two errors:
 
 | Concern | Owner | Notes |
 |---|---|---|
-| Wine identity (LWIN resolution, adjudication tiers) | **quark** | D1 migration; quark has the `lwin` namespace but no LWIN catalog loader yet (its slice 3). |
+| Wine identity (LWIN resolution, adjudication tiers) | **quark** | D1 migration, done in quark QUARK-04 (2026-09-25): quark loads the LWIN catalog and resolves producer + title name hints; nagus's resolver is deleted. quark's wine product is the LWIN-7 wine (all vintages) and carries `vintage_mode`. |
 | Critic scores as facts about a vintage | **quark** | A score belongs to the product, not an offer: the deferred "observed specs with provenance" slice (D5). |
 | Producer as an entity, and its website | **quark** | A `Publisher` (manufacturer; corporate https references). |
 | Extracting hints from a listing: producer, critic codes | **nagus** | Extraction. Sent to quark as resolution hints. |
-| Market comparable: other sellers' offers for the same product | **nagus** | Valuation over the offer layer, which already carries quark's `ProductID`. Excludes the listing's own source. |
+| Market comparable: other sellers' offers for the same product | **nagus** | Valuation over the offer layer, keyed on `offer.ComparisonKey` -- NOT the bare `ProductID`, which for wine spans vintages: (product, vintage) for a vintage wine, product alone for a non-vintage blend, and never for a vintage wine listed with no year. Excludes the listing's own source. |
 | Legality per destination; verdicts; watches | **nagus** | Unchanged. |
 | Which stores to poll; the fingerprint tool | **nagus** | Acquisition. |
 | Page scraping for catalog loaders; email offers | **glovebox** | Per quark's catalog-loaders table; nagus-239. |

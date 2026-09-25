@@ -175,22 +175,15 @@ spec:
               value: /run/secrets/nagus-glovebox/NAGUS_GLOVEBOX_TOKEN
             {{- end }}
             {{- end }}
-            {{- if .Values.lwin.url }}
-            # LWIN wine dictionary, mirrored onto the data volume from the
-            # published export and re-checked against it after maxAge. Loads in
-            # the background: startup never waits on the download.
-            - name: NAGUS_LWIN_URL
-              value: {{ .Values.lwin.url | quote }}
-            - name: NAGUS_LWIN_CACHE
-              value: {{ .Values.lwin.cachePath | quote }}
-            - name: NAGUS_LWIN_MAX_AGE
-              value: {{ .Values.lwin.maxAge | quote }}
+            {{- if .Values.lwin.stamp }}
+            # Wine identity: opted-in wine sources (lwinStamp) send quark
+            # producer + title name hints. The LWIN dictionary itself lives in
+            # quark since quark QUARK-04; lwin.url and friends are ignored.
             - name: NAGUS_LWIN_STAMP
               value: {{ .Values.lwin.stamp | quote }}
             {{- end }}
             # The Go runtime collects before the container limit instead of
-            # being OOM-killed at it. Matters once the LWIN dictionary (~55 MiB
-            # resident, more while a refresh builds its replacement) is loaded.
+            # being OOM-killed at it.
             - name: GOMEMLIMIT
               valueFrom:
                 resourceFieldRef:

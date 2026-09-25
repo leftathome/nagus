@@ -6,9 +6,9 @@
 // section 7): the output is a CONSTRAINED TYPED SCHEMA. Listing text is only
 // ever pattern-matched -- a malicious listing can at worst yield a wrong
 // field value ("WS 99" it never earned), never hijack anything. The spec's
-// LLM step (structuring odd free-text critic attributions the regexes miss,
-// and adjudicating mid-confidence LWIN matches) is a deliberate follow-on
-// that would run on this same sanitized text and emit only typed labels.
+// LLM step (structuring odd free-text critic attributions the regexes miss)
+// is a deliberate follow-on that would run on this same sanitized text and
+// emit only typed labels.
 //
 // Extracted signal:
 //
@@ -28,11 +28,13 @@
 //     source may legally ship to ("US-WA", "CA-BC", "FR"); each token is
 //     validated as an ISO 3166 code so an untrusted aspect can never smuggle
 //     a non-jurisdiction token past the destination filter.
-//   - CanonicalID -- when an LWIN resolver is injected, a HIGH-CONFIDENCE
-//     (RouteAuto) match stamps the LWIN-11. Lower-confidence routes leave
-//     CanonicalID empty and record lwin_route so the adjudication tier can
-//     find them; a wrong canonical identity corrupts every downstream
-//     quality join, so only auto-route matches are ever stamped.
+//
+// Wine IDENTITY is not extracted here. The LWIN resolver that used to stamp
+// CanonicalID moved to quark (quark QUARK-04, design D1: identity belongs
+// wholly to quark): a wine source's offers carry its declared producer and
+// sanitized title to quark as a name hint (pipeline.Ingester.NameHintProducer),
+// and quark's answer -- a product id, only ever from an auto-band match --
+// lands on the offer, not the item. Wine items therefore carry no CanonicalID.
 package wine
 
 import (
@@ -45,8 +47,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/shipping"
@@ -63,22 +65,11 @@ type Extractor struct {
 	// Normalizer aggregates parsed critic scores; the zero value applies the
 	// default anchors with no per-critic bias.
 	Normalizer valwine.Normalizer
-	// Resolver, when non-nil, resolves listings to LWIN identities. Only
-	// RouteAuto matches stamp CanonicalID (see package doc), and only when
-	// Stamp is set.
-	Resolver *lwin.Resolver
-	// Stamp enables writing CanonicalID. Off, the resolver runs in SHADOW:
-	// lwin_route plus the would-be id and score are recorded as attributes so
-	// the false-match rate can be measured on real listings before any id is
-	// trusted. Measured on the full Liv-ex dictionary (185k wines), token-set
-	// scoring auto-matched "2018 The Reserve Cabernet Sauvignon, To Kalon
-	// Vineyard" to an unrelated producer at 100 -- so this starts off.
-	Stamp bool
 }
 
 var _ listing.Extractor = (*Extractor)(nil)
 
-// New returns an Extractor for the "wine" category with no LWIN resolver.
+// New returns an Extractor for the "wine" category.
 func New() *Extractor {
 	return &Extractor{}
 }
@@ -89,12 +80,15 @@ func (e *Extractor) Category() string {
 }
 
 // Extract normalizes one sanitized wine listing. Missing signal (no vintage,
-// no critic scores, no LWIN match) is absence, not an error -- the
+// no critic scores) is absence, not an error -- the
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
+	if culinaryRe.MatchString(s.Title) {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+	}
 	if isMerchandise(s.Title) {
-		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrMerchandise)
 	}
 	text := s.Title
 	if s.Body != "" {
@@ -203,36 +197,46 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	}
 
 	// The producer, when the source declared or published one: rows show
-	// it, and joins that cannot use LWIN (a label approval names a brand,
-	// not a vintage) join on it.
+	// it, and joins that cannot use a product id (a label approval names a
+	// brand, not a vintage) join on it.
 	if p := strings.TrimSpace(s.Aspects["wine_producer"]); p != "" {
 		it.Attributes["producer"] = p
 	}
 
-	// LWIN identity resolution (optional).
-	if e.Resolver != nil {
-		producer := strings.TrimSpace(s.Aspects["wine_producer"])
-		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage, Producer: producer})
-		it.Attributes["lwin_route"] = string(res.Route)
-		if res.Route != lwin.RouteReview {
-			it.Attributes["lwin_candidate"] = res.Best.Record.LWIN11(vintage)
-			it.Attributes["lwin_score"] = strconv.FormatFloat(res.Best.Score, 'f', 1, 64)
-		}
-		// Stamped only when the producer was KNOWN, not inferred from the
-		// title: measured on the live listings, title-only auto matches were
-		// mostly wrong ("Bolero" -> producer Bolero), while producer-hinted
-		// ones were right (24 of 24 on Robert Mondavi's store, 2026-09-21).
-		if res.Route == lwin.RouteAuto && e.Stamp && producer != "" {
-			it.CanonicalID = res.Best.Record.LWIN11(vintage)
-		}
+	// An explicit non-vintage marker ("NV", "N.V."): a house-style blend
+	// whose listing states no year on purpose. It tells the comparison key
+	// (offer.ComparisonKey) that a wine quark cannot classify is non-vintage,
+	// and it is wine evidence -- but only beside another wine cue, because
+	// "NV" is also a US state ("Pickup Fee Reno, NV"), a company suffix
+	// ("Heineken N.V."), and a word merchandise titles carry ("Gift Box NV").
+	if explicitNV(s.Title, it.Attributes["varietal"] != "" || it.Attributes["colour"] != "") {
+		it.Attributes["nv"] = "true"
 	}
 
-	// No wine evidence at all -- no vintage, no varietal, no colour -- means
-	// merchandise the keyword list did not name. Measured on the live corpus
+	// A disgorgement is wine evidence on its own: only sparkling wine is
+	// disgorged. Its year is never the vintage (extractVintage skips it).
+	disgorged := disgorgedRe.MatchString(s.Title)
+
+	// A fortified-wine style is wine evidence on its own, NV or not (operator
+	// ruling 2026-09-25, "Port is wine"; LWIN files every one of them as
+	// "Fortified Wine", which quark loads). See fortifiedWine for the guards.
+	fortified, culinaryFortified := fortifiedWine(s.Title)
+
+	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
+	// marker, no disgorgement, no fortified style -- means merchandise the
+	// keyword list did not name. A source-declared wine_type is a colour
+	// (sourceColour above), so it passes this check for any title the
+	// merchandise lists did not already reject: intentional, and unchanged
+	// since production (TestExtract_DeclaredWineTypeIsEvidence). Measured on the live corpus
 	// (2026-09-21): exactly 12 of 91 wine items had none of the three, and all
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
-	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" {
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged && !fortified {
+		if culinaryFortified {
+			// "Sherry Trifle Mix", "Marsala Chicken Sauce": a food made
+			// with the wine.
+			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+		}
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
@@ -270,19 +274,125 @@ func deterministicID(sourceID, sourceKey string) string {
 // digit word boundaries keep it from firing inside "1500ml" or "20150".
 var vintageRe = regexp.MustCompile(`\b(19[3-9]\d|20[0-4]\d)\b`)
 
+// notVintageBeforeRe is a word that, directly before a year (or with one
+// filler word between: "bottled in 2020"), makes the year something other
+// than the vintage: "disgorged 2019", "bottled 2021", "Est. 1970", "founded
+// 1885", "since 1885", "anniversary 1966". "<ordinal> anniversary" is NOT
+// one: in "50th Anniversary 2019 Cabernet" the year is the vintage; see
+// ordinalAnniversaryRe.
+var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorge|degorgement|bottled|est\.?|established|founded|since|anniversary)[\s:.,(]*((in|on|at|from)[\s:.,(]+)?$`)
+
+// ordinalAnniversaryRe is "50th anniversary" and the like, right before a
+// year.
+var ordinalAnniversaryRe = regexp.MustCompile(`(?i)\b\d+(st|nd|rd|th)\s+anniversary[\s:.,(]*$`)
+
+// fortifiedRe is a fortified-wine style: port and its categories, sherry and
+// its styles, madeira, marsala. Whole words only ("Newport", "Portland",
+// "Portsmouth", "Passport" never match). "tawny" and "ruby" are NOT here on
+// their own -- they are colours and gemstones ("Ruby Red Grapefruit",
+// "Tawny Leather Tote") -- but "Tawny Port" / "Ruby Port" match on "port".
+var fortifiedRe = regexp.MustCompile(`(?i)\b(port|colheita|lbv|late bottled vintage|sherry|fino|manzanilla|amontillado|oloroso|pedro ximenez|px|madeira|marsala)\b`)
+
+// notWinePortRe is "port" the English word: a place ("Port Townsend", "Port
+// Angeles" -- a short list, not a gazetteer) or a connector ("USB port").
+// The wine extractor rarely sees either; the tech half is defensive.
+var notWinePortRe = regexp.MustCompile(`(?i)\bport\s+(townsend|angeles|orchard|ludlow|hadlock|huron|arthur|jefferson|washington|charlotte|richey|chester|clinton|royal|elizabeth|moresby|louis|lincoln|hueneme|aransas|lavaca|isabel|st\.?\s+lucie)\b|\b(usb|usb-c|hdmi|ethernet|charging|charger|serial|audio|thunderbolt|lightning|network|power|display)\s+ports?\b`)
+
+// spiritOrBeerRe is a spirit or a beer anywhere in a title: a fortified-wine
+// word there names the cask it was finished in, or a distillery ("Sherry
+// Cask Bourbon", "Port Dundas Grain Whisky", "Sherry Barrel Imperial
+// Porter"). It only withdraws the fortified cue: a title with a vintage, a
+// varietal or a colour is judged on those ("Porter Creek Vineyards Pinot
+// Noir 2021").
+var spiritOrBeerRe = regexp.MustCompile(`(?i)\b(whisky|whiskey|scotch|bourbon|rum|gin|vodka|tequila|mezcal|brandy|cognac|armagnac|single malt|stout|porter|ale|ipa|lager|beer|cider)\b`)
+
+// CULINARY PRODUCTS are not wine and are NOT merchandise: nagus may watch
+// groceries one day, and a grocery category would claim them. The wine
+// extractor rejects them with ErrCulinary (still ErrNotWine), so logs and
+// skips count them apart from merchandise. Two lists:
+//
+//   - culinaryRe always rejects: nothing called vinegar or cheese is a
+//     bottle of wine, whatever colour or varietal the title names ("Camino
+//     Red Wine Vinegar", live on broc-cellars). Checked against the live
+//     corpus: it rejects no wine.
+//   - culinaryWordRe is words that real wine names also use ("JaM Cellars",
+//     "The Chocolate Block", "2021 Mix"): they only withdraw the fortified
+//     cue ("Sherry Trifle Mix", "Marsala Chicken Sauce").
+var culinaryRe = regexp.MustCompile(`(?i)\b(vinegar|cooking (wine|sherry)|cakes?|cheeses?|jelly|olive oil)\b`)
+
+var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?)\b`)
+
+// caskWordRe is a cask word: within two tokens of a fortified-wine word it
+// names a cask finish, not the wine ("Port Cask Finish", "Sherry Oak").
+var caskWordRe = regexp.MustCompile(`(?i)^(cask|casks|barrel|barrels|oak|wood|finish|finished)$`)
+
+// fortifiedWine reports whether a title names a fortified-wine style once
+// the English-word uses of "port" are set aside, and no cask finish, spirit
+// or beer says the word is about something else. culinary reports a
+// fortified-wine word withdrawn because the title is a food made with it.
+func fortifiedWine(title string) (fortified, culinary bool) {
+	t := notWinePortRe.ReplaceAllString(foldASCII(title), " ")
+	named := false
+	for _, m := range fortifiedRe.FindAllStringIndex(t, -1) {
+		start, end := m[0], m[1]
+		// A hyphen-joined token is not the word: "Port-a-Potty".
+		if (start > 0 && t[start-1] == '-') || (end < len(t) && t[end] == '-') {
+			continue
+		}
+		if nearCaskWord(t[:start], t[end:]) {
+			continue
+		}
+		named = true
+		break
+	}
+	switch {
+	case !named || spiritOrBeerRe.MatchString(t):
+		return false, false
+	case culinaryWordRe.MatchString(t):
+		return false, true
+	}
+	return true, false
+}
+
+// nearCaskWord reports whether one of the two tokens before or after a match
+// is a cask word.
+func nearCaskWord(before, after string) bool {
+	notWord := func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+	b, a := strings.FieldsFunc(before, notWord), strings.FieldsFunc(after, notWord)
+	if len(b) > 2 {
+		b = b[len(b)-2:]
+	}
+	if len(a) > 2 {
+		a = a[:2]
+	}
+	for _, w := range append(b, a...) {
+		if caskWordRe.MatchString(w) {
+			return true
+		}
+	}
+	return false
+}
+
+// disgorgedRe marks a disgorgement date: sparkling wine only.
+var disgorgedRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorged?|degorgement)\b`)
+
 // extractVintage returns the FIRST plausible vintage year in the text, or
-// (0, false) for none / a non-vintage (NV) wine. 0 is also what the LWIN
-// resolver treats as the NV vintage segment.
+// (0, false) for none / a non-vintage (NV) wine. A year right after a word
+// that says it is something else -- a disgorgement or bottling date, a
+// founding year, an anniversary -- is not the vintage and is skipped.
 func extractVintage(text string) (int, bool) {
-	m := vintageRe.FindString(text)
-	if m == "" {
-		return 0, false
+	folded := foldASCII(text)
+	for _, loc := range vintageRe.FindAllStringIndex(folded, -1) {
+		if before := folded[:loc[0]]; notVintageBeforeRe.MatchString(before) && !ordinalAnniversaryRe.MatchString(before) {
+			continue
+		}
+		v, err := strconv.Atoi(folded[loc[0]:loc[1]])
+		if err != nil {
+			return 0, false
+		}
+		return v, true
 	}
-	v, err := strconv.Atoi(m)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
+	return 0, false
 }
 
 // --- bottle size ---
@@ -422,7 +532,7 @@ func extractColour(text string) (string, bool) {
 }
 
 // foldASCII folds the accented characters common in wine text to ASCII (the
-// same practical set the LWIN normalizer uses).
+// same practical set quark's LWIN normalizer uses).
 var foldASCII = strings.NewReplacer(
 	"à", "a", "â", "a", "ä", "a", "á", "a", "ã", "a",
 	"ç", "c",
@@ -569,23 +679,89 @@ func tokenize(title string) []string {
 	return tokens
 }
 
-// ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
-// pipeline records it as an extract skip.
-var ErrNotWine = fmt.Errorf("%w: not a wine (merchandise listing)", listing.ErrNotInCategory)
+// nvRe finds an "NV" / "N.V." token, capturing what precedes and follows it.
+var nvRe = regexp.MustCompile(`(?i)(^|[^a-z0-9])n\.?v\.?([^a-z0-9]|$)`)
+
+// nvNotWineAfterRe is what, directly after "N.V.", makes it a company suffix
+// rather than a wine marker ("Heineken N.V. Beer").
+var nvNotWineAfterRe = regexp.MustCompile(`(?i)^\s*(beer|brewery|brewing|lager|ale|company|co\b|corp|inc\b|ltd|llc|holdings?|group)`)
+
+// nvWineCueRe are the words that make a title's NV a wine's NV: sparkling
+// and house-style terms. A colour or a varietal also qualifies (passed in).
+var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs|port|tawny|ruby|moscato|pet[ -]?nat|petillant|vermouth|vermut)\b`)
+
+// nevadaPlaceRe is a Nevada place directly before "NV" with no comma
+// ("Reno NV Pickup"): the state, not a non-vintage marker. The main cities
+// only -- a gazetteer is out of scope, and the comma form covers the rest.
+var nevadaPlaceRe = regexp.MustCompile(`(?i)\b(reno|las vegas|vegas|henderson|sparks|carson city|north las vegas|elko|mesquite|boulder city|incline village|stateline)$`)
+
+// explicitNV reports whether a title marks the wine non-vintage: an NV token
+// that is not a state after a city (", NV"), not a company suffix, and sits
+// beside a wine cue -- a sparkling/house-style word, or (otherWineCue) a
+// colour or varietal the extractor already found.
+func explicitNV(title string, otherWineCue bool) bool {
+	folded := foldASCII(title)
+	for _, m := range nvRe.FindAllStringSubmatchIndex(folded, -1) {
+		start, end := m[0], m[1]
+		before := strings.TrimRight(folded[:start+len(folded[m[2]:m[3]])], " ")
+		if strings.HasSuffix(before, ",") || nevadaPlaceRe.MatchString(before) {
+			continue // "Reno, NV" / "Reno NV": the state after a city
+		}
+		if nvNotWineAfterRe.MatchString(folded[end-len(folded[m[4]:m[5]]):]) {
+			continue // "Heineken N.V. Beer": a company suffix
+		}
+		return otherWineCue || nvWineCueRe.MatchString(notWinePortRe.ReplaceAllString(folded, " "))
+	}
+	return false
+}
+
+// ErrNotWine rejects a listing that is not a bottle of wine. The ingest
+// pipeline records it as an extract skip (the reason is the error text) and
+// deletes any item stored under it. The two named reasons below wrap it; a
+// bare ErrNotWine is a title with no wine evidence at all.
+var ErrNotWine = fmt.Errorf("%w: not a wine", listing.ErrNotInCategory)
+
+// ErrMerchandise is a listing on the merchandise lists: a tote, a glass.
+var ErrMerchandise = fmt.Errorf("%w (merchandise)", ErrNotWine)
+
+// ErrCulinary is a culinary product: not wine, and not merchandise either
+// -- reserved for a possible future grocery category (see culinaryRe).
+var ErrCulinary = fmt.Errorf("%w (culinary; reserved for a future grocery category)", ErrNotWine)
 
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping fee)\b`)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?)\b|^\s*shipping\b)`)
+
+// packagingMerchRe are words that name merchandise ON THEIR OWN ("Champagne
+// Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine
+// sold in packaging ("6PK Gift Box Wood MRW, 2021 Mix"). They mark a title
+// merchandise only when nothing in it says it is wine; see isMerchandise.
+var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|flutes?|buckets?|sab(er|re)s?|charms?|chillers?|sleeves?|towels?|soaps?|display|tools?|pickup|sippers?|leather|carriers?)\b`)
+
+// packCountRe is a pack count: "6PK", "6 pk", "12-pack", "3 Pack".
+var packCountRe = regexp.MustCompile(`(?i)\b\d+\s*-?\s*(pk|pack)s?\b`)
 
 // isMerchandise reports whether a wine-store title is merchandise (nagus-17k:
 // robert-mondavi-winery's "Single Bottle Wine Tote" was ingested as a wine).
+//
+// Two lists. merchandiseRe always wins: nothing called olive oil or a key
+// chain is a bottle of wine, whatever year it carries ("2025 Fox Hill Olive
+// Oil"). packagingMerchRe wins only when the title carries no pack count, no
+// vintage year and no varietal -- a gift box of wine is wine.
 func isMerchandise(title string) bool {
-	return merchandiseRe.MatchString(title)
+	if merchandiseRe.MatchString(title) {
+		return true
+	}
+	if !packagingMerchRe.MatchString(title) {
+		return false
+	}
+	if packCountRe.MatchString(title) || vintageRe.MatchString(title) {
+		return false
+	}
+	_, _, varietal := extractVarietal(title)
+	return !varietal
 }
-
-// StampEnabled reports whether this extractor writes LWIN canonical ids.
-func (e *Extractor) StampEnabled() bool { return e.Stamp }
 
 // sourceColour maps a source's structured wine type (Commerce7 "Red",
 // Vinoshipper "RED", "ROSE", ...) onto the extractor's colour vocabulary; ""

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	extwine "github.com/leftathome/nagus/internal/extract/wine"
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
@@ -132,16 +131,17 @@ type WineDeps struct {
 	// Sanitizer is the trust boundary listings cross before extraction; nil
 	// is the in-process Passthrough (see sanitizerOr).
 	Sanitizer listing.Sanitizer
-	// LWIN, when non-nil, resolves listings to LWIN canonical identities at
-	// extract time. Nil = wine items carry no canonical id (identity join
-	// disabled) -- the pipeline still works, per the graceful-degradation
-	// convention.
-	LWIN *lwin.Resolver
-	// LWINStamp lets auto-route LWIN matches stamp CanonicalID; off is shadow
-	// mode (see extwine.Extractor.Stamp).
+	// LWINStamp makes this source's offers carry a wine NAME hint to quark --
+	// the declared producer plus the sanitized title -- which quark resolves
+	// against its LWIN catalog (quark QUARK-04; the resolver used to run
+	// here). Off, offers carry whatever structured hint the source states,
+	// which for most wine storefronts is none. The name is kept from when it
+	// switched stamping LWIN canonical ids on, so existing configuration
+	// (lwin.stamp + a source's lwinStamp) keeps selecting the same sources.
 	LWINStamp bool
 	// Producer is this source's declared producer (SourceConfig.WineProducer),
-	// passed to LWIN resolution. Per source, so set on the source's own copy.
+	// sent to quark as the name hint's producer. Per source, so set on the
+	// source's own copy.
 	Producer string
 	// Model overrides the hedonic value model; nil = valwine.DefaultModel
 	// (the documented cold-start bootstrap priors).
@@ -250,18 +250,22 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 	if err := src.Validate(); err != nil {
 		return nil, fmt.Errorf("wine: %w", err)
 	}
-	return &pipeline.Ingester{
+	ing := &pipeline.Ingester{
 		Connector: &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
 			producerFromBody: deps.ProducerFromBody},
 		Sanitizer:        sanitizerOr(deps.Sanitizer, "wine"),
-		Extractor:        &extwine.Extractor{Resolver: deps.LWIN, Stamp: deps.LWINStamp},
+		Extractor:        extwine.New(),
 		Store:            deps.Store,
 		StaleAfter:       deps.StaleAfter,
 		Offers:           deps.Offers,
 		OfferRetention:   deps.OfferRetention,
 		OfferExpireAfter: deps.OfferExpireAfter,
 		Logf:             deps.Logf,
-	}, nil
+	}
+	if deps.LWINStamp {
+		ing.NameHintProducer = "wine_producer"
+	}
+	return ing, nil
 }
 
 // producerFor is the producer to resolve a listing against: the source's

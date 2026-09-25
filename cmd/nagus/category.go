@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -50,18 +49,17 @@ type categoryOpts struct {
 	// wine scoring/legality config (NAGUS_WINE_*). wineShipTo is the
 	// destination JURISDICTION offers must legally ship to -- "US-WA", "FR",
 	// "CA-BC" -- (empty = no legality filter); wineShipRules optionally names
-	// a JSON rules-override file merged over shipping.DefaultRules; lwinCSV
-	// is the optional local path of the Liv-ex LWIN export (NAGUS_LWIN_CSV)
-	// enabling canonical-identity resolution at extract time.
+	// a JSON rules-override file merged over shipping.DefaultRules.
 	wineBudgetCents   int64
 	wineMinScore      float64
 	wineMinScoreCount int
 	wineShipTo        string
 	wineShipRules     string
-	// lwin is the process's one shared LWIN dictionary (NAGUS_LWIN_URL or
-	// NAGUS_LWIN_CSV); nil when LWIN is not configured. A pointer, so every
-	// copy of categoryOpts shares the same loaded dictionary.
-	lwin *lwinSource
+	// lwinStamp is the global switch (NAGUS_LWIN_STAMP) that, with a
+	// source's own lwinStamp, sends that wine source's offers to quark as
+	// producer + title name hints. The LWIN dictionary itself moved to quark
+	// (quark QUARK-04); nagus no longer downloads or loads it.
+	lwinStamp bool
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
 	// sanitizer is the trust boundary every ingested listing crosses; nil is
@@ -92,8 +90,21 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		wineMinScoreCount: int(envInt64("NAGUS_WINE_MIN_SCORE_COUNT", 0)),
 		wineShipTo:        envOr("NAGUS_WINE_SHIP_TO", ""),
 		wineShipRules:     envOr("NAGUS_WINE_SHIP_RULES", ""),
-		lwin:              lwinSourceFromEnv(client, logf),
+		lwinStamp:         lwinStampFromEnv(logf),
 	}
+}
+
+// lwinStampFromEnv reads NAGUS_LWIN_STAMP, and says so -- once, at startup --
+// when a deployment still sets the variables of the resolver that moved to
+// quark: they no longer do anything, and a silent no-op would leave an
+// operator believing nagus still resolves wine identity itself.
+func lwinStampFromEnv(logf func(string, ...any)) bool {
+	for _, gone := range []string{"NAGUS_LWIN_URL", "NAGUS_LWIN_CSV", "NAGUS_LWIN_CACHE", "NAGUS_LWIN_MAX_AGE"} {
+		if envOr(gone, "") != "" && logf != nil {
+			logf("lwin: %s is set but ignored: the LWIN dictionary and resolver moved to quark (QUARK-04); set it on quark as QUARK_LWIN_URL", gone)
+		}
+	}
+	return envBool("NAGUS_LWIN_STAMP")
 }
 
 // orDefault returns def when s is empty, else s.
@@ -135,7 +146,7 @@ func categoryConfigFromOpts(cat string, o categoryOpts) CategoryConfig {
 }
 
 // wineDepsFrom assembles the wine bundle deps from category config + env
-// opts. The LWIN export and the shipping rules override are loaded per call,
+// opts. The shipping rules override is loaded per call,
 // which only happens at startup (one surface + one ingester per wine
 // source); a missing or malformed file, or an invalid destination state, is
 // a loud startup error -- a silently-empty legality filter would fail closed
@@ -180,14 +191,7 @@ func wineDepsFrom(cc CategoryConfig, st store.Store, o categoryOpts) (category.W
 			return category.WineDeps{}, fmt.Errorf("wine: wineShipTo %q has no shipping policy in the rules table, so nothing could ever surface for it; add one via a rules override file (NAGUS_WINE_SHIP_RULES)", cc.WineShipTo)
 		}
 	}
-	if o.lwin != nil {
-		r, err := o.lwin.get(context.Background())
-		if err != nil {
-			return category.WineDeps{}, err
-		}
-		deps.LWIN = r
-		deps.LWINStamp = o.lwin.stamp
-	}
+	deps.LWINStamp = o.lwinStamp
 	return deps, nil
 }
 
@@ -398,7 +402,9 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		}
 		deps.Producer = s.WineProducer
 		deps.ProducerFromBody = s.ProducerFromBody
-		// Stamping needs BOTH the global switch and this source's opt-in.
+		// Name hints to quark need BOTH the global switch and this source's
+		// opt-in: the same pair that used to gate LWIN stamping, so the same
+		// sources are identified.
 		deps.LWINStamp = deps.LWINStamp && s.LWINStamp
 		ing, err := category.NewWineIngester(conn, src, deps)
 		if err != nil {

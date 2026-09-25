@@ -113,11 +113,15 @@ type SourceConfig struct {
 	// whose part numbers live only in the title (eBay). Title attached only
 	// after the glovebox gate passed it.
 	QuarkTextHints bool `json:"quarkTextHints,omitempty"`
-	// LWINStamp opts this source in to writing LWIN canonical ids, once its
-	// shadow matches (lwin_route/lwin_candidate) have been reviewed. The global
-	// lwin.stamp switch alone is not enough: a newly added source would
-	// otherwise stamp before anyone had looked at its matches (nagus-a8t --
-	// Turley stamped 47 ids on arrival, one of them wrong).
+	// LWINStamp opts this wine source in to wine identity: its offers carry
+	// the declared producer and sanitized title to quark as a name hint, and
+	// quark's LWIN resolver answers with a product id for auto-band matches
+	// only (quark QUARK-04; the resolver ran here, stamping CanonicalID, until
+	// then). The global lwin.stamp switch alone is not enough: a newly added
+	// source would otherwise be identified before anyone had looked at its
+	// matches (nagus-a8t -- Turley stamped 47 ids on arrival, one of them
+	// wrong). quark's adjudication queue and quark_name_matches_total are
+	// where a source's matches are now reviewed.
 	LWINStamp bool `json:"lwinStamp,omitempty"`
 
 	// offline/testing
