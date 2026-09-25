@@ -19,7 +19,8 @@ func (w *wineQuark) Resolve(_ context.Context, hints []quark.Hint, _ bool) (quar
 	for i, h := range hints {
 		switch h.Text {
 		case "2019 Cabernet Sauvignon, Walla Walla Valley":
-			out.Results[i] = quark.Result{Route: quark.RouteFuzzy, ProductID: "p-lwin-1101245", Confidence: 100, Standing: "authoritative"}
+			out.Results[i] = quark.Result{Route: quark.RouteFuzzy, ProductID: "p-lwin-1101245", Confidence: 100, Standing: "authoritative",
+				Specs: []quark.Spec{{Key: quark.Untrusted{Value: "vintage_mode"}, Value: quark.Untrusted{Value: "vintage"}, Tier: "catalog"}}}
 		case "2019 Reserve Cabernet, Seven Hills Vineyard":
 			out.Results[i] = quark.Result{Route: quark.RouteAdjudicate, Confidence: 100, Reason: "coverage"}
 		default:
@@ -62,8 +63,8 @@ func TestWineNameHintsStampOnlyTheAutoBand(t *testing.T) {
 			t.Fatalf("wine hint on the wire = %+v", h)
 		}
 	}
-	if r := state(t, s, auto); r.State != offer.ResolutionResolved || r.ProductID != "p-lwin-1101245" {
-		t.Errorf("fuzzy route: %+v, want resolved with the product id", r)
+	if r := state(t, s, auto); r.State != offer.ResolutionResolved || r.ProductID != "p-lwin-1101245" || r.VintageMode != "vintage" {
+		t.Errorf("fuzzy route: %+v, want resolved with the product id and quark's vintage mode", r)
 	}
 	for name, o := range map[string]offer.Offer{"adjudicate": adj, "unmatched": none} {
 		if r := state(t, s, o); r.State != offer.ResolutionRefused || r.ProductID != "" {

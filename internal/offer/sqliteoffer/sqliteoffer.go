@@ -87,6 +87,9 @@ var resolutionColumns = []struct{ name, ddl string }{
 	{"resolved_at_ns", `INTEGER NOT NULL DEFAULT 0`},
 	// QUARK-02 text hints: '' keeps every existing fingerprint unchanged.
 	{"hint_text", `TEXT NOT NULL DEFAULT ''`},
+	// QUARK-04 wine vintage mode from quark's resolution specs; '' = quark
+	// said nothing, which is true of every existing row.
+	{"vintage_mode", `TEXT NOT NULL DEFAULT ''`},
 }
 
 // resolutionIndexes run AFTER migrateResolution, because on an existing
@@ -240,6 +243,7 @@ ON CONFLICT(id) DO UPDATE SET
   product_id = CASE WHEN `+sameHint+` THEN offers.product_id ELSE '' END,
   resolution_generation = CASE WHEN `+sameHint+` THEN offers.resolution_generation ELSE 0 END,
   resolved_at_ns = CASE WHEN `+sameHint+` THEN offers.resolved_at_ns ELSE 0 END,
+  vintage_mode = CASE WHEN `+sameHint+` THEN offers.vintage_mode ELSE '' END,
   source_url=excluded.source_url, title=excluded.title, body=excluded.body,
   price_cents=excluded.price_cents, currency=excluded.currency,
   condition=excluded.condition, seller=excluded.seller,
@@ -384,9 +388,9 @@ ORDER BY CASE WHEN resolution_state = 'refused' THEN 1 ELSE 0 END, id`
 // this fingerprint; the WHERE clause is the race guard.
 func (s *Store) RecordResolution(ctx context.Context, offerID, hintFingerprint string, r offer.Resolution) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
-UPDATE offers SET resolution_state = ?, product_id = ?, resolution_generation = ?, resolved_at_ns = ?
+UPDATE offers SET resolution_state = ?, product_id = ?, resolution_generation = ?, resolved_at_ns = ?, vintage_mode = ?
 WHERE id = ? AND `+storedFingerprint+` = ?`,
-		string(r.State), r.ProductID, r.Generation, nsOrZero(r.At), offerID, hintFingerprint)
+		string(r.State), r.ProductID, r.Generation, nsOrZero(r.At), r.VintageMode, offerID, hintFingerprint)
 	if err != nil {
 		return false, fmt.Errorf("sqliteoffer: record resolution: %w", err)
 	}
@@ -401,7 +405,7 @@ const selectCols = `SELECT
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
-  resolution_state, product_id, resolution_generation, resolved_at_ns`
+  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode`
 
 func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 	var out []offer.Offer
@@ -415,7 +419,7 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
 			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
-			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS,
+			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS, &o.Resolution.VintageMode,
 		); err != nil {
 			return nil, fmt.Errorf("sqliteoffer: scan: %w", err)
 		}

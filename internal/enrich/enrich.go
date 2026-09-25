@@ -262,6 +262,7 @@ func (e *Enricher) resolveBatch(ctx context.Context, all []offer.Offer, retry bo
 				continue
 			}
 			stamp.State, stamp.ProductID = offer.ResolutionResolved, r.ProductID
+			stamp.VintageMode = r.VintageMode()
 		case quark.RouteQuarantined:
 			stamp.State = offer.ResolutionQuarantined
 		default:

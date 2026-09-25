@@ -87,6 +87,49 @@ type Result struct {
 	Confidence int    `json:"confidence"`
 	Standing   string `json:"standing,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+	// Specs are the resolved product's authoritative (catalog) facts. quark
+	// returns every free-text field inside an untrusted-data envelope, which
+	// is why Key and Value are objects. nagus reads one of them today:
+	// VintageMode.
+	Specs []Spec `json:"specs,omitempty"`
+}
+
+// Spec is one of a resolution's catalog facts.
+type Spec struct {
+	Key   Untrusted `json:"key"`
+	Value Untrusted `json:"value"`
+	Tier  string    `json:"tier"`
+}
+
+// Untrusted is quark's untrusted-data envelope (quark ADR-003).
+type Untrusted struct {
+	Value string `json:"value"`
+}
+
+// The vintage modes quark states for a wine product (QUARK-04), from the LWIN
+// export's VINTAGE_CONFIG: whether the year on the bottle is part of what the
+// wine is.
+const (
+	VintageModeVintage    = "vintage"
+	VintageModeNonVintage = "non_vintage"
+	VintageModeUnknown    = "unknown"
+)
+
+// VintageMode returns the result's catalog-tier vintage_mode, or "" when quark
+// stated none. The value is checked against the closed set, so a malformed or
+// unexpected value -- including one arriving at any tier but catalog -- is
+// never carried into nagus's comparison key.
+func (r Result) VintageMode() string {
+	for _, s := range r.Specs {
+		if s.Key.Value != "vintage_mode" || s.Tier != "catalog" {
+			continue
+		}
+		switch s.Value.Value {
+		case VintageModeVintage, VintageModeNonVintage, VintageModeUnknown:
+			return s.Value.Value
+		}
+	}
+	return ""
 }
 
 // Response is a resolve response. CatalogGeneration is 0 when quark does not

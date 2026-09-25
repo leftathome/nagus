@@ -182,6 +182,23 @@ of different geography routes to adjudication. What changed for nagus:
   `lwin_route` / `lwin_candidate` / `lwin_score` attributes. The vintage stays
   an item attribute (LWIN-11 = LWIN-7 + vintage). Shadow review moved to quark:
   its adjudication queue and `quark_name_matches_total{band,reason}`.
+- **Comparison key.** quark's product id names the WINE, not the vintage, so
+  offers are compared on `offer.ComparisonKey`, which follows the
+  `vintage_mode` quark states per product (from the LWIN export's
+  VINTAGE_CONFIG):
+  `vintage` -> (product, vintage), and a listing with no year gets NO key
+  (`vintage_unknown`: never priced against a specific vintage);
+  `non_vintage` -> product alone, ignoring any year a title carries
+  (disgorgement dates, "bottled 2018", anniversary editions);
+  `unknown` -> as `vintage`, except that the listing's own explicit "NV"
+  marks it non-vintage. Rows carry `comparison_key` and `vintage_status`
+  beside `product_id` on /search, MCP `search_items` and /watches (the
+  openclaw/Telegram path). An explicit "NV" in a title now also counts as
+  wine evidence at extract, so NV listings are no longer dropped as
+  merchandise. No nagus code groups or compares by product id today
+  (audited 2026-09-25: `offer.Query.ProductID` has no caller outside the
+  stores' own tests; product ids only reach rows); the key is exposed so
+  that no consumer has to.
 - nagus no longer downloads the export; `NAGUS_LWIN_URL` and friends are
   ignored (logged once at startup). The false-auto-match rate was re-measured
   on the ported resolver against every live wine listing that declares a

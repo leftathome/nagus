@@ -19,6 +19,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identity is now quark's product id on the OFFER, surfaced as a row's
   `product_id` like every other category.
 
+- **`NAGUS_LWIN_STAMP` now renders whenever `lwin.stamp` is set**, with no
+  need for `lwin.url` (chart 0.12.0). Before, the chart emitted it only
+  inside the `lwin.url` block; the current production values set both, so
+  nothing changes there, but a values file that sets only `lwin.stamp` now
+  takes effect.
+- **Wine rows carry `comparison_key` and `vintage_status`.** A wine's
+  `product_id` is the wine across all its vintages; compare offers on
+  `comparison_key` instead (see Added).
+
 ### Removed
 
 - **The LWIN resolver and mirror** (`internal/identity/lwin`,
@@ -37,7 +46,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing else) to quark, which resolves them against its LWIN catalog and
   returns a product id only for an auto-band match (new route `fuzzy`;
   `adjudicate` records refused). The same three sources that stamped before
-  are identified now. `pipeline.Ingester.NameHintProducer` carries it.
+  are identified now. `pipeline.Ingester.NameHintProducer` carries it. The
+  hint is built from what the glovebox gate passed (the sanitized title and
+  producer); when the gate does not pass a listing -- refused, or glovebox
+  down -- the offer keeps the hint and resolution it already had, so an
+  outage no longer resets resolved wine offers.
+- **Vintage-aware comparison key** (`offer.ComparisonKey`). quark states per
+  wine product whether its vintage matters (`vintage_mode`: `vintage`,
+  `non_vintage`, `unknown`, from the LWIN export's VINTAGE_CONFIG); nagus
+  stores it with the offer's resolution (additive `vintage_mode` column,
+  Postgres `ADD COLUMN IF NOT EXISTS`, SQLite `table_info`) and keys
+  comparisons on (product, vintage) for vintage wines, on the product alone
+  for non-vintage blends (Bollinger Special Cuvee "NV" and "disgorged 2019"
+  are one thing to compare; La Grande Annee 2014 and 2015 are not), and
+  gives a vintage wine listed with no year no key at all. `unknown` behaves
+  as `vintage` unless the title says NV. Rows expose `comparison_key` and
+  `vintage_status`. An explicit NV marker is now wine evidence at extract
+  (attribute `nv`), so NV listings are not dropped as merchandise.
 
 ### Added
 

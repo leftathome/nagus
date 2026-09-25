@@ -45,7 +45,10 @@ type server struct {
 }
 
 // withProductIDs stamps quark's product id onto every row whose offer quark
-// resolved. An item and its offer share one id (both are
+// resolved, with the row's comparison key (offer.ComparisonKey): the key rows
+// must share to be the same thing to compare on price. For wine that is the
+// product id plus the vintage when the vintage matters, and the product id
+// alone for a non-vintage blend. An item and its offer share one id (both are
 // sha256(source NUL key)[:16]), so the lookup is by row id. Rows whose offer
 // is unresolved, missing, or unreadable simply carry no product id: this is
 // enrichment on a read path, never a reason to fail it.
@@ -59,6 +62,8 @@ func (s *server) withProductIDs(ctx context.Context, rows []searchRow) []searchR
 			continue
 		}
 		rows[i].ProductID = o.Resolution.ProductID
+		rows[i].ComparisonKey, rows[i].VintageStatus = offer.ComparisonKey(
+			o.Resolution.ProductID, o.Resolution.VintageMode, rows[i].Details["vintage"], rows[i].Details["nv"] == "true")
 	}
 	return rows
 }
@@ -172,12 +177,21 @@ type searchRow struct {
 	// values (rowDetailKeys), never free text beyond what Title already is.
 	Details map[string]string `json:"details,omitempty"`
 	// ProductID is quark's product id for this listing's offer, when quark
-	// resolved it. Two rows with one ProductID are the same product at
-	// different sellers.
+	// resolved it. Two rows with one ProductID are the same PRODUCT -- for
+	// wine, the same wine (an LWIN-7), NOT the same vintage. Compare offers
+	// on ComparisonKey, never on ProductID.
 	ProductID string `json:"product_id,omitempty"`
-	Condition string `json:"condition"`
-	Title     string `json:"title"`
-	SourceURL string `json:"source_url"`
+	// ComparisonKey is what two rows must share to be the same thing at
+	// different sellers (offer.ComparisonKey): the product id, plus the
+	// vintage for a wine whose year matters. Empty when the row must not be
+	// compared with any other -- a vintage wine whose listing names no year.
+	ComparisonKey string `json:"comparison_key,omitempty"`
+	// VintageStatus is, for wine, "vintage", "non_vintage" or
+	// "vintage_unknown" (see offer.ComparisonKey); empty otherwise.
+	VintageStatus string `json:"vintage_status,omitempty"`
+	Condition     string `json:"condition"`
+	Title         string `json:"title"`
+	SourceURL     string `json:"source_url"`
 }
 
 func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {

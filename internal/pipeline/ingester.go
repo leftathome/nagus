@@ -125,16 +125,29 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		// that fails extraction below is still a real offer that existed.
 		if i.Offers != nil {
 			o := offerFromRaw(r, now)
+			keep := true
 			switch {
 			case gated && sanErr == nil && i.NameHintProducer != "":
+				// What the gate passed, not the raw listing: the hint is
+				// built from the sanitized title and producer.
 				o.ProductHint = offer.ProductHint{
-					Brand: strings.TrimSpace(r.Aspects[i.NameHintProducer]),
-					Text:  r.Title,
+					Brand: strings.TrimSpace(san.Aspects[i.NameHintProducer]),
+					Text:  san.Title,
 				}
+			case gated && i.NameHintProducer != "":
+				// The gate did not pass this listing -- refused, or glovebox
+				// unreachable. The listing's name hint is unknown for this
+				// pass, so the offer keeps the hint (and with it the
+				// resolution) it already has: replacing it would change the
+				// fingerprint and throw away a resolved wine's product id
+				// every time glovebox has an outage.
+				o.ProductHint, keep = i.previousHint(ctx, o.ID)
 			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title
 			}
-			if err := i.Offers.Put(ctx, o); err != nil {
+			if !keep {
+				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: "could not read the stored hint to preserve it"})
+			} else if err := i.Offers.Put(ctx, o); err != nil {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: err.Error()})
 				i.logf("ingest: offer store dropped %s: %v", r.SourceKey, err)
 			} else {
@@ -263,4 +276,19 @@ func offerFromRaw(r listing.Raw, now time.Time) offer.Offer {
 		LastSeen:    seen,
 		Status:      offer.StatusActive,
 	}
+}
+
+// previousHint is the hint the stored offer carries, or the empty hint for an
+// offer not stored yet. ok is false when the store could not be read: the
+// caller then skips the offer for this pass rather than guess.
+func (i *Ingester) previousHint(ctx context.Context, id string) (offer.ProductHint, bool) {
+	prev, found, err := i.Offers.Get(ctx, id)
+	if err != nil {
+		i.logf("ingest: reading offer %s to preserve its hint: %v", id, err)
+		return offer.ProductHint{}, false
+	}
+	if !found {
+		return offer.ProductHint{}, true
+	}
+	return prev.ProductHint, true
 }

@@ -199,12 +199,20 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["producer"] = p
 	}
 
-	// No wine evidence at all -- no vintage, no varietal, no colour -- means
-	// merchandise the keyword list did not name. Measured on the live corpus
+	// An explicit non-vintage marker ("NV", "N.V."): a house-style blend
+	// whose listing states no year on purpose. It is wine evidence -- only a
+	// wine is non-vintage -- and it tells the comparison key (offer
+	// .ComparisonKey) that a wine quark cannot classify is non-vintage.
+	if explicitNVRe.MatchString(s.Title) {
+		it.Attributes["nv"] = "true"
+	}
+
+	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
+	// marker -- means merchandise the keyword list did not name. Measured on the live corpus
 	// (2026-09-21): exactly 12 of 91 wine items had none of the three, and all
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
-	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" {
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" {
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
@@ -539,6 +547,9 @@ func tokenize(title string) []string {
 	}
 	return tokens
 }
+
+// explicitNVRe matches a title's own "NV" / "N.V." marker, as a whole token.
+var explicitNVRe = regexp.MustCompile(`(?i)(^|[^a-z0-9])n\.?v\.?([^a-z0-9]|$)`)
 
 // ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
 // pipeline records it as an extract skip.
