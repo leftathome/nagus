@@ -92,28 +92,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (DOC, AOC, Grand Cru, Riserva, ...) or a bare colour word. Bare "Red",
   "Rouge", "Rosso", "Tinto", "Blanco" (and Bianco, Blanc, White, Rosado,
   Rosato) are the colour beside an appellation or NV, and nowhere else.
-  Cask finishes, spirits, events and foods withdraw the cue ("Sauternes
-  Cask Finish", "Barolo Tasting Dinner", "Chianti Cooking Sauce"). nagus
-  still loads nothing from LWIN at runtime.
+  A broad name's colour word must sit next to it (at most one word between)
+  in a title with no object noun ("Burgundy Blanc Throw Pillow" is not
+  wine). Appellations that double as places or words (Vesuvio, Santorini,
+  Hermitage, Douro, Macon, Montrachet, Brunello, ...) are broad. Cask
+  finishes, spirits, events and travel, printed matter and foods withdraw
+  the cue ("Sauternes Cask Finish", "Barolo Tasting Dinner", "Douro River
+  Cruise", "Chianti Salami"). An NV marker and a bare colour need a third
+  cue ("Red NV" is not wine). nagus still loads nothing from LWIN at
+  runtime.
 - **Culinary is a head-noun rule** (nagus-tmr). A title's food noun
   (vinegar, cake, cheese, jelly, jam, preserves, marmalade, chutney,
   compote, syrup, honey, mustard, olive oil, cooking wine) makes it
   culinary unless a varietal, appellation, fortified style or colour
-  keyword FOLLOWS it: "Sherry Vinegar", "Chardonnay Jam" and "Madeira Cake"
-  are culinary; "Cake Bread Cellars Chardonnay", "Jelly Roll Zinfandel" and
-  "Vinegar Hill Syrah" are wine. A year never rescues one, from the title
-  or the body.
+  keyword or bare colour word FOLLOWS it: "Sherry Vinegar", "Chardonnay
+  Jam" and "Madeira Cake" are culinary; "Cake Bread Cellars Chardonnay",
+  "Jelly Roll Zinfandel", "Vinegar Hill Syrah" and "Mustard Seed Red 2020"
+  are wine. A food word in a producer name ("Butter Chardonnay by JaM",
+  "JaM Cellars Butter") is not a food. A year never rescues one, from the
+  title or the body. A food sold in a bundle ("Spritz Pack w/ ... Fruit
+  Syrup") is merchandise, and mead ("Honey Wine") plain not-wine.
 - **Port styles and guards** (nagus-tmr). Oak or wood before a port word is
   a style ("Oak Aged Port", "Wood Port"), and after a named style too ("Old
   Oak Tawny Port", "Tawny Port, oak aged"); cask, barrel and finish still
   withdraw it. A spirit word in a producer name right before the style is
   the producer ("Porter Creek Tawny Port", "Gin Lane Port"). "Tawny-Port"
   counts. "Angelica" (California's fortified dessert wine) is a fortified
-  style. "Port Ellen" and "Port Askaig" are Scotch.
+  style beside a bottle size, "dessert wine" or a declared wine type (alone
+  it is a herb or a name); "2020 Angelica" is wine by its year. "Port
+  Ellen" and "Port Askaig" are Scotch.
 - **Object merchandise is not rescued by a grape** (nagus-tmr). Towels,
   charms, soap, flutes and tools are merchandise even with a varietal, a
   year or a pack count ("Merlot Tea Towel", "2-Pack Champagne Flutes"),
-  unless a bottle size or an explicit pack of wine is in the title.
+  unless a bottle size or an explicit pack of wine is in the title -- when
+  the object is the title's head noun ("Charm City Syrah 2020" is wine).
+  Tees, socks, stickers, magnets, mugs, perfume, sweaters, posters, prints,
+  paddles and jerseys (not New Jersey) are merchandise.
 - **Bare "Cabernet" is a varietal** (red), after every other grape.
 
 ### Fixed
@@ -123,13 +137,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Pantry, tags merch and pantry) was stored as a 2020 wine because its
   description names "our 2020 Angelica dessert wine" (production,
   2026-09-25; pre-existing since at least c4b6e98). The Shopify connector
-  now carries a product's tags as the `tags` aspect, and the wine extractor
+  now carries a product's tags as the `tags` aspect for WINE sources only
+  (other categories' listings, e.g. serverpartdeals' long drive tags, do
+  not reach the glovebox gate or the stored offer), and the wine extractor
   rejects a listing whose product_type is Pantry, Food or Grocery
   (culinary) or Merch, Merchandise, Apparel, Gift Card(s), (Wine)
   Accessories, Glassware, Books, Events, Tickets or Membership
   (merchandise), or which is tagged pantry or food (culinary) or merch,
-  merchandise, apparel or gift card (merchandise). Exact words only: a wine
-  tagged "gifts" or "holiday" stays wine. Commerce7 and Vinoshipper already
+  merchandise, apparel or gift card (merchandise); declared both, the title
+  decides (a food title is culinary, anything else merchandise). Exact
+  words only: a wine tagged "gifts" or "holiday" stays wine. Commerce7 and Vinoshipper already
   skip non-wine types; OrderPort publishes none.
 
 ### Added

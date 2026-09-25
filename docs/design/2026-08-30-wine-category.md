@@ -210,18 +210,26 @@ of different geography routes to adjudication. What changed for nagus:
   hand supplement. Specific appellations (Barolo, Chablis, Rioja) count
   alone; broad regions and New World AVAs (Burgundy, Tuscany, Napa Valley)
   count only beside a classification token (DOC, AOC, Grand Cru, Riserva)
-  or a bare colour word (Red, Rouge, Rosso), which is otherwise the colour
-  only beside an appellation or NV. Culinary products are classified
+  or a bare colour word (Red, Rouge, Rosso) next to the name in a title
+  with no object noun; a bare colour is otherwise the colour only beside an
+  appellation, or beside an NV that has a wine cue of its own. Angelica
+  counts only beside a bottle size, "dessert wine" or a declared wine type.
+  Culinary products are classified
   not-wine/CULINARY (`wine.ErrCulinary`), not merchandise: a title whose
   food noun (vinegar, cooking wine, cake, cheese, jelly, jam, preserves,
   marmalade, chutney, compote, syrup, honey, mustard, olive oil) is not
-  followed by a wine cue as its head ("Sherry Vinegar", but not "Vinegar
-  Hill Syrah"), and a fortified word or appellation on a sauce, jam, trifle
-  mix, fudge or chocolate. A store's own non-wine declaration beats every
-  cue: a Shopify product_type (Pantry, Food, Grocery -> culinary; Merch,
-  Apparel, Gift Card, Accessories, Glassware, Books, Events, Tickets,
-  Membership -> merchandise) or tag (pantry, food; merch, merchandise,
-  apparel, gift card). Culinary items are reserved
+  followed by a wine cue (varietal, appellation, fortified style, colour) as
+  its head ("Sherry Vinegar", but not "Vinegar Hill Syrah"; a food word in a
+  producer name, "by JaM" or "JaM Cellars", is no food), and a fortified
+  word or appellation on a sauce, jam, salami, pasta, pizza and the like. A
+  food sold in a bundle is merchandise; mead is plain not-wine. The same
+  head-noun rule makes a towel, charm, soap, flute or tool merchandise
+  ("Merlot Tea Towel", not "Charm City Syrah"). A store's own non-wine
+  declaration beats every cue: a Shopify product_type (Pantry, Food,
+  Grocery -> culinary; Merch, Apparel, Gift Card, Accessories, Glassware,
+  Books, Events, Tickets, Membership -> merchandise) or tag (pantry, food;
+  merch, merchandise, apparel, gift card); declared both, the title decides.
+  Only wine sources carry the `tags` aspect. Culinary items are reserved
   for a possible future grocery category, which must claim them before the
   ingest's out-of-category purge deletes them. No nagus code groups or compares by product id today
   (audited 2026-09-25: `offer.Query.ProductID` has no caller outside the

@@ -49,7 +49,7 @@ func TestExtract_AppellationIsWineEvidence(t *testing.T) {
 // name, each pinned so removing it fails.
 func TestExtract_AppellationSupplement(t *testing.T) {
 	for _, title := range []string{
-		"Benanti Etna", "Brunello", "Amarone", "Ripasso", "Recioto", "Vino Nobile", "Morellino",
+		"Benanti Etna", "Brunello Riserva", "Amarone", "Ripasso", "Recioto", "Vino Nobile", "Morellino",
 		"Chateauneuf", "Sassicaia", "Lambrusco", "Tokaji", "Cremant", "Txakoli", "Txakolina",
 		"Priorato", "Sudtirol", "Sud Tirol", "Asti Spumante", "Muscadet", "Brachetto d'Acqui",
 		"Carmignano", "Ghemme", "Frascati",
@@ -60,7 +60,7 @@ func TestExtract_AppellationSupplement(t *testing.T) {
 			t.Errorf("%q: %v, want wine", title, err)
 		}
 	}
-	for _, title := range []string{"Montalcino", "Napa", "Sonoma"} {
+	for _, title := range []string{"Montalcino", "Napa", "Sonoma", "Brunello"} {
 		if err := extractErr(title); !errors.Is(err, ErrNotWine) {
 			t.Errorf("%q: %v, want ErrNotWine (broad alone)", title, err)
 		}
@@ -165,9 +165,8 @@ func TestExtract_BareColour(t *testing.T) {
 		{"Kekfrankos Rheinhessen Red 2020", "red", ""},
 		{"Coup de Foug Blanc IGP Vin des Allobroges 2024", "white", ""},
 		{"Bianco Abruzzo White 2023", "white", ""},
-		{"Something Tinto NV", "red", "true"},
-		{"Casa Blanco NV", "white", "true"},
-		{"Rouge Garance Blanc NV", "white", "true"}, // the last colour
+
+		{"Cuvee Rouge Garance Blanc NV", "white", "true"}, // the last colour
 		// A colour in the appellation's own name beats one outside it.
 		{"Etna Bianco Red Label", "white", ""},
 		// An appellation is an NV cue on its own.

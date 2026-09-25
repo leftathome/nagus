@@ -103,6 +103,12 @@ var broad = setOf(
 	"stajerska slovenija", "quincy", "maury", "graves", "fixin",
 	"saint joseph", "l etoile", "brouilly", "sjalland", "guerrouane",
 	"valul lui traian", "stefan voda", "vardar river valley",
+	// Appellations that double as places, landmarks or words (!30 review):
+	// "Vesuvio Pizza Oven", "Santorini Vacation", "Hermitage Museum",
+	// "Douro River Cruise", "Montrachet Goat Log", "Bouzy Babe Tee".
+	"vesuvio", "santorini", "ischia", "pantelleria", "hermitage", "douro",
+	"macon", "dao", "bouzy", "ventoux", "wagram", "schlossberg", "collioure",
+	"montrachet",
 )
 
 // newWorld countries' names are broad: their wines are named by grape, which
@@ -217,6 +223,7 @@ var fold = strings.NewReplacer(
 	"\u00f1", "n",
 	"\u00f4", "o", "\u00f6", "o", "\u00f3", "o", "\u00f8", "o",
 	"\u00fb", "u", "\u00fc", "u", "\u00fa", "u",
+	"\u00f2", "o", "\u00ec", "i", "\u00f9", "u", "\u00f5", "o", "\u00e5", "a", "\u00e6", "ae", "\u0153", "oe",
 )
 
 // spelled are the abbreviations the extractor spells out.

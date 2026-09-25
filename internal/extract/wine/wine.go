@@ -83,11 +83,11 @@ func (e *Extractor) Category() string {
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
-	if err := declaredNonWine(s.Aspects); err != nil {
+	if err := declaredNonWine(s.Aspects, s.Title); err != nil {
 		return item.Item{}, fmt.Errorf("wine: extract: %w", err)
 	}
-	if culinaryTitle(s.Title) {
-		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+	if err := culinaryTitle(s.Title); err != nil {
+		return item.Item{}, fmt.Errorf("wine: extract: %w", err)
 	}
 	if isMerchandise(s.Title) {
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrMerchandise)
@@ -161,7 +161,10 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	app := titleAppellations(s.Title)
 	if it.Attributes["colour"] == "" {
 		c := app.colour
-		if !app.wine && nvMarker(s.Title) {
+		// Beside NV only when the NV already has a wine cue of its own
+		// ("Cuvee Rouge NV"): "Red NV" alone is two weak cues vouching for
+		// each other.
+		if !app.wine && explicitNV(s.Title, false) {
 			c = bareColour(normalizeWords(s.Title))
 		}
 		if c != "" {
@@ -235,7 +238,7 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// A fortified-wine style is wine evidence on its own, NV or not (operator
 	// ruling 2026-09-25, "Port is wine"; LWIN files every one of them as
 	// "Fortified Wine", which quark loads). See fortifiedWine for the guards.
-	fortified, culinaryFortified := fortifiedWine(s.Title)
+	fortified, culinaryFortified := fortifiedWine(s.Title, angelicaVouched(s))
 
 	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
 	// marker, no disgorgement, no fortified style -- means merchandise the
@@ -311,6 +314,24 @@ var ordinalAnniversaryRe = regexp.MustCompile(`(?i)\b\d+(st|nd|rd|th)\s+annivers
 // Angelica").
 var fortifiedRe = regexp.MustCompile(`(?i)\b(port|colheita|lbv|late bottled vintage|sherry|fino|manzanilla|amontillado|oloroso|pedro ximenez|px|madeira|marsala|angelica)\b`)
 
+// angelicaVouched reports what "Angelica" needs beside it to be the wine
+// rather than the herb or a name ("Angelica Root Tea", "Angelica Houston
+// Poster"): a bottle size in the title or the source's data, "dessert wine"
+// in the text, or a source-declared wine type. (A vintage needs no rule
+// here: it is wine evidence on its own, which is how Broc Cellars' "2020
+// Angelica" stays wine.)
+func angelicaVouched(s listing.Sanitized) bool {
+	if mlRe.MatchString(s.Title) || litreRe.MatchString(s.Title) || strings.TrimSpace(s.Aspects["bottle_ml"]) != "" {
+		return true
+	}
+	if strings.TrimSpace(s.Aspects["wine_type"]) != "" {
+		return true
+	}
+	return dessertWineRe.MatchString(s.Title + "\n" + s.Body)
+}
+
+var dessertWineRe = regexp.MustCompile(`(?i)\bdessert\s+wines?\b`)
+
 // hyphenPortRe is a port style written with a hyphen ("Tawny-Port"): the
 // hyphen rule below would otherwise read it as a joined token.
 var hyphenPortRe = regexp.MustCompile(`(?i)\b(tawny|ruby|white|vintage)-(port)\b`)
@@ -349,13 +370,13 @@ var notWinePortRe = regexp.MustCompile(`(?i)\bport\s+(townsend|angeles|orchard|l
 //   - culinaryWordRe is words that real wine names also use ("JaM Cellars",
 //     "The Chocolate Block", "2021 Mix"): they only withdraw the fortified
 //     and appellation cues ("Sherry Trifle Mix", "Chianti Cooking Sauce").
-var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?)\b`)
+var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?|salami|chorizo|truffles?|pasta|marinara|capers|anchovies|oysters|pizza|gelato|risotto|foie gras|ice cream|sorbet)\b`)
 
 // fortifiedWine reports whether a title names a fortified-wine style once
 // the English-word uses of "port" are set aside, and no cask finish, spirit
 // or beer says the word is about something else. culinary reports a
 // fortified-wine word withdrawn because the title is a food made with it.
-func fortifiedWine(title string) (fortified, culinary bool) {
+func fortifiedWine(title string, angelica bool) (fortified, culinary bool) {
 	t := notWinePortRe.ReplaceAllString(foldASCII(title), " ")
 	if spiritBrandRe.MatchString(t) {
 		return false, false
@@ -366,6 +387,10 @@ func fortifiedWine(title string) (fortified, culinary bool) {
 		start, end := m[0], m[1]
 		// A hyphen-joined token is not the word: "Port-a-Potty".
 		if (start > 0 && t[start-1] == '-') || (end < len(t) && t[end] == '-') {
+			continue
+		}
+		// "Angelica" is also a herb and a name: see angelicaVouched.
+		if !angelica && strings.EqualFold(t[start:end], "angelica") {
 			continue
 		}
 		before, after := normalizeWords(t[:start]), normalizeWords(t[end:])
@@ -586,6 +611,8 @@ var foldASCII = strings.NewReplacer(
 	"ñ", "n",
 	"ô", "o", "ö", "o", "ó", "o", "ø", "o",
 	"û", "u", "ü", "u", "ú", "u",
+	// Italian grave accents and the rest of the Iberian set ("Oltrep\u00f2").
+	"\u00f2", "o", "\u00ec", "i", "\u00f9", "u", "\u00f5", "o", "\u00e5", "a", "\u00e6", "ae", "\u0153", "oe",
 ).Replace
 
 // --- critic scores ---
@@ -782,7 +809,13 @@ var ErrCulinary = fmt.Errorf("%w (culinary; reserved for a future grocery catego
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?)\b|^\s*shipping\b)`)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|tees?|socks?|stickers?|magnets?|mugs?|perfumes?|sweaters?|posters?|prints?|paddles?)\b|^\s*shipping\b)`)
+
+// jerseyRe is a jersey, but not the state ("New Jersey Chardonnay").
+var (
+	jerseyRe    = regexp.MustCompile(`(?i)\bjerseys?\b`)
+	newJerseyRe = regexp.MustCompile(`(?i)\bnew\s+jersey\b`)
+)
 
 // packagingMerchRe are words that name merchandise ON THEIR OWN ("Champagne
 // Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine
@@ -790,12 +823,13 @@ var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|cor
 // merchandise only when nothing in it says it is wine; see isMerchandise.
 var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|buckets?|sab(er|re)s?|chillers?|sleeves?|display|pickup|sippers?|leather|carriers?)\b`)
 
-// objectMerchRe are objects no bottle of wine is sold as ("Merlot Tea
-// Towel", "Riesling Wine Charm", "Pinot Noir Wine Tool", "2-Pack Champagne
-// Flutes"): a varietal, a year or a pack count does NOT override them, as it
-// does packagingMerchRe; only a bottle size ("750ml", "1.5L", "Magnum") or an
-// explicit wine pack ("6 Bottles", "Wine Set") does.
-var objectMerchRe = regexp.MustCompile(`(?i)\b(towels?|charms?|soaps?|flutes?|tools?)\b`)
+// OBJECT MERCHANDISE (objectNouns, nonwine.go): a towel, charm, soap,
+// flute or tool that is the title's HEAD noun ("Merlot Tea Towel",
+// "Riesling Wine Charm", "Pinot Noir Wine Tool", "2-Pack Champagne Flutes")
+// is merchandise whatever varietal, year or pack count the title carries --
+// unlike packagingMerchRe -- unless a bottle size ("750ml", "1.5L",
+// "Magnum") or an explicit wine pack ("6 Bottles", "Wine Set") says it is
+// wine. Followed by a wine cue it is a name ("Charm City Syrah 2020").
 
 // bottleCueRe is a bottle size or an explicit pack of wine.
 var bottleCueRe = regexp.MustCompile(`(?i)\b(\d{3,4}\s*ml|\d+(\.\d+)?\s*(l|liter|litre)s?|magnums?|jeroboams?|half[ -]bottles?|\d+\s*-?\s*(bottles?|btls?)|wine\s+(packs?|sets?|bundles?|cases?|collection|trio|duo)|(packs?|cases?|sets?)\s+of\s+\d+\s+(bottles|wines))\b`)
@@ -811,10 +845,10 @@ var packCountRe = regexp.MustCompile(`(?i)\b\d+\s*-?\s*(pk|pack)s?\b`)
 // Oil"). packagingMerchRe wins only when the title carries no pack count, no
 // vintage year and no varietal -- a gift box of wine is wine.
 func isMerchandise(title string) bool {
-	if merchandiseRe.MatchString(title) {
+	if merchandiseRe.MatchString(title) || (jerseyRe.MatchString(title) && !newJerseyRe.MatchString(title)) {
 		return true
 	}
-	if objectMerchRe.MatchString(title) && !bottleCueRe.MatchString(title) {
+	if objectHead(title) && !bottleCueRe.MatchString(title) {
 		return true
 	}
 	if !packagingMerchRe.MatchString(title) {

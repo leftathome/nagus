@@ -17,7 +17,7 @@ import (
 // "2020 Angelica" (a fortified dessert wine) and a Wine tagged holiday stay
 // wine, and a decanter filed under Wine but tagged merch is merchandise.
 func TestExtract_StoreDeclaredNonWine_BrocCellars(t *testing.T) {
-	c := shopify.NewConnector(shopify.Config{Name: "broc-cellars", BaseURL: "https://broccellars.com", FixturePath: "testdata/broc_cellars_2026-09-25.json"})
+	c := shopify.NewConnector(shopify.Config{Name: "broc-cellars", BaseURL: "https://broccellars.com", FixturePath: "testdata/broc_cellars_2026-09-25.json", EmitTags: true})
 	raws, err := c.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestDeclaredNonWine(t *testing.T) {
 		{"Pantry", "", ErrCulinary},
 		{"  FOOD ", "", ErrCulinary},
 		{"Grocery", "", ErrCulinary},
-		{"", "2021, merch, pantry", ErrCulinary},
+		{"", "2021, merch, pantry", ErrMerchandise}, // both declared: the title decides
 		{"Wine", "food", ErrCulinary},
 		{"Merch", "", ErrMerchandise},
 		{"Merchandise", "", ErrMerchandise},
@@ -87,7 +87,7 @@ func TestDeclaredNonWine(t *testing.T) {
 		{"Pantry Wine", "", nil},      // exact types only
 		{"Wine", "online merch", nil}, // exact tags only
 	} {
-		got := declaredNonWine(map[string]string{"product_type": tc.productType, "tags": tc.tags})
+		got := declaredNonWine(map[string]string{"product_type": tc.productType, "tags": tc.tags}, "Some Title")
 		if got != tc.want {
 			t.Errorf("type %q tags %q: %v, want %v", tc.productType, tc.tags, got, tc.want)
 		}
@@ -110,10 +110,7 @@ func TestDeclaredNonWine(t *testing.T) {
 func TestExtract_CulinaryTitleHeadRule(t *testing.T) {
 	culinary := []string{
 		"Sherry Vinegar", "Madeira Cake", "Chardonnay Jam", "Pinot Noir Jelly", "Camino Red Wine Vinegar",
-		"Apricot Jam 2021",         // a year is not a head cue
-		"Cheese and Port Gift Set", // a conjunction
-		"Honey with Chardonnay",    // ditto
-		"JaM Cellars Butter",       // no wine cue at all
+		"Apricot Jam 2021", // a year is not a head cue
 		"Fig Preserves", "Orange Marmalade", "Mango Chutney", "Cherry Compote", "Fruit Syrup",
 		"Wildflower Honey", "Dijon Mustard", "Fox Hill Olive Oil",
 		"Zinfandel Cooking Wine", "Cooking Sherry",

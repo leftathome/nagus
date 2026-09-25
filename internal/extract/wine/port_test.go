@@ -20,7 +20,7 @@ func TestExtract_PortStylesAndGuards(t *testing.T) {
 		// Hyphenated styles.
 		"Tawny-Port", "Ruby-Port",
 		// Angelica, California's fortified dessert wine.
-		"Angelica", "Broc Angelica",
+		"2020 Angelica", "Angelica 375ml",
 	} {
 		if err := extractErr(title); err != nil {
 			t.Errorf("%q: %v, want wine", title, err)

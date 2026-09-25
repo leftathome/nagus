@@ -104,7 +104,7 @@ var lwinAppellations = map[string]bool{
 	"bourgogne passe tout grains":          false, // 73
 	"bourgueil":                            false, // 82
 	"bouzeron":                             false, // 43
-	"bouzy":                                false, // 46
+	"bouzy":                                true,  // 46
 	"breede river valley":                  true,  // 287
 	"breedekloof":                          true,  // 54
 	"breganze":                             false, // 29
@@ -188,7 +188,7 @@ var lwinAppellations = map[string]bool{
 	"colline pescaresi":                    false, // 30
 	"collines rhodaniennes":                false, // 157
 	"collio":                               false, // 215
-	"collioure":                            false, // 59
+	"collioure":                            true,  // 59
 	"columbia gorge":                       true,  // 142
 	"columbia valley":                      true,  // 1836
 	"conca de barbera":                     false, // 35
@@ -248,12 +248,12 @@ var lwinAppellations = map[string]bool{
 	"custoza":                              false, // 34
 	"cyclades":                             true,  // 33
 	"dalmacija":                            true,  // 47
-	"dao":                                  false, // 297
+	"dao":                                  true,  // 297
 	"delle venezie":                        false, // 212
 	"diamond mountain district":            true,  // 80
 	"dogliani":                             false, // 29
 	"dolcetto d alba":                      false, // 209
-	"douro":                                false, // 1014
+	"douro":                                true,  // 1014
 	"dry creek valley":                     true,  // 267
 	"dundee hills":                         true,  // 405
 	"durbanville":                          true,  // 64
@@ -333,7 +333,7 @@ var lwinAppellations = map[string]bool{
 	"heathcote":                            true,  // 166
 	"hemel en aarde ridge":                 true,  // 21
 	"hengst":                               false, // 46
-	"hermitage":                            false, // 153
+	"hermitage":                            true,  // 153
 	"hessische bergstrasse":                false, // 32
 	"horse heaven hills":                   true,  // 342
 	"howell mountain":                      true,  // 208
@@ -343,7 +343,7 @@ var lwinAppellations = map[string]bool{
 	"irancy":                               false, // 46
 	"irouleguy":                            false, // 32
 	"irpinia":                              false, // 96
-	"ischia":                               false, // 23
+	"ischia":                               true,  // 23
 	"isola dei nuraghi":                    false, // 104
 	"istria":                               true,  // 23
 	"itata valley":                         true,  // 163
@@ -408,7 +408,7 @@ var lwinAppellations = map[string]bool{
 	"lujan de cuyo":                        true,  // 277
 	"lussac saint emilion":                 false, // 107
 	"macedon ranges":                       true,  // 40
-	"macon":                                false, // 371
+	"macon":                                true,  // 371
 	"macon villages":                       false, // 106
 	"macvin du jura":                       false, // 25
 	"madiran":                              false, // 52
@@ -466,7 +466,7 @@ var lwinAppellations = map[string]bool{
 	"monthelie":                            false, // 219
 	"montilla moriles":                     false, // 65
 	"montlouis sur loire":                  false, // 70
-	"montrachet":                           false, // 84
+	"montrachet":                           true,  // 84
 	"montsant":                             false, // 174
 	"moon mountain district":               true,  // 51
 	"morellino di scansano":                false, // 74
@@ -521,7 +521,7 @@ var lwinAppellations = map[string]bool{
 	"padthaway":                              true,  // 38
 	"paestum":                                true,  // 37
 	"pais vasco":                             true,  // 81
-	"pantelleria":                            false, // 20
+	"pantelleria":                            true,  // 20
 	"parras valley":                          true,  // 30
 	"paso robles":                            true,  // 1697
 	"paso robles highlands district":         true,  // 21
@@ -651,7 +651,7 @@ var lwinAppellations = map[string]bool{
 	"santa maria valley":                     true,  // 471
 	"santa ynez valley":                      true,  // 554
 	"santenay":                               false, // 504
-	"santorini":                              false, // 93
+	"santorini":                              true,  // 93
 	"sardinia":                               true,  // 462
 	"saumur":                                 false, // 159
 	"saumur champigny":                       false, // 130
@@ -659,7 +659,7 @@ var lwinAppellations = map[string]bool{
 	"savennieres":                            false, // 76
 	"savigny les beaune":                     false, // 604
 	"savoie":                                 true,  // 320
-	"schlossberg":                            false, // 47
+	"schlossberg":                            true,  // 47
 	"schoenenbourg":                          false, // 44
 	"seneca lake":                            true,  // 143
 	"shenandoah valley":                      true,  // 114
@@ -749,7 +749,7 @@ var lwinAppellations = map[string]bool{
 	"vaud":                                   true,  // 106
 	"veneto":                                 true,  // 1790
 	"venezia giulia":                         true,  // 229
-	"ventoux":                                false, // 150
+	"ventoux":                                true,  // 150
 	"verdicchio dei castelli di jesi":        false, // 87
 	"verdicchio di matelica":                 false, // 25
 	"vermentino di gallura":                  false, // 44
@@ -757,7 +757,7 @@ var lwinAppellations = map[string]bool{
 	"vernaccia di san gimignano":             false, // 46
 	"verzenay":                               false, // 35
 	"verzy":                                  false, // 29
-	"vesuvio":                                false, // 25
+	"vesuvio":                                true,  // 25
 	"vigneti delle dolomiti":                 false, // 146
 	"villany":                                false, // 20
 	"vin de corse":                           false, // 68
@@ -779,7 +779,7 @@ var lwinAppellations = map[string]bool{
 	"vouvray":                                false, // 250
 	"vulkanland steiermark":                  false, // 26
 	"wachau":                                 false, // 487
-	"wagram":                                 false, // 159
+	"wagram":                                 true,  // 159
 	"wahluke slope":                          true,  // 170
 	"waiheke island":                         true,  // 146
 	"waipara":                                true,  // 179

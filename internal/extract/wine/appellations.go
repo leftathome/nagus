@@ -47,7 +47,7 @@ import (
 var appellationSupplement = map[string]bool{
 	// Short forms LWIN files only under a longer name.
 	"etna":          false, // LWIN: Etna Rosso / Etna Bianco / Etna Rosato
-	"brunello":      false, // Brunello di Montalcino
+	"brunello":      true,  // Brunello di Montalcino; also a fashion house
 	"amarone":       false, // Amarone della Valpolicella
 	"ripasso":       false, // Valpolicella Ripasso
 	"recioto":       false, // Recioto della Valpolicella / di Soave
@@ -208,7 +208,9 @@ func inSpan(ms []phraseMatch, i int) bool {
 // "Burgundy Harvest Tour", "Map of Bordeaux").
 var eventWords = setOfWords("dinner", "lunch", "brunch", "tasting", "tastings", "tour", "tours", "class",
 	"classes", "seminar", "webinar", "event", "events", "experience", "festival", "trip", "travel",
-	"book", "books", "map", "maps", "poster", "print", "prints", "puzzle", "guide", "course")
+	"book", "books", "map", "maps", "poster", "print", "prints", "puzzle", "guide", "course",
+	"cruise", "cruises", "vacation", "vacations", "visit", "visits", "hike", "hikes", "museum",
+	"voucher", "vouchers", "package", "packages", "cookbook", "cookbooks")
 
 // spiritWords are the whole-word spirit and beer names
 // ("single malt" is two words; see spiritTitle).
@@ -353,12 +355,22 @@ func titleAppellations(title string) appellationEvidence {
 	return ev
 }
 
-// colourBeside reports a bare colour word outside match m's own words: the
-// supporting cue a broad name needs. noEnglish drops "red" and "white" (see
-// englishColours).
+// colourBeside reports a bare colour word NEXT TO broad match m -- right
+// before or after it, or with one word between ("Red Mountain Pioneer Red")
+// -- in a title with no object noun: the supporting cue a broad name needs.
+// "Burgundy Blanc Throw Pillow" and "Napa Valley Cap Red" are home goods and
+// clothes in a colour. noEnglish drops "red" and "white" (englishColours).
 func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
+	for _, w := range words {
+		if broadMerchNouns[w] {
+			return false
+		}
+	}
 	for i, w := range words {
 		if i >= m.start && i < m.end {
+			continue
+		}
+		if i < m.start-2 || i > m.end+1 {
 			continue
 		}
 		if _, ok := bareColours[w]; ok && !(noEnglish && englishColours[w]) {
@@ -367,3 +379,10 @@ func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 	}
 	return false
 }
+
+// broadMerchNouns are things sold "in Burgundy" or "in Bordeaux Blanc": a
+// broad region's colour cue does not count in a title that names one.
+var broadMerchNouns = setOfWords("cap", "caps", "pillow", "pillows", "throw", "throws", "blanket", "blankets",
+	"swatch", "swatches", "paint", "paints", "scarf", "scarves", "bag", "bags", "napkin", "napkins", "rug",
+	"rugs", "fabric", "yarn", "lipstick", "polish", "dress", "jacket", "vest", "coat", "shoes", "tie",
+	"ribbon", "balloon", "balloons", "frame", "cushion", "cushions", "curtain", "curtains", "sofa", "chair")
