@@ -297,6 +297,11 @@ func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, e
 	if s.Fixture == "" && s.BaseURL == "" {
 		return nil, fmt.Errorf("source %q: shopify needs baseUrl (the storefront root) or a fixture", s.Name)
 	}
+	for _, h := range append([]string{s.Collection}, s.Collections...) {
+		if h != "" && !shopify.ValidCollectionHandle(h) {
+			return nil, fmt.Errorf("source %q: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", s.Name, h)
+		}
+	}
 	return shopify.NewConnector(shopify.Config{
 		Name:                s.Name,
 		BaseURL:             s.BaseURL,
@@ -306,6 +311,8 @@ func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, e
 		SKUIsMPN:            s.SKUIsMPN,
 		SKUSuffixes:         s.SKUSuffixes,
 		MaxPages:            s.MaxPages,
+		Collection:          s.Collection,
+		Collections:         s.Collections,
 		// Only the wine extractor reads tags (store-declared non-wine,
 		// nagus-tmr). Other categories' listings do not carry them: they
 		// would reach the fail-closed glovebox gate and every stored offer

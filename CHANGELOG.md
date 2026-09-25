@@ -131,6 +131,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paddles and jerseys (not New Jersey) follow the same head-noun rule:
   "Sancerre Tee" is merchandise, "Sweater Weather Red Blend 2022" wine.
 - **Bare "Cabernet" is a varietal** (red), after every other grape.
+- **A Shopify SKU is no longer sent to quark as the part number** (quark
+  QUARK-02; operator-approved re-key). serverpartdeals SKUs carry seller
+  segments after the manufacturer part number (`HUS726040AL4215-DELL_DELLG13`,
+  `00JHTD_DELLG14_SR_12`), so one drive became many quark products -- 266 keys
+  over 61 base part numbers on the live store -- and no listing title could
+  ever match a key. The MPN is now the longest title token the SKU starts
+  with, else the SKU's part-number-shaped leading segment, else none. Offers
+  whose hint changes are re-resolved by quark automatically; the old
+  SKU-keyed products stay in quark unreferenced (nothing is merged or
+  deleted). The committed serverpartdeals baseline moves from 35 to 25
+  products: ten groups were each one drive in different caddies, audited.
 
 ### Fixed
 
@@ -150,6 +161,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   decides (a food title is culinary, anything else merchandise). Exact
   words only: a wine tagged "gifts" or "holiday" stays wine. Commerce7 and Vinoshipper already
   skip non-wine types; OrderPort publishes none.
+- **serverpartdeals was never walked to its end, so tail rows never
+  refreshed** (nagus-bu2). The store's catalogue is more than 10,000 products
+  (40+ full pages at 250, measured 2026-09-25) and hard drives are spread
+  across all of them, so the 12-page cap reached 147 of the 260 in-stock
+  drives. Rows past the cap kept their pre-re-key seller-SKU hints and quark
+  ids, and offer expiry was skipped on every run. A shopify source can now
+  set `collections` (a list; `collection` is a single-entry alias), which
+  walks each `/collections/<handle>/products.json` instead of the whole
+  catalogue, deduping products by id; the fetch is complete only when EVERY
+  collection's walk is. No single serverpartdeals collection covers the
+  drives: `all-hard-drives` (260) misses the 7 in-stock drives typed
+  "HDDs > ..." (live offers today), which only `hard-drives` (266) holds,
+  and `hard-drives` misses one that only `all-hard-drives` holds; together
+  they are 267 products, every in-stock drive (measured 2026-09-25), in 4
+  pages. Every row is re-ingested with its manufacturer-part-number hint (a
+  changed hint resets the offer's resolution, so quark re-resolves it), and
+  expiry runs again. SourceKeys and product URLs do not change. Needs the
+  gitops value `collections: [all-hard-drives, hard-drives]` on the
+  serverpartdeals source.
+- **An empty collection is never a complete walk.** A collection that
+  returns no products on page 1 (emptied, hidden or renamed: Shopify
+  answers an unknown handle with an empty list) makes the fetch incomplete
+  and logs a warning, so it cannot expire every offer the source holds.
+- **A failed Shopify fetch resets completeness** at its start, as commerce7
+  and vinoshipper do, so a fetch that errors part-way never leaves the
+  previous run's "complete" standing.
+- **Shopify fetches pace themselves**: a 3s courtesy pause before every page
+  after the first (`shopify.Config.PageDelay`), so a multi-page walk is a
+  trickle, not the burst that trips a store's limiter. One-page stores never
+  wait.
+- **The truncation warning counts store products read and listings kept
+  separately.** "143 products fetched" was 3000 store products read, of
+  which 143 variants passed the allow-filter; the smaller number hid how far
+  short of the catalogue the walk stopped.
 
 ### Added
 
@@ -166,20 +211,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   quark's `text` route stamps resolved; `unmatched` stamps refused, retried
   when quark's catalogue generation grows. Enable only after quark accepts
   `text` (quark MR !6): an older quark rejects the unknown field.
-
-### Changed
-
-- **A Shopify SKU is no longer sent to quark as the part number** (quark
-  QUARK-02; operator-approved re-key). serverpartdeals SKUs carry seller
-  segments after the manufacturer part number (`HUS726040AL4215-DELL_DELLG13`,
-  `00JHTD_DELLG14_SR_12`), so one drive became many quark products -- 266 keys
-  over 61 base part numbers on the live store -- and no listing title could
-  ever match a key. The MPN is now the longest title token the SKU starts
-  with, else the SKU's part-number-shaped leading segment, else none. Offers
-  whose hint changes are re-resolved by quark automatically; the old
-  SKU-keyed products stay in quark unreferenced (nothing is merged or
-  deleted). The committed serverpartdeals baseline moves from 35 to 25
-  products: ten groups were each one drive in different caddies, audited.
 
 ## [0.5.1] - 2026-09-24
 
