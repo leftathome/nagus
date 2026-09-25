@@ -32,12 +32,23 @@
 //     "Hard Drives > 18TB > ..." and "HDDs > 18TB > ..." occur. An allow-filter
 //     must therefore accept a LIST of prefixes.
 //
+// # Large mixed catalogues: walk a collection
+//
+// A fetch that stops at MaxPages never refreshes the products behind the cap
+// and never lets offer expiry run. serverpartdeals is the case in point: more
+// than 10,000 products, hard drives scattered across every page. Rather than
+// walking 40+ pages an hour, such a store is pointed at the storefront
+// collection holding the category (Config.Collection), which Shopify serves
+// through the same products.json shape (nagus-bu2).
+//
 // # Rate limiting
 //
 // serverpartdeals returns HTTP 429 with a plain-text "local_rate_limited" body and
 // is aggressive about it (five consecutive 429s at 45s intervals during the
-// capture). Poll politely -- hourly at most, per store. This package does not
-// sleep or schedule; cadence is the caller's responsibility.
+// capture). Poll politely -- hourly at most, per store. Cadence between fetches
+// is the caller's responsibility; WITHIN a fetch the connector paces itself,
+// waiting PageDelay between successive pages (nagus-bu2), so walking a large
+// catalogue to its end is a slow trickle rather than a burst.
 //
 // # Trust boundary
 //
@@ -85,9 +96,24 @@ const (
 	MaxRetryWait = 2 * time.Minute
 	// DefaultCurrency -- products.json omits currency entirely.
 	DefaultCurrency = "USD"
+	// DefaultPageDelay is the courtesy pause between successive pages of one
+	// fetch. A burst of back-to-back pages is what trips serverpartdeals'
+	// limiter; 3s keeps a 30-page walk under two minutes while staying far
+	// below any per-second budget. A single-page store never waits.
+	DefaultPageDelay = 3 * time.Second
 	// DefaultUserAgent identifies the poller politely.
 	DefaultUserAgent = "nagus/0.2 (+https://github.com/leftathome/nagus)"
 )
+
+// collectionHandleRe is a Shopify collection handle. Checked because the
+// handle is spliced into a URL path.
+var collectionHandleRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidCollectionHandle reports whether s is a well-formed collection handle,
+// so configuration can be rejected at startup rather than on first fetch.
+func ValidCollectionHandle(s string) bool {
+	return collectionHandleRe.MatchString(strings.TrimSpace(s))
+}
 
 // ErrRateLimited is a 429 from the storefront. Surfaced distinctly so an operator
 // can tell throttling from a broken store.
@@ -107,6 +133,15 @@ type Config struct {
 	// store downstream. Note real catalogs use INCONSISTENT prefixes for one
 	// category, so pass every spelling: {"Hard Drives", "HDDs"}.
 	ProductTypePrefixes []string
+	// Collection, when set, walks one storefront collection's feed
+	// (/collections/<handle>/products.json) instead of the whole catalogue's.
+	// It is how a store whose catalogue is far larger than the category we
+	// want is walked COMPLETELY and cheaply (nagus-bu2): serverpartdeals has
+	// more than 10,000 products, 40+ pages, but its "all-hard-drives"
+	// collection is every in-stock hard drive in 2 pages (measured
+	// 2026-09-25). The allow-filter still applies on top. A handle is a
+	// Shopify slug: lowercase letters, digits and hyphens only.
+	Collection string
 	// IncludeUnavailable emits variants with available=false. Default false:
 	// an out-of-stock drive is not an actionable deal, and surfacing it as one
 	// is noise.
@@ -145,8 +180,14 @@ type Config struct {
 	// Sleep is the delay hook, injectable so tests do not actually wait.
 	Sleep func(ctx context.Context, d time.Duration) error
 
-	// MaxPages bounds pagination. Defaults to DefaultMaxPages.
+	// MaxPages bounds pagination. Defaults to DefaultMaxPages. It is a guard
+	// against a mis-pointed source, not a sampling knob: set it ABOVE the
+	// store's real page count, because a fetch that stops at the cap never
+	// refreshes the tail and never lets offer expiry run (nagus-bu2).
 	MaxPages int
+	// PageDelay is the courtesy pause before every page after the first.
+	// Defaults to DefaultPageDelay; negative disables it (tests).
+	PageDelay time.Duration
 	// Limit is the page size. Defaults to DefaultLimit.
 	Limit int
 
@@ -210,6 +251,12 @@ func NewConnector(cfg Config) *Connector {
 	if cfg.Limit <= 0 {
 		cfg.Limit = DefaultLimit
 	}
+	if cfg.PageDelay == 0 {
+		cfg.PageDelay = DefaultPageDelay
+	} else if cfg.PageDelay < 0 {
+		cfg.PageDelay = 0
+	}
+	cfg.Collection = strings.TrimSpace(cfg.Collection)
 	cfg.Name = strings.TrimSpace(cfg.Name)
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	return &Connector{cfg: cfg}
@@ -250,13 +297,23 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	if c.cfg.BaseURL == "" {
 		return nil, errors.New("shopify: no base url configured")
 	}
+	if c.cfg.Collection != "" && !ValidCollectionHandle(c.cfg.Collection) {
+		return nil, fmt.Errorf("shopify: collection %q is not a Shopify handle (lowercase letters, digits, hyphens)", c.cfg.Collection)
+	}
 	// complete records whether we walked the catalogue to its end. Exhausting
 	// MaxPages while the last page was still FULL means there is more inventory
 	// we did not fetch -- and a bounded fetch that says nothing is the worst kind
 	// of bug, because partial coverage is indistinguishable from full coverage in
 	// the output. So the cap is reported, never silent.
 	complete := false
+	products := 0
 	for page := 1; page <= c.cfg.MaxPages; page++ {
+		if page > 1 && c.cfg.PageDelay > 0 {
+			// Courtesy pacing: never fetch pages back to back.
+			if err := c.cfg.Sleep(ctx, c.cfg.PageDelay); err != nil {
+				return nil, err
+			}
+		}
 		data, err := c.fetchPageWithRetry(ctx, page)
 		if err != nil {
 			return nil, err
@@ -269,6 +326,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			complete = true
 			break
 		}
+		products += len(prods)
 		raws = append(raws, c.mapProducts(prods, now)...)
 		if len(prods) < c.cfg.Limit {
 			// Short page: this was the last one.
@@ -280,8 +338,11 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	c.lastComplete = complete
 	c.mu.Unlock()
 	if !complete {
-		c.logf("shopify %s: TRUNCATED at the %d-page cap (%d products fetched, last page full) -- this store has more inventory than we are collecting; raise maxPages or accept partial coverage",
-			c.SourceID(), c.cfg.MaxPages, len(raws))
+		// products is what the store returned; raws is what survived the
+		// allow-filter and availability as per-variant listings. Reporting
+		// the second as "products" understated the walk (nagus-bu2).
+		c.logf("shopify %s: TRUNCATED at the %d-page cap (%d store products read, %d listings kept, last page full) -- products past the cap are never refreshed and offer expiry is skipped; raise maxPages above the store's page count",
+			c.SourceID(), c.cfg.MaxPages, products, len(raws))
 	}
 	return raws, nil
 }
@@ -338,7 +399,11 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // fetchPageOnce returns the body, or on a 429 the server's requested wait.
 func (c *Connector) fetchPageOnce(ctx context.Context, page int) ([]byte, time.Duration, error) {
-	url := fmt.Sprintf("%s%s?limit=%d&page=%d", c.cfg.BaseURL, ProductsPath, c.cfg.Limit, page)
+	path := ProductsPath
+	if c.cfg.Collection != "" {
+		path = "/collections/" + c.cfg.Collection + ProductsPath
+	}
+	url := fmt.Sprintf("%s%s?limit=%d&page=%d", c.cfg.BaseURL, path, c.cfg.Limit, page)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("shopify: build request: %w", err)

@@ -111,6 +111,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deleted). The committed serverpartdeals baseline moves from 35 to 25
   products: ten groups were each one drive in different caddies, audited.
 
+### Fixed
+
+- **serverpartdeals was never walked to its end, so tail rows never
+  refreshed** (nagus-bu2). The store's catalogue is more than 10,000 products
+  (40+ full pages at 250, measured 2026-09-25) and hard drives are spread
+  across all of them, so the 12-page cap reached 147 of the 260 in-stock
+  drives. Rows past the cap kept their pre-re-key seller-SKU hints and quark
+  ids, and offer expiry was skipped on every run. A shopify source can now
+  set `collection`, which walks `/collections/<handle>/products.json`
+  instead of the whole catalogue: serverpartdeals' `all-hard-drives`
+  collection is every in-stock drive in 2 pages. The walk completes, every
+  row is re-ingested with its manufacturer-part-number hint (a changed hint
+  resets the offer's resolution, so quark re-resolves it), and expiry runs
+  again. SourceKeys and product URLs do not change. Needs the gitops value
+  `collection: all-hard-drives` on the serverpartdeals source.
+- **Shopify fetches pace themselves**: a 3s courtesy pause before every page
+  after the first (`shopify.Config.PageDelay`), so a multi-page walk is a
+  trickle, not the burst that trips a store's limiter. One-page stores never
+  wait.
+- **The truncation warning counts store products read and listings kept
+  separately.** "143 products fetched" was 3000 store products read, of
+  which 143 variants passed the allow-filter; the smaller number hid how far
+  short of the catalogue the walk stopped.
+
 ## [0.5.1] - 2026-09-24
 
 ### Fixed
