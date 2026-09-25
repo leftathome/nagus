@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/leftathome/nagus/internal/listing"
 )
 
 // "NV" is wine evidence only beside another wine cue (nagus !28 re-review
@@ -132,10 +134,98 @@ func TestExtract_NVWithFortifiedOrPetillantCues(t *testing.T) {
 		"Pet-Nat Sparkler NV",
 		"Petillant Naturel NV",
 		"Sweet Vermouth NV",
+		"MUZ Vermut 1L NV", // mysa; the Spanish spelling
 	} {
 		it, err := New().Extract(context.Background(), sanitized(title, ""))
 		if err != nil || it.Attributes["nv"] != "true" {
 			t.Errorf("%q: nv=%q err=%v", title, it.Attributes["nv"], err)
+		}
+	}
+}
+
+// A fortified-wine style is wine evidence with no NV and no product type
+// (operator ruling 2026-09-25, "Port is wine"). A year beside it is still
+// the vintage unless a skip word says otherwise.
+func TestExtract_FortifiedIsWine(t *testing.T) {
+	for title, vintage := range map[string]string{
+		"Bottled in 2020 Tawny Port":       "", // wine, but 2020 is a bottling year
+		"Taylor's 20 Year Old Tawny Port":  "",
+		"Graham's 2017 Vintage Port":       "2017",
+		"Fonseca Bin 27 Port":              "",
+		"Tio Pepe Fino Sherry":             "",
+		"Blandy's 10 Year Malmsey Madeira": "",
+		"Florio Marsala Superiore":         "",
+		"Warre's LBV 2016":                 "2016",
+		"Quinta do Noval Colheita":         "",
+		"Lustau Manzanilla Papirusa":       "",
+		"Gonzalez Byass Oloroso":           "",
+		"Pedro Ximenez Dessert Sherry":     "",
+		"Late Bottled Vintage Porto Style": "",
+		"Hidalgo Amontillado Napoleon":     "",
+		"Ruby Port Reserve":                "",
+		"Harveys Bristol Cream Sherry":     "",
+		"Taylor Fladgate LBV":              "",
+	} {
+		it, err := New().Extract(context.Background(), sanitized(title, ""))
+		if err != nil {
+			t.Errorf("%q: %v, want wine", title, err)
+			continue
+		}
+		if it.Attributes["vintage"] != vintage {
+			t.Errorf("%q: vintage = %q, want %q", title, it.Attributes["vintage"], vintage)
+		}
+	}
+}
+
+// "port" the English word, "ruby"/"tawny" the colours, and fortified-wine
+// merchandise are not wine.
+func TestExtract_PortAsEnglishWordIsNotWine(t *testing.T) {
+	for _, title := range []string{
+		// Merchandise: glass and decanter are on the strong list, so no pack
+		// count, year or varietal rescues them; sipper, leather and carrier
+		// are on the packaging list.
+		"Port Glass Set of 2",
+		"6 Pack Port Glasses",
+		"Sherry Glass",
+		"Port Sipper",
+		"Port Decanter",
+		"Tawny Leather Wine Carrier",
+		"Tawny Leather Tote",
+		"Port Travel Carrier",
+		"Port Leather Case",
+		// Places: whole words, and "Port <place>".
+		"Newport Wine Tote",
+		"Portland Oregon Wine Tour Gift Card",
+		"Portsmouth Tasting Room Pass",
+		"Port Townsend Tasting Room Pass",
+		"Port Angeles Tasting Room Pass",
+		// A connector.
+		"USB Port Adapter",
+		// Colours and gemstones.
+		"Ruby Red Grapefruit Soda",
+		"Tawny Owl Print",
+	} {
+		if _, err := New().Extract(context.Background(), sanitized(title, "")); !errors.Is(err, ErrNotWine) {
+			t.Errorf("%q: err = %v, want ErrNotWine", title, err)
+		}
+	}
+}
+
+// A source's declared wine_type is wine evidence (a colour), so it overrides
+// the no-evidence rejection -- intentional, and the production behaviour --
+// but never the merchandise lists, which run first on the title alone.
+func TestExtract_DeclaredWineTypeIsEvidence(t *testing.T) {
+	withType := func(title, wineType string) listing.Sanitized {
+		s := sanitized(title, "")
+		s.Aspects = map[string]string{"wine_type": wineType}
+		return s
+	}
+	if _, err := New().Extract(context.Background(), withType("Tawny Owl Reserve", "Red")); err != nil {
+		t.Errorf("declared wine_type Red with no title evidence: %v, want wine", err)
+	}
+	for _, title := range []string{"Tawny Leather Wine Carrier", "Port Glass Set of 2", "Port Sipper"} {
+		if _, err := New().Extract(context.Background(), withType(title, "Red")); !errors.Is(err, ErrNotWine) {
+			t.Errorf("%q with wine_type Red: err = %v, want ErrNotWine (merchandise wins)", title, err)
 		}
 	}
 }

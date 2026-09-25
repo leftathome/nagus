@@ -213,12 +213,21 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// disgorged. Its year is never the vintage (extractVintage skips it).
 	disgorged := disgorgedRe.MatchString(s.Title)
 
+	// A fortified-wine style is wine evidence on its own, NV or not (operator
+	// ruling 2026-09-25, "Port is wine"; LWIN files every one of them as
+	// "Fortified Wine", which quark loads). See fortifiedWine for the guards.
+	fortified := fortifiedWine(s.Title)
+
 	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
-	// marker, no disgorgement -- means merchandise the keyword list did not name. Measured on the live corpus
+	// marker, no disgorgement, no fortified style -- means merchandise the
+	// keyword list did not name. A source-declared wine_type is a colour
+	// (sourceColour above), so it passes this check for any title the
+	// merchandise lists did not already reject: intentional, and unchanged
+	// since production (TestExtract_DeclaredWineTypeIsEvidence). Measured on the live corpus
 	// (2026-09-21): exactly 12 of 91 wine items had none of the three, and all
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
-	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged {
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged && !fortified {
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
@@ -267,6 +276,24 @@ var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degor
 // ordinalAnniversaryRe is "50th anniversary" and the like, right before a
 // year.
 var ordinalAnniversaryRe = regexp.MustCompile(`(?i)\b\d+(st|nd|rd|th)\s+anniversary[\s:.,(]*$`)
+
+// fortifiedRe is a fortified-wine style: port and its categories, sherry and
+// its styles, madeira, marsala. Whole words only ("Newport", "Portland",
+// "Portsmouth", "Passport" never match). "tawny" and "ruby" are NOT here on
+// their own -- they are colours and gemstones ("Ruby Red Grapefruit",
+// "Tawny Leather Tote") -- but "Tawny Port" / "Ruby Port" match on "port".
+var fortifiedRe = regexp.MustCompile(`(?i)\b(port|colheita|lbv|late bottled vintage|sherry|fino|manzanilla|amontillado|oloroso|pedro ximenez|px|madeira|marsala)\b`)
+
+// notWinePortRe is "port" the English word: a place ("Port Townsend", "Port
+// Angeles" -- a short list, not a gazetteer) or a connector ("USB port").
+// The wine extractor rarely sees either; the tech half is defensive.
+var notWinePortRe = regexp.MustCompile(`(?i)\bport\s+(townsend|angeles|orchard|ludlow|hadlock|huron|arthur|jefferson|washington|charlotte|richey|chester|clinton|royal|elizabeth|moresby|louis|lincoln|hueneme|aransas|lavaca|isabel|st\.?\s+lucie)\b|\b(usb|usb-c|hdmi|ethernet|charging|charger|serial|audio|thunderbolt|lightning|network|power|display)\s+ports?\b`)
+
+// fortifiedWine reports whether a title names a fortified-wine style once
+// the English-word uses of "port" are set aside.
+func fortifiedWine(title string) bool {
+	return fortifiedRe.MatchString(notWinePortRe.ReplaceAllString(foldASCII(title), " "))
+}
 
 // disgorgedRe marks a disgorgement date: sparkling wine only.
 var disgorgedRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorged?|degorgement)\b`)
@@ -583,7 +610,7 @@ var nvNotWineAfterRe = regexp.MustCompile(`(?i)^\s*(beer|brewery|brewing|lager|a
 
 // nvWineCueRe are the words that make a title's NV a wine's NV: sparkling
 // and house-style terms. A colour or a varietal also qualifies (passed in).
-var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs|port|tawny|ruby|moscato|pet[ -]?nat|petillant|vermouth)\b`)
+var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs|port|tawny|ruby|moscato|pet[ -]?nat|petillant|vermouth|vermut)\b`)
 
 // nevadaPlaceRe is a Nevada place directly before "NV" with no comma
 // ("Reno NV Pickup"): the state, not a non-vintage marker. The main cities
@@ -605,7 +632,7 @@ func explicitNV(title string, otherWineCue bool) bool {
 		if nvNotWineAfterRe.MatchString(folded[end-len(folded[m[4]:m[5]]):]) {
 			continue // "Heineken N.V. Beer": a company suffix
 		}
-		return otherWineCue || nvWineCueRe.MatchString(folded)
+		return otherWineCue || nvWineCueRe.MatchString(notWinePortRe.ReplaceAllString(folded, " "))
 	}
 	return false
 }
@@ -623,7 +650,7 @@ var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|cor
 // Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine
 // sold in packaging ("6PK Gift Box Wood MRW, 2021 Mix"). They mark a title
 // merchandise only when nothing in it says it is wine; see isMerchandise.
-var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|flutes?|buckets?|sab(er|re)s?|charms?|chillers?|sleeves?|towels?|soaps?|display|tools?|pickup)\b`)
+var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|flutes?|buckets?|sab(er|re)s?|charms?|chillers?|sleeves?|towels?|soaps?|display|tools?|pickup|sippers?|leather|carriers?)\b`)
 
 // packCountRe is a pack count: "6PK", "6 pk", "12-pack", "3 Pack".
 var packCountRe = regexp.MustCompile(`(?i)\b\d+\s*-?\s*(pk|pack)s?\b`)
