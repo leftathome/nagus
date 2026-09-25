@@ -287,9 +287,9 @@ func TestExtract_CulinaryIsItsOwnReason(t *testing.T) {
 		"Port Fig Jam",
 		"Port Fudge",
 		"Sherry Chocolates",
-		// The always-reject culinary list: a colour, varietal or year in
-		// the title does not rescue it ("Camino Red Wine Vinegar" is live
-		// on broc-cellars).
+		// A food noun AFTER a colour, varietal or year is the product
+		// (culinaryTitle), so they do not rescue it ("Camino Red Wine
+		// Vinegar" is live on broc-cellars).
 		"Camino Red Wine Vinegar",
 		"Zinfandel Cooking Wine",
 		"Chardonnay Cake",

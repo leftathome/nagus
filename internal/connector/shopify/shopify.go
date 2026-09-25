@@ -416,6 +416,12 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if p.ProductType != "" {
 				aspects["product_type"] = p.ProductType
 			}
+			// The store's own tags, comma-joined: the wine extractor
+			// rejects a listing a store tags "merch" or "pantry" whatever
+			// its text says (nagus-tmr). Untrusted like every aspect.
+			if tags := joinTags(p.Tags); tags != "" {
+				aspects["tags"] = tags
+			}
 			if v.SKU != "" {
 				aspects["sku"] = v.SKU
 			}
@@ -449,6 +455,18 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 		}
 	}
 	return out
+}
+
+// joinTags renders a product's tags as one comma-separated aspect value,
+// trimmed, empty tags dropped.
+func joinTags(tags []string) string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // allowed reports whether a product passes the configured product_type

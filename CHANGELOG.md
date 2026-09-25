@@ -80,6 +80,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   merchandise (`wine.ErrMerchandise`): both wrap `wine.ErrNotWine` and are
   told apart in the extract skip reason, reserved for a possible future
   grocery category.
+- **Appellations are wine evidence** (nagus-tmr). Old World wines named by
+  place ("Castello di Ama Chianti Classico", "Barolo Vietti", "Sancerre
+  Vacheron", "Etna Rosso Benanti") were dropped as not-wine when the title
+  carried no year, grape or colour word. A static table generated offline
+  from the Liv-ex LWIN export (`tools/genappellations`; REGION/SUB_REGION
+  names of at least 20 live wines, CC BY 4.0, attributed in the generated
+  file) plus a hand supplement (Etna, Brunello, Amarone, Muscadet, ...)
+  now counts: specific appellations alone, broad regions and New World
+  AVAs (Burgundy, Tuscany, Napa Valley) only beside a classification token
+  (DOC, AOC, Grand Cru, Riserva, ...) or a bare colour word. Bare "Red",
+  "Rouge", "Rosso", "Tinto", "Blanco" (and Bianco, Blanc, White, Rosado,
+  Rosato) are the colour beside an appellation or NV, and nowhere else.
+  Cask finishes, spirits, events and foods withdraw the cue ("Sauternes
+  Cask Finish", "Barolo Tasting Dinner", "Chianti Cooking Sauce"). nagus
+  still loads nothing from LWIN at runtime.
+- **Culinary is a head-noun rule** (nagus-tmr). A title's food noun
+  (vinegar, cake, cheese, jelly, jam, preserves, marmalade, chutney,
+  compote, syrup, honey, mustard, olive oil, cooking wine) makes it
+  culinary unless a varietal, appellation, fortified style or colour
+  keyword FOLLOWS it: "Sherry Vinegar", "Chardonnay Jam" and "Madeira Cake"
+  are culinary; "Cake Bread Cellars Chardonnay", "Jelly Roll Zinfandel" and
+  "Vinegar Hill Syrah" are wine. A year never rescues one, from the title
+  or the body.
+- **Port styles and guards** (nagus-tmr). Oak or wood before a port word is
+  a style ("Oak Aged Port", "Wood Port"), and after a named style too ("Old
+  Oak Tawny Port", "Tawny Port, oak aged"); cask, barrel and finish still
+  withdraw it. A spirit word in a producer name right before the style is
+  the producer ("Porter Creek Tawny Port", "Gin Lane Port"). "Tawny-Port"
+  counts. "Angelica" (California's fortified dessert wine) is a fortified
+  style. "Port Ellen" and "Port Askaig" are Scotch.
+- **Object merchandise is not rescued by a grape** (nagus-tmr). Towels,
+  charms, soap, flutes and tools are merchandise even with a varietal, a
+  year or a pack count ("Merlot Tea Towel", "2-Pack Champagne Flutes"),
+  unless a bottle size or an explicit pack of wine is in the title.
+- **Bare "Cabernet" is a varietal** (red), after every other grape.
+
+### Fixed
+
+- **A store's own non-wine declaration beats text evidence** (nagus-tmr).
+  Broc Cellars' "June Taylor Mission Fig + Angelica Jam" (product_type
+  Pantry, tags merch and pantry) was stored as a 2020 wine because its
+  description names "our 2020 Angelica dessert wine" (production,
+  2026-09-25; pre-existing since at least c4b6e98). The Shopify connector
+  now carries a product's tags as the `tags` aspect, and the wine extractor
+  rejects a listing whose product_type is Pantry, Food or Grocery
+  (culinary) or Merch, Merchandise, Apparel, Gift Card(s), (Wine)
+  Accessories, Glassware, Books, Events, Tickets or Membership
+  (merchandise), or which is tagged pantry or food (culinary) or merch,
+  merchandise, apparel or gift card (merchandise). Exact words only: a wine
+  tagged "gifts" or "holiday" stays wine. Commerce7 and Vinoshipper already
+  skip non-wine types; OrderPort publishes none.
 
 ### Added
 

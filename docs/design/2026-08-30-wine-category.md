@@ -198,12 +198,30 @@ of different geography routes to adjudication. What changed for nagus:
   openclaw/Telegram path). An explicit "NV" in a title counts as wine
   evidence at extract only beside another wine cue (sparkling and
   house-style words, a colour or a varietal) -- NV is also a US state and a
-  company suffix. A fortified-wine style (port, sherry, madeira, marsala and
-  their styles) is wine evidence on its own, except beside a cask word or on
-  a spirit or beer title ("Sherry Cask Bourbon"). Culinary products
-  (vinegar, cooking wine, cake, cheese, jelly, olive oil; and a fortified
-  word on a sauce, jam, trifle mix, fudge or chocolate) are classified
-  not-wine/CULINARY (`wine.ErrCulinary`), not merchandise: they are reserved
+  company suffix. A fortified-wine style (port, sherry, madeira, marsala,
+  angelica and their styles) is wine evidence on its own, except beside a
+  cask word or on a spirit or beer title ("Sherry Cask Bourbon"); a spirit
+  word in a producer name right before the style ("Porter Creek Tawny
+  Port") is the producer, and oak or wood BEFORE the style ("Oak Aged
+  Port") is a style, not a cask. An APPELLATION is wine evidence too
+  (nagus-tmr, `internal/extract/wine/appellations.go`): a static table
+  generated offline from the LWIN export's REGION/SUB_REGION names
+  (`tools/genappellations`, CC BY 4.0, >= 20 wines, hand exclusions) plus a
+  hand supplement. Specific appellations (Barolo, Chablis, Rioja) count
+  alone; broad regions and New World AVAs (Burgundy, Tuscany, Napa Valley)
+  count only beside a classification token (DOC, AOC, Grand Cru, Riserva)
+  or a bare colour word (Red, Rouge, Rosso), which is otherwise the colour
+  only beside an appellation or NV. Culinary products are classified
+  not-wine/CULINARY (`wine.ErrCulinary`), not merchandise: a title whose
+  food noun (vinegar, cooking wine, cake, cheese, jelly, jam, preserves,
+  marmalade, chutney, compote, syrup, honey, mustard, olive oil) is not
+  followed by a wine cue as its head ("Sherry Vinegar", but not "Vinegar
+  Hill Syrah"), and a fortified word or appellation on a sauce, jam, trifle
+  mix, fudge or chocolate. A store's own non-wine declaration beats every
+  cue: a Shopify product_type (Pantry, Food, Grocery -> culinary; Merch,
+  Apparel, Gift Card, Accessories, Glassware, Books, Events, Tickets,
+  Membership -> merchandise) or tag (pantry, food; merch, merchandise,
+  apparel, gift card). Culinary items are reserved
   for a possible future grocery category, which must claim them before the
   ingest's out-of-category purge deletes them. No nagus code groups or compares by product id today
   (audited 2026-09-25: `offer.Query.ProductID` has no caller outside the
