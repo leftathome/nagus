@@ -191,11 +191,14 @@ of different geography routes to adjudication. What changed for nagus:
   `non_vintage` -> product alone, ignoring any year a title carries
   (disgorgement dates, "bottled 2018", anniversary editions);
   `unknown` -> as `vintage`, except that the listing's own explicit "NV"
-  marks it non-vintage. Rows carry `comparison_key` and `vintage_status`
+  marks it non-vintage; an NV title on a product quark calls `vintage` gets
+  no key (`conflict_nv`). A year right after disgorged, bottled, Est., since
+  or anniversary is never the vintage. Rows carry `comparison_key` and `vintage_status`
   beside `product_id` on /search, MCP `search_items` and /watches (the
-  openclaw/Telegram path). An explicit "NV" in a title now also counts as
-  wine evidence at extract, so NV listings are no longer dropped as
-  merchandise. No nagus code groups or compares by product id today
+  openclaw/Telegram path). An explicit "NV" in a title counts as wine
+  evidence at extract only beside another wine cue (sparkling and
+  house-style words, a colour or a varietal) -- NV is also a US state and a
+  company suffix. No nagus code groups or compares by product id today
   (audited 2026-09-25: `offer.Query.ProductID` has no caller outside the
   stores' own tests; product ids only reach rows); the key is exposed so
   that no consumer has to.

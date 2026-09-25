@@ -136,7 +136,12 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 				}
 			case gated && i.NameHintProducer != "":
 				// The gate did not pass this listing -- refused, or glovebox
-				// unreachable. The listing's name hint is unknown for this
+				// unreachable. The two are treated ALIKE on purpose: a
+				// refusal keeps the old hint and product id just as an outage
+				// does. A listing that changed into something glovebox refuses
+				// keeps its last identity rather than losing it, and its item
+				// is dropped at the gate below either way, so nothing refused
+				// is surfaced. The listing's name hint is unknown for this
 				// pass, so the offer keeps the hint (and with it the
 				// resolution) it already has: replacing it would change the
 				// fingerprint and throw away a resolved wine's product id

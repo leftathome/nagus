@@ -61,8 +61,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are one thing to compare; La Grande Annee 2014 and 2015 are not), and
   gives a vintage wine listed with no year no key at all. `unknown` behaves
   as `vintage` unless the title says NV. Rows expose `comparison_key` and
-  `vintage_status`. An explicit NV marker is now wine evidence at extract
-  (attribute `nv`), so NV listings are not dropped as merchandise.
+  `vintage_status`. An explicit NV marker is wine evidence at extract
+  (attribute `nv`) only beside another wine cue (brut, cuvee, champagne,
+  cremant, cava, prosecco, sparkling, rose, blanc de blancs/noirs, or a
+  colour or varietal), never as a state after a city (", NV") or a company
+  suffix ("N.V. Beer"); the merchandise list gains key chains, foil cutters,
+  stoppers, gift boxes, pickup fees, shipping charges and olive oil. A title
+  that says NV on a product quark calls `vintage` gets no key
+  (`conflict_nv`). A year right after disgorged, bottled, Est., since or
+  anniversary is not taken as the vintage.
 
 ### Added
 

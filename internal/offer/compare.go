@@ -17,6 +17,11 @@ const (
 	// vintage-insensitive) wine whose listing states no year. It must not be
 	// priced against any specific vintage, so it has no comparison key.
 	VintageStatusUnknown = "vintage_unknown"
+	// VintageStatusConflictNV: quark says the wine's year matters, but the
+	// listing says NV. One of the two is wrong -- the listing, or the match --
+	// and any year in the title is not trustworthy as the vintage, so it has
+	// no comparison key.
+	VintageStatusConflictNV = "conflict_nv"
 )
 
 // ComparisonKey is the key two offers must share to be compared with each
@@ -33,6 +38,7 @@ const (
 //	non_vintage    ignored        productID            non_vintage
 //	vintage        2019           productID@2019       vintage
 //	vintage        none           "" (not compared)    vintage_unknown
+//	vintage        title says NV  "" (not compared)    conflict_nv
 //	unknown        as vintage, except that the listing's own explicit "NV"
 //	               marks it non-vintage
 //	""             (quark stated no mode: every non-wine product)
@@ -55,6 +61,10 @@ func ComparisonKey(productID, vintageMode, vintage string, explicitNV bool) (key
 	case "unknown":
 		if explicitNV {
 			return productID, VintageStatusNonVintage
+		}
+	case "vintage":
+		if explicitNV {
+			return "", VintageStatusConflictNV
 		}
 	}
 	if vintage == "" {

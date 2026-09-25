@@ -200,10 +200,12 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	}
 
 	// An explicit non-vintage marker ("NV", "N.V."): a house-style blend
-	// whose listing states no year on purpose. It is wine evidence -- only a
-	// wine is non-vintage -- and it tells the comparison key (offer
-	// .ComparisonKey) that a wine quark cannot classify is non-vintage.
-	if explicitNVRe.MatchString(s.Title) {
+	// whose listing states no year on purpose. It tells the comparison key
+	// (offer.ComparisonKey) that a wine quark cannot classify is non-vintage,
+	// and it is wine evidence -- but only beside another wine cue, because
+	// "NV" is also a US state ("Pickup Fee Reno, NV"), a company suffix
+	// ("Heineken N.V."), and a word merchandise titles carry ("Gift Box NV").
+	if explicitNV(s.Title, it.Attributes["varietal"] != "" || it.Attributes["colour"] != "") {
 		it.Attributes["nv"] = "true"
 	}
 
@@ -250,18 +252,28 @@ func deterministicID(sourceID, sourceKey string) string {
 // digit word boundaries keep it from firing inside "1500ml" or "20150".
 var vintageRe = regexp.MustCompile(`\b(19[3-9]\d|20[0-4]\d)\b`)
 
+// notVintageBeforeRe is a word that, directly before a year, makes the year
+// something other than the vintage: "disgorged 2019", "bottled 2021",
+// "Est. 1970", "since 1885", "anniversary 1966".
+var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorge|degorgement|bottled|est\.?|established|since|anniversary)[\s:.,(]*$`)
+
 // extractVintage returns the FIRST plausible vintage year in the text, or
-// (0, false) for none / a non-vintage (NV) wine.
+// (0, false) for none / a non-vintage (NV) wine. A year right after a word
+// that says it is something else -- a disgorgement or bottling date, a
+// founding year, an anniversary -- is not the vintage and is skipped.
 func extractVintage(text string) (int, bool) {
-	m := vintageRe.FindString(text)
-	if m == "" {
-		return 0, false
+	folded := foldASCII(text)
+	for _, loc := range vintageRe.FindAllStringIndex(folded, -1) {
+		if notVintageBeforeRe.MatchString(folded[:loc[0]]) {
+			continue
+		}
+		v, err := strconv.Atoi(folded[loc[0]:loc[1]])
+		if err != nil {
+			return 0, false
+		}
+		return v, true
 	}
-	v, err := strconv.Atoi(m)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
+	return 0, false
 }
 
 // --- bottle size ---
@@ -548,8 +560,36 @@ func tokenize(title string) []string {
 	return tokens
 }
 
-// explicitNVRe matches a title's own "NV" / "N.V." marker, as a whole token.
-var explicitNVRe = regexp.MustCompile(`(?i)(^|[^a-z0-9])n\.?v\.?([^a-z0-9]|$)`)
+// nvRe finds an "NV" / "N.V." token, capturing what precedes and follows it.
+var nvRe = regexp.MustCompile(`(?i)(^|[^a-z0-9])n\.?v\.?([^a-z0-9]|$)`)
+
+// nvNotWineAfterRe is what, directly after "N.V.", makes it a company suffix
+// rather than a wine marker ("Heineken N.V. Beer").
+var nvNotWineAfterRe = regexp.MustCompile(`(?i)^\s*(beer|brewery|brewing|lager|ale|company|co\b|corp|inc\b|ltd|llc|holdings?|group)`)
+
+// nvWineCueRe are the words that make a title's NV a wine's NV: sparkling
+// and house-style terms. A colour or a varietal also qualifies (passed in).
+var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs)\b`)
+
+// explicitNV reports whether a title marks the wine non-vintage: an NV token
+// that is not a state after a city (", NV"), not a company suffix, and sits
+// beside a wine cue -- a sparkling/house-style word, or (otherWineCue) a
+// colour or varietal the extractor already found.
+func explicitNV(title string, otherWineCue bool) bool {
+	folded := foldASCII(title)
+	for _, m := range nvRe.FindAllStringSubmatchIndex(folded, -1) {
+		start, end := m[0], m[1]
+		before := strings.TrimRight(folded[:start+len(folded[m[2]:m[3]])], " ")
+		if strings.HasSuffix(before, ",") {
+			continue // "Reno, NV": a state after a city
+		}
+		if nvNotWineAfterRe.MatchString(folded[end-len(folded[m[4]:m[5]]):]) {
+			continue // "Heineken N.V. Beer": a company suffix
+		}
+		return otherWineCue || nvWineCueRe.MatchString(folded)
+	}
+	return false
+}
 
 // ErrNotWine rejects a listing that is merchandise, not a bottle. The ingest
 // pipeline records it as an extract skip.
@@ -558,7 +598,7 @@ var ErrNotWine = fmt.Errorf("%w: not a wine (merchandise listing)", listing.ErrN
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping fee)\b`)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|gift box(es)?|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|olive oil)\b|^\s*shipping\b)`)
 
 // isMerchandise reports whether a wine-store title is merchandise (nagus-17k:
 // robert-mondavi-winery's "Single Bottle Wine Tote" was ingested as a wine).

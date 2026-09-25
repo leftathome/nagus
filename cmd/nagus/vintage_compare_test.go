@@ -24,10 +24,22 @@ func TestWineRowsCompareOnVintageAwareKeys(t *testing.T) {
 		key, title, wineType, productID, mode string
 	}
 	cases := []listingCase{
-		{"bsc-nv", "Bollinger Special Cuvee Brut NV", "", "p-special-cuvee", "non_vintage"},
-		{"bsc-2019", "Bollinger Special Cuvee (disgorged 2019)", "", "p-special-cuvee", "non_vintage"},
+		// A store's own product type (Commerce7 / Shopify "White") is what
+		// makes a title with no year, varietal or colour a wine at extract.
+		{"bsc-nv", "Bollinger Special Cuvee Brut NV", "White", "p-special-cuvee", "non_vintage"},
+		{"bsc-2019", "Bollinger Special Cuvee (disgorged 2019)", "White", "p-special-cuvee", "non_vintage"},
 		{"lga-2014", "Bollinger La Grande Annee 2014", "", "p-grande-annee", "vintage"},
 		{"lga-2015", "Bollinger La Grande Annee 2015", "", "p-grande-annee", "vintage"},
+		// A vintage-mode product whose listing says NV: a conflict, no key,
+		// and the disgorgement year is not taken as the vintage.
+		{"conflict", "Bollinger Special Cuvee Brut NV, disgorged 2019", "White", "p-grande-annee", "vintage"},
+		// quark does not know the mode; the listing's NV decides (needs the
+		// "nv" row detail on the read path).
+		{"unknown-nv", "Hypothetical Cuvee Brut NV", "White", "p-hypothetical", "unknown"},
+		// A founding year in a producer name is not a vintage; a bottling
+		// date after the vintage is ignored.
+		{"est", "Old Winery Est. 1970 Cabernet Sauvignon", "Red", "p-old-winery", "vintage"},
+		{"opus-bottled", "Opus One 2019 (bottled 2021)", "Red", "p-opus-one", "vintage"},
 		{"opus-2019", "Opus One 2019", "Red", "p-opus-one", "vintage"},
 		{"opus-none", "Opus One", "Red", "p-opus-one", "vintage"},
 	}
@@ -74,5 +86,17 @@ func TestWineRowsCompareOnVintageAwareKeys(t *testing.T) {
 	}
 	if r := key["opus-2019"]; r.ComparisonKey != "p-opus-one@2019" {
 		t.Errorf("Opus One 2019: key %q", r.ComparisonKey)
+	}
+	if r := key["conflict"]; r.ComparisonKey != "" || r.VintageStatus != offer.VintageStatusConflictNV {
+		t.Errorf("NV title on a vintage product: key %q status %q, want none / conflict_nv", r.ComparisonKey, r.VintageStatus)
+	}
+	if r := key["unknown-nv"]; r.ComparisonKey != "p-hypothetical" || r.VintageStatus != offer.VintageStatusNonVintage {
+		t.Errorf("unknown mode with NV: key %q status %q, want the product id / non_vintage", r.ComparisonKey, r.VintageStatus)
+	}
+	if r := key["est"]; r.ComparisonKey == "p-old-winery@1970" || r.VintageStatus != offer.VintageStatusUnknown {
+		t.Errorf("'Est. 1970': key %q status %q, want no key / vintage_unknown", r.ComparisonKey, r.VintageStatus)
+	}
+	if r := key["opus-bottled"]; r.ComparisonKey != "p-opus-one@2019" {
+		t.Errorf("Opus One 2019 (bottled 2021): key %q, want @2019", r.ComparisonKey)
 	}
 }
