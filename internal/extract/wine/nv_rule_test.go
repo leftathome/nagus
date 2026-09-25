@@ -19,6 +19,8 @@ func TestExplicitNV(t *testing.T) {
 		{"Pickup Fee Reno, NV", false, false},     // a state after a city
 		{"Brut Pickup Reno, NV", false, false},    // a state, whatever else
 		{"Nevada Brut", false, false},             // NV must be a token
+		{"Reno NV Pickup Brut", false, false},     // a Nevada city, no comma
+		{"Las Vegas NV Brut", false, false},
 	} {
 		if got := explicitNV(tc.title, tc.otherCue); got != tc.want {
 			t.Errorf("explicitNV(%q, %v) = %v, want %v", tc.title, tc.otherCue, got, tc.want)

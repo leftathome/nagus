@@ -209,12 +209,16 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["nv"] = "true"
 	}
 
+	// A disgorgement is wine evidence on its own: only sparkling wine is
+	// disgorged. Its year is never the vintage (extractVintage skips it).
+	disgorged := disgorgedRe.MatchString(s.Title)
+
 	// No wine evidence at all -- no vintage, no varietal, no colour, no NV
-	// marker -- means merchandise the keyword list did not name. Measured on the live corpus
+	// marker, no disgorgement -- means merchandise the keyword list did not name. Measured on the live corpus
 	// (2026-09-21): exactly 12 of 91 wine items had none of the three, and all
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
-	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" {
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged {
 		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 	}
 
@@ -252,10 +256,20 @@ func deterministicID(sourceID, sourceKey string) string {
 // digit word boundaries keep it from firing inside "1500ml" or "20150".
 var vintageRe = regexp.MustCompile(`\b(19[3-9]\d|20[0-4]\d)\b`)
 
-// notVintageBeforeRe is a word that, directly before a year, makes the year
-// something other than the vintage: "disgorged 2019", "bottled 2021",
-// "Est. 1970", "since 1885", "anniversary 1966".
-var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorge|degorgement|bottled|est\.?|established|since|anniversary)[\s:.,(]*$`)
+// notVintageBeforeRe is a word that, directly before a year (or with one
+// filler word between: "bottled in 2020"), makes the year something other
+// than the vintage: "disgorged 2019", "bottled 2021", "Est. 1970", "founded
+// 1885", "since 1885", "anniversary 1966". "<ordinal> anniversary" is NOT
+// one: in "50th Anniversary 2019 Cabernet" the year is the vintage; see
+// ordinalAnniversaryRe.
+var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorge|degorgement|bottled|est\.?|established|founded|since|anniversary)[\s:.,(]*((in|on|at|from)[\s:.,(]+)?$`)
+
+// ordinalAnniversaryRe is "50th anniversary" and the like, right before a
+// year.
+var ordinalAnniversaryRe = regexp.MustCompile(`(?i)\b\d+(st|nd|rd|th)\s+anniversary[\s:.,(]*$`)
+
+// disgorgedRe marks a disgorgement date: sparkling wine only.
+var disgorgedRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degorged?|degorgement)\b`)
 
 // extractVintage returns the FIRST plausible vintage year in the text, or
 // (0, false) for none / a non-vintage (NV) wine. A year right after a word
@@ -264,7 +278,7 @@ var notVintageBeforeRe = regexp.MustCompile(`(?i)\b(disgorged|disgorgement|degor
 func extractVintage(text string) (int, bool) {
 	folded := foldASCII(text)
 	for _, loc := range vintageRe.FindAllStringIndex(folded, -1) {
-		if notVintageBeforeRe.MatchString(folded[:loc[0]]) {
+		if before := folded[:loc[0]]; notVintageBeforeRe.MatchString(before) && !ordinalAnniversaryRe.MatchString(before) {
 			continue
 		}
 		v, err := strconv.Atoi(folded[loc[0]:loc[1]])
@@ -569,7 +583,12 @@ var nvNotWineAfterRe = regexp.MustCompile(`(?i)^\s*(beer|brewery|brewing|lager|a
 
 // nvWineCueRe are the words that make a title's NV a wine's NV: sparkling
 // and house-style terms. A colour or a varietal also qualifies (passed in).
-var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs)\b`)
+var nvWineCueRe = regexp.MustCompile(`(?i)\b(extra brut|brut|cuvee|champagne|cremant|cava|prosecco|sparkling|rose|blanc de blancs|blanc de noirs|port|tawny|ruby|moscato|pet[ -]?nat|petillant|vermouth)\b`)
+
+// nevadaPlaceRe is a Nevada place directly before "NV" with no comma
+// ("Reno NV Pickup"): the state, not a non-vintage marker. The main cities
+// only -- a gazetteer is out of scope, and the comma form covers the rest.
+var nevadaPlaceRe = regexp.MustCompile(`(?i)\b(reno|las vegas|vegas|henderson|sparks|carson city|north las vegas|elko|mesquite|boulder city|incline village|stateline)$`)
 
 // explicitNV reports whether a title marks the wine non-vintage: an NV token
 // that is not a state after a city (", NV"), not a company suffix, and sits
@@ -580,8 +599,8 @@ func explicitNV(title string, otherWineCue bool) bool {
 	for _, m := range nvRe.FindAllStringSubmatchIndex(folded, -1) {
 		start, end := m[0], m[1]
 		before := strings.TrimRight(folded[:start+len(folded[m[2]:m[3]])], " ")
-		if strings.HasSuffix(before, ",") {
-			continue // "Reno, NV": a state after a city
+		if strings.HasSuffix(before, ",") || nevadaPlaceRe.MatchString(before) {
+			continue // "Reno, NV" / "Reno NV": the state after a city
 		}
 		if nvNotWineAfterRe.MatchString(folded[end-len(folded[m[4]:m[5]]):]) {
 			continue // "Heineken N.V. Beer": a company suffix
@@ -598,12 +617,36 @@ var ErrNotWine = fmt.Errorf("%w: not a wine (merchandise listing)", listing.ErrN
 // merchandiseRe matches what winery storefronts sell besides wine. A keyword
 // rule, deliberately, rather than "no vintage, no varietal": plenty of real
 // wines carry neither (Harbinger's non-vintage "Bolero").
-var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|gift box(es)?|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|olive oil)\b|^\s*shipping\b)`)
+var merchandiseRe = regexp.MustCompile(`(?i)(\b(tote|totes|gift card|e-?gift|corkscrews?|openers?|decanters?|glass(es|ware)?|stemware|aerators?|t-?shirts?|shirts?|hats?|caps|hoodies?|aprons?|coasters?|candles?|membership|wine club|tasting fee|tickets?|reservations?|shipping (fee|charge|cost|insurance|upgrade)|pickup fee|key ?chains?|foil cutters?|stoppers?|olive oil)\b|^\s*shipping\b)`)
+
+// packagingMerchRe are words that name merchandise ON THEIR OWN ("Champagne
+// Flute", "Prosecco Ice Bucket", "Gift Box NV") but also appear on real wine
+// sold in packaging ("6PK Gift Box Wood MRW, 2021 Mix"). They mark a title
+// merchandise only when nothing in it says it is wine; see isMerchandise.
+var packagingMerchRe = regexp.MustCompile(`(?i)\b(gift box(es)?|flutes?|buckets?|sab(er|re)s?|charms?|chillers?|sleeves?|towels?|soaps?|display|tools?|pickup)\b`)
+
+// packCountRe is a pack count: "6PK", "6 pk", "12-pack", "3 Pack".
+var packCountRe = regexp.MustCompile(`(?i)\b\d+\s*-?\s*(pk|pack)s?\b`)
 
 // isMerchandise reports whether a wine-store title is merchandise (nagus-17k:
 // robert-mondavi-winery's "Single Bottle Wine Tote" was ingested as a wine).
+//
+// Two lists. merchandiseRe always wins: nothing called olive oil or a key
+// chain is a bottle of wine, whatever year it carries ("2025 Fox Hill Olive
+// Oil"). packagingMerchRe wins only when the title carries no pack count, no
+// vintage year and no varietal -- a gift box of wine is wine.
 func isMerchandise(title string) bool {
-	return merchandiseRe.MatchString(title)
+	if merchandiseRe.MatchString(title) {
+		return true
+	}
+	if !packagingMerchRe.MatchString(title) {
+		return false
+	}
+	if packCountRe.MatchString(title) || vintageRe.MatchString(title) {
+		return false
+	}
+	_, _, varietal := extractVarietal(title)
+	return !varietal
 }
 
 // sourceColour maps a source's structured wine type (Commerce7 "Red",

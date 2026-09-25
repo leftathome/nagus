@@ -24,10 +24,11 @@ func TestWineRowsCompareOnVintageAwareKeys(t *testing.T) {
 		key, title, wineType, productID, mode string
 	}
 	cases := []listingCase{
-		// A store's own product type (Commerce7 / Shopify "White") is what
-		// makes a title with no year, varietal or colour a wine at extract.
-		{"bsc-nv", "Bollinger Special Cuvee Brut NV", "White", "p-special-cuvee", "non_vintage"},
-		{"bsc-2019", "Bollinger Special Cuvee (disgorged 2019)", "White", "p-special-cuvee", "non_vintage"},
+		// No product type: as a Shopify listing arrives (its product_type
+		// is not wine_type). NV beside "Brut", and the disgorgement, are the
+		// wine evidence.
+		{"bsc-nv", "Bollinger Special Cuvee Brut NV", "", "p-special-cuvee", "non_vintage"},
+		{"bsc-2019", "Bollinger Special Cuvee (disgorged 2019)", "", "p-special-cuvee", "non_vintage"},
 		{"lga-2014", "Bollinger La Grande Annee 2014", "", "p-grande-annee", "vintage"},
 		{"lga-2015", "Bollinger La Grande Annee 2015", "", "p-grande-annee", "vintage"},
 		// A vintage-mode product whose listing says NV: a conflict, no key,
