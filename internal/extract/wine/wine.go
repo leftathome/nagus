@@ -6,9 +6,9 @@
 // section 7): the output is a CONSTRAINED TYPED SCHEMA. Listing text is only
 // ever pattern-matched -- a malicious listing can at worst yield a wrong
 // field value ("WS 99" it never earned), never hijack anything. The spec's
-// LLM step (structuring odd free-text critic attributions the regexes miss,
-// and adjudicating mid-confidence LWIN matches) is a deliberate follow-on
-// that would run on this same sanitized text and emit only typed labels.
+// LLM step (structuring odd free-text critic attributions the regexes miss)
+// is a deliberate follow-on that would run on this same sanitized text and
+// emit only typed labels.
 //
 // Extracted signal:
 //
@@ -28,11 +28,13 @@
 //     source may legally ship to ("US-WA", "CA-BC", "FR"); each token is
 //     validated as an ISO 3166 code so an untrusted aspect can never smuggle
 //     a non-jurisdiction token past the destination filter.
-//   - CanonicalID -- when an LWIN resolver is injected, a HIGH-CONFIDENCE
-//     (RouteAuto) match stamps the LWIN-11. Lower-confidence routes leave
-//     CanonicalID empty and record lwin_route so the adjudication tier can
-//     find them; a wrong canonical identity corrupts every downstream
-//     quality join, so only auto-route matches are ever stamped.
+//
+// Wine IDENTITY is not extracted here. The LWIN resolver that used to stamp
+// CanonicalID moved to quark (quark QUARK-04, design D1: identity belongs
+// wholly to quark): a wine source's offers carry its declared producer and
+// sanitized title to quark as a name hint (pipeline.Ingester.NameHintProducer),
+// and quark's answer -- a product id, only ever from an auto-band match --
+// lands on the offer, not the item. Wine items therefore carry no CanonicalID.
 package wine
 
 import (
@@ -46,7 +48,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/shipping"
@@ -63,22 +64,11 @@ type Extractor struct {
 	// Normalizer aggregates parsed critic scores; the zero value applies the
 	// default anchors with no per-critic bias.
 	Normalizer valwine.Normalizer
-	// Resolver, when non-nil, resolves listings to LWIN identities. Only
-	// RouteAuto matches stamp CanonicalID (see package doc), and only when
-	// Stamp is set.
-	Resolver *lwin.Resolver
-	// Stamp enables writing CanonicalID. Off, the resolver runs in SHADOW:
-	// lwin_route plus the would-be id and score are recorded as attributes so
-	// the false-match rate can be measured on real listings before any id is
-	// trusted. Measured on the full Liv-ex dictionary (185k wines), token-set
-	// scoring auto-matched "2018 The Reserve Cabernet Sauvignon, To Kalon
-	// Vineyard" to an unrelated producer at 100 -- so this starts off.
-	Stamp bool
 }
 
 var _ listing.Extractor = (*Extractor)(nil)
 
-// New returns an Extractor for the "wine" category with no LWIN resolver.
+// New returns an Extractor for the "wine" category.
 func New() *Extractor {
 	return &Extractor{}
 }
@@ -89,7 +79,7 @@ func (e *Extractor) Category() string {
 }
 
 // Extract normalizes one sanitized wine listing. Missing signal (no vintage,
-// no critic scores, no LWIN match) is absence, not an error -- the
+// no critic scores) is absence, not an error -- the
 // hard-filter and valuation stages own enforcing and explaining any
 // requirements. An error is returned only when no valid item can be formed.
 func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, error) {
@@ -203,28 +193,10 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	}
 
 	// The producer, when the source declared or published one: rows show
-	// it, and joins that cannot use LWIN (a label approval names a brand,
-	// not a vintage) join on it.
+	// it, and joins that cannot use a product id (a label approval names a
+	// brand, not a vintage) join on it.
 	if p := strings.TrimSpace(s.Aspects["wine_producer"]); p != "" {
 		it.Attributes["producer"] = p
-	}
-
-	// LWIN identity resolution (optional).
-	if e.Resolver != nil {
-		producer := strings.TrimSpace(s.Aspects["wine_producer"])
-		res := e.Resolver.Resolve(lwin.Query{Name: s.Title, Vintage: vintage, Producer: producer})
-		it.Attributes["lwin_route"] = string(res.Route)
-		if res.Route != lwin.RouteReview {
-			it.Attributes["lwin_candidate"] = res.Best.Record.LWIN11(vintage)
-			it.Attributes["lwin_score"] = strconv.FormatFloat(res.Best.Score, 'f', 1, 64)
-		}
-		// Stamped only when the producer was KNOWN, not inferred from the
-		// title: measured on the live listings, title-only auto matches were
-		// mostly wrong ("Bolero" -> producer Bolero), while producer-hinted
-		// ones were right (24 of 24 on Robert Mondavi's store, 2026-09-21).
-		if res.Route == lwin.RouteAuto && e.Stamp && producer != "" {
-			it.CanonicalID = res.Best.Record.LWIN11(vintage)
-		}
 	}
 
 	// No wine evidence at all -- no vintage, no varietal, no colour -- means
@@ -271,8 +243,7 @@ func deterministicID(sourceID, sourceKey string) string {
 var vintageRe = regexp.MustCompile(`\b(19[3-9]\d|20[0-4]\d)\b`)
 
 // extractVintage returns the FIRST plausible vintage year in the text, or
-// (0, false) for none / a non-vintage (NV) wine. 0 is also what the LWIN
-// resolver treats as the NV vintage segment.
+// (0, false) for none / a non-vintage (NV) wine.
 func extractVintage(text string) (int, bool) {
 	m := vintageRe.FindString(text)
 	if m == "" {
@@ -422,7 +393,7 @@ func extractColour(text string) (string, bool) {
 }
 
 // foldASCII folds the accented characters common in wine text to ASCII (the
-// same practical set the LWIN normalizer uses).
+// same practical set quark's LWIN normalizer uses).
 var foldASCII = strings.NewReplacer(
 	"à", "a", "â", "a", "ä", "a", "á", "a", "ã", "a",
 	"ç", "c",
@@ -583,9 +554,6 @@ var merchandiseRe = regexp.MustCompile(`(?i)\b(tote|totes|gift card|e-?gift|cork
 func isMerchandise(title string) bool {
 	return merchandiseRe.MatchString(title)
 }
-
-// StampEnabled reports whether this extractor writes LWIN canonical ids.
-func (e *Extractor) StampEnabled() bool { return e.Stamp }
 
 // sourceColour maps a source's structured wine type (Commerce7 "Red",
 // Vinoshipper "RED", "ROSE", ...) onto the extractor's colour vocabulary; ""

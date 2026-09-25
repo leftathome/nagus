@@ -39,12 +39,6 @@ type server struct {
 	store           store.Store
 	defaultCategory string // "" when >1 category and no explicit default
 	watches         watch.Config
-	// lwin is the shared LWIN dictionary source, nil when LWIN is off. Read
-	// for its metrics.
-	lwin *lwinSource
-	// ingestGates, aligned with ingesters, run once before a source's FIRST
-	// ingest pass (nil = start at once). See wineIngestGates.
-	ingestGates []func(context.Context)
 	// offers is the offer layer, nil when off. Read only to stamp quark's
 	// product id onto rows (withProductIDs).
 	offers offer.Store
@@ -143,9 +137,6 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.sanitizer != nil {
 		writeSanitizeMetrics(w, s.sanitizer)
-	}
-	if s.lwin != nil {
-		writeLWINMetrics(w, s.lwin)
 	}
 	if len(ebaySources) == 0 {
 		return
@@ -388,16 +379,11 @@ func runServe(args []string) error {
 			def = name
 		}
 	}
-	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore, lwin: opts.lwin,
-		sanitizer:   opts.sanitizer,
-		ingestGates: wineIngestGates(cfg.Sources, opts.lwin, lwinStartWait, logf)}
+	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
+		sanitizer: opts.sanitizer}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	if opts.lwin != nil {
-		go opts.lwin.refreshLoop(ctx)
-	}
 
 	// One ingest goroutine per source, each on its own configured interval;
 	// per-source failure isolation (a bad source never blocks another's loop
@@ -491,25 +477,20 @@ func (s *server) startIngest(ctx context.Context, intervals []time.Duration) {
 		if i >= len(intervals) || intervals[i] <= 0 {
 			continue
 		}
-		var gate func(context.Context)
-		if i < len(s.ingestGates) {
-			gate = s.ingestGates[i]
-		}
-		go runSourceIngestLoop(ctx, ing, intervals[i], gate)
+		go runSourceIngestLoop(ctx, ing, intervals[i])
 	}
 }
 
-// runSourceIngestLoop runs Ingest immediately (after gate, when set), then on
-// every tick, until ctx is done. It operates on exactly one source's Ingester;
-// an error there is logged and the loop continues, never affecting any other
-// source's loop.
-func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration, gate func(context.Context)) {
-	if gate != nil {
-		gate(ctx)
-		if ctx.Err() != nil {
-			return
-		}
-	}
+// runSourceIngestLoop runs Ingest immediately, then on every tick, until ctx
+// is done. It operates on exactly one source's Ingester; an error there is
+// logged and the loop continues, never affecting any other source's loop.
+//
+// (A wine source's first pass used to wait for the LWIN dictionary to load,
+// nagus-0k0. The dictionary moved to quark (quark QUARK-04), and identity now
+// arrives asynchronously through the quark resolution pass, so no ingest waits
+// on it: an offer ingested while quark's index warms is simply resolved on a
+// later pass.)
+func runSourceIngestLoop(ctx context.Context, ing *pipeline.Ingester, interval time.Duration) {
 	ingestOnceSource(ctx, ing)
 	t := time.NewTicker(interval)
 	defer t.Stop()

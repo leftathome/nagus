@@ -3,7 +3,8 @@
 - **Status:** accepted 2026-08-30 (revises an earlier report that recommended
   the paid Wine-Searcher API)
 - **Implements:** the wine category bundle (`internal/category/wine.go`), the
-  LWIN identity resolver (`internal/identity/lwin`), critic-score
+  LWIN identity resolver (`internal/identity/lwin` -- **moved to quark
+  2026-09-24**, quark QUARK-04; see "Identity moved to quark" below), critic-score
   normalization + hedonic value (`internal/valuation/wine`), the wine
   extractor (`internal/extract/wine`), and the per-jurisdiction
   ship-legality constraint layer (`internal/shipping`).
@@ -160,6 +161,33 @@ from the log-price residual in units of the fit's residual spread (great
 <= -1.5z, good <= -0.5z, market <= +0.5z, else poor). Prices are scaled to
 750ml-equivalent first so magnums are not flagged expensive. Refit offline
 on live offers as they accrue and inject via `WineDeps.Model`.
+
+**Identity moved to quark (2026-09-24, quark QUARK-04).** Spec D1 of the quark
+design puts identity resolution wholly in quark, so the resolver below and the
+LWIN mirror (`internal/refdata`) were DELETED here and ported there rule for
+rule (quark `internal/lwin`), with one addition: an exact tie between records
+of different geography routes to adjudication. What changed for nagus:
+
+- A wine source opted in (`lwin.stamp` + the source's `lwinStamp`, the same
+  switches that gated stamping) sends each offer to quark as a **name hint**:
+  `category: wine`, `brand` = the declared producer, `text` = the sanitized
+  title (after the glovebox gate), no other field. quark returns a product id
+  (route `fuzzy`) ONLY for an auto-band match; `adjudicate` and `unmatched`
+  carry no id and nagus records them refused. "Only auto-route matches ever
+  stamp an identity" therefore still holds -- quark enforces it, and quark's
+  auto band additionally requires a known producer, which is nagus-86s's rule
+  moved into the route.
+- The identity lands on the OFFER (`Resolution.ProductID`, a quark UUID for the
+  LWIN-7 wine), no longer on the item: wine items carry no `CanonicalID` and no
+  `lwin_route` / `lwin_candidate` / `lwin_score` attributes. The vintage stays
+  an item attribute (LWIN-11 = LWIN-7 + vintage). Shadow review moved to quark:
+  its adjudication queue and `quark_name_matches_total{band,reason}`.
+- nagus no longer downloads the export; `NAGUS_LWIN_URL` and friends are
+  ignored (logged once at startup). The false-auto-match rate was re-measured
+  on the ported resolver against every live wine listing that declares a
+  producer: 5 false of 502 auto (1.0%), quark `internal/lwin/labeled_test.go`.
+
+The original design, as built in nagus, follows.
 
 **LWIN entity resolution** (`internal/identity/lwin`): normalize (accent
 fold, Chateau/Domaine alias expansion), block on shared tokens, score with

@@ -37,7 +37,8 @@ source polls daily with a bounded result cap -- see
 `docs/design/2026-07-29-zillapi-land-connector.md`.
 
 A third adapter, **wine**, runs on a $0/month data stack: LWIN (Creative
-Commons) for canonical identity, critic-score normalization + a hedonic
+Commons) for canonical identity -- resolved by quark, which owns product
+identity, from each listing's producer and title -- critic-score normalization + a hedonic
 log-price value model for quality/value, and a data-driven ship-legality
 constraint layer covering ~110 jurisdictions worldwide -- each source declares
 its channel (producer/retailer) and origin (`US-WA`, `CA-BC`, `FR`), a

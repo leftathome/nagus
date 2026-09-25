@@ -52,12 +52,25 @@ const (
 	RouteQuarantined = "quarantined"
 	// RouteText: the hint's text named exactly one key quark holds (QUARK-02).
 	RouteText = "text"
-	// RouteUnmatched: text named no known key, or keys of several products.
+	// RouteUnmatched: text named no known key, or keys of several products;
+	// for wine, no credible catalog name match, or quark's LWIN catalog is not
+	// loaded yet (reason catalog_not_loaded).
 	RouteUnmatched = "unmatched"
+	// RouteFuzzy: a wine name hint (producer + title) matched a catalog
+	// product in quark's AUTO band (QUARK-04). The only name route that
+	// carries a product id.
+	RouteFuzzy = "fuzzy"
+	// RouteAdjudicate: a wine name hint matched credibly but not safely
+	// enough to name; quark queued it for adjudication and returned NO id.
+	RouteAdjudicate = "adjudicate"
 )
 
 // Hint is quark's Hint wire shape. Values are untrusted listing text; quark's
 // gates, not nagus, decide what identifies a product.
+//
+// A wine NAME hint (quark QUARK-04) uses the same shape: Brand is the
+// producer the source declares, Text the sanitized listing title, and every
+// other field is empty.
 type Hint struct {
 	Category string `json:"category"`
 	Brand    string `json:"brand,omitempty"`

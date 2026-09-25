@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/leftathome/nagus/internal/listing"
@@ -50,6 +51,19 @@ type Ingester struct {
 	// quark consumes sanitized text (spec D7) -- and only when every structured
 	// hint field is empty. Needs an evaluating ingester (a Sanitizer).
 	TextHints bool
+
+	// NameHintProducer, when set, makes this source send quark a NAME hint:
+	// the listing's producer (the raw aspect with this key) as the hint brand
+	// and its title as the hint text, REPLACING any structured hint fields.
+	// It is how wine is identified since the LWIN resolver moved to quark
+	// (quark QUARK-04): quark matches producer + title against the LWIN
+	// catalog's names and returns a product id only for an auto-band match.
+	// Structured fields are dropped rather than sent alongside because they
+	// would take quark's key path instead (a wine GTIN would mint a product
+	// beside the catalog's). As with TextHints, the title is attached only
+	// after the listing passed the sanitize gate; a listing the gate drops
+	// keeps its structured hint. Needs an evaluating ingester (a Sanitizer).
+	NameHintProducer string
 
 	// StaleAfter, when > 0, enables a post-ingest freshness purge of this
 	// source's items older than the window (eBay License 8.1(b)). 0 disables it.
@@ -102,7 +116,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		var san listing.Sanitized
 		var sanErr error
 		gated := false
-		if i.TextHints && evaluates && i.Sanitizer != nil {
+		if (i.TextHints || i.NameHintProducer != "") && evaluates && i.Sanitizer != nil {
 			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
 			gated = true
 		}
@@ -111,7 +125,13 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		// that fails extraction below is still a real offer that existed.
 		if i.Offers != nil {
 			o := offerFromRaw(r, now)
-			if gated && sanErr == nil && o.ProductHint.Empty() {
+			switch {
+			case gated && sanErr == nil && i.NameHintProducer != "":
+				o.ProductHint = offer.ProductHint{
+					Brand: strings.TrimSpace(r.Aspects[i.NameHintProducer]),
+					Text:  r.Title,
+				}
+			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title
 			}
 			if err := i.Offers.Put(ctx, o); err != nil {

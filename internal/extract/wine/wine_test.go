@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/listing"
 )
 
@@ -181,76 +180,26 @@ func TestExtract_EmptyShipLegalToIsStampedNotDropped(t *testing.T) {
 	}
 }
 
-func TestExtract_LWINResolverStampsOnlyAutoRoute(t *testing.T) {
-	db := lwin.NewDB([]lwin.Record{
-		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
-	})
-	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
-
+// Wine identity moved to quark (QUARK-04): the extractor stamps no canonical
+// id and records no resolver attributes, even for a listing whose producer
+// is known. The producer itself is still carried, for rows and joins.
+func TestExtract_CarriesNoIdentity(t *testing.T) {
 	s := sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", "")
 	s.Aspects = map[string]string{"wine_producer": "Leonetti Cellar"}
-	it, err := e.Extract(context.Background(), s)
+	it, err := New().Extract(context.Background(), s)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if it.CanonicalID != "11012452019" {
-		t.Errorf("high-confidence match should stamp LWIN-11, got %q", it.CanonicalID)
-	}
-	if it.Attributes["lwin_route"] != "auto" {
-		t.Errorf("route should be recorded, got %q", it.Attributes["lwin_route"])
-	}
-
-	// A non-matching listing must stay unidentified with the route recorded.
-	it, err = e.Extract(context.Background(), sanitized("Screaming Eagle Napa 2018", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
 	if it.CanonicalID != "" {
-		t.Errorf("low-confidence must never stamp an identity, got %q", it.CanonicalID)
+		t.Errorf("CanonicalID = %q, want none", it.CanonicalID)
 	}
-	if it.Attributes["lwin_route"] != "review" {
-		t.Errorf("expected review route, got %q", it.Attributes["lwin_route"])
+	for _, k := range []string{"lwin_route", "lwin_candidate", "lwin_score"} {
+		if _, ok := it.Attributes[k]; ok {
+			t.Errorf("attribute %s present", k)
+		}
 	}
-}
-
-// Shadow mode (the default): the match is recorded -- route, would-be id,
-// score -- so false matches can be measured on real listings, but no
-// canonical id is written until stamping is turned on deliberately.
-func TestExtract_LWINShadowRecordsButNeverStamps(t *testing.T) {
-	db := lwin.NewDB([]lwin.Record{
-		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
-	})
-	e := &Extractor{Resolver: &lwin.Resolver{DB: db}}
-
-	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if it.CanonicalID != "" {
-		t.Fatalf("shadow mode stamped %q", it.CanonicalID)
-	}
-	if it.Attributes["lwin_route"] != "auto" || it.Attributes["lwin_candidate"] != "11012452019" || it.Attributes["lwin_score"] == "" {
-		t.Fatalf("shadow attributes = route %q candidate %q score %q", it.Attributes["lwin_route"],
-			it.Attributes["lwin_candidate"], it.Attributes["lwin_score"])
-	}
-
-	it, err = e.Extract(context.Background(), sanitized("Screaming Eagle Napa 2018", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, has := it.Attributes["lwin_candidate"]; has {
-		t.Fatal("a review-route listing must record no candidate")
-	}
-}
-
-func TestExtract_NoResolverLeavesNoRoute(t *testing.T) {
-	e := New()
-	it, err := e.Extract(context.Background(), sanitized("Wine 2020", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, present := it.Attributes["lwin_route"]; present {
-		t.Errorf("no resolver should record no route")
+	if it.Attributes["producer"] != "Leonetti Cellar" {
+		t.Errorf("producer = %q", it.Attributes["producer"])
 	}
 }
 
@@ -440,24 +389,6 @@ func TestIsMerchandise(t *testing.T) {
 		if isMerchandise(title) {
 			t.Errorf("%q is a wine", title)
 		}
-	}
-}
-
-// nagus-86s: stamping requires the producer to be KNOWN (declared or the
-// producer store's vendor), never inferred from the title alone. Title-only
-// auto matches were mostly wrong on the live listings; producer-hinted ones
-// were right.
-func TestExtract_StampsOnlyWithAKnownProducer(t *testing.T) {
-	db := lwin.NewDB([]lwin.Record{
-		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
-	})
-	e := &Extractor{Resolver: &lwin.Resolver{DB: db}, Stamp: true}
-	it, err := e.Extract(context.Background(), sanitized("Leonetti Cellar Cabernet Sauvignon 2019 750ml", ""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if it.CanonicalID != "" || it.Attributes["lwin_candidate"] != "11012452019" {
-		t.Fatalf("title-only auto match: canonical=%q candidate=%q; want shadow only", it.CanonicalID, it.Attributes["lwin_candidate"])
 	}
 }
 

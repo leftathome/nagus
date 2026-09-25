@@ -132,7 +132,7 @@ func TestRunSourceIngestLoopTicksAndReturnsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		runSourceIngestLoop(ctx, ing, 10*time.Millisecond, nil)
+		runSourceIngestLoop(ctx, ing, 10*time.Millisecond)
 		close(done)
 	}()
 

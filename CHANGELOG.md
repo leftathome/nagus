@@ -6,6 +6,39 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Deploy quark with its LWIN catalog first** (quark QUARK-04: chart 0.6.0,
+  `catalogs.lwin.url` set, first load complete). This release stops resolving
+  wine identity in nagus; until quark answers wine name hints, opted-in wine
+  offers are recorded refused (quark before QUARK-04 refuses category `wine`)
+  and are re-offered when quark's catalog generation advances.
+- **Wine items no longer carry `CanonicalID` or the `lwin_*` attributes.** Items
+  are re-extracted on each ingest, so previously stamped LWIN-11 ids disappear
+  from items within one ingest interval (720m for the producer stores). Wine
+  identity is now quark's product id on the OFFER, surfaced as a row's
+  `product_id` like every other category.
+
+### Removed
+
+- **The LWIN resolver and mirror** (`internal/identity/lwin`,
+  `internal/refdata`, `cmd/nagus/lwin.go`) -- moved to quark (quark QUARK-04,
+  design D1), not forked. With them go the `nagus_lwin_*` metrics, the wine
+  first-ingest wait for the dictionary (nagus-0k0), and the chart's
+  `NAGUS_LWIN_URL`/`_CACHE`/`_MAX_AGE` env (chart 0.12.0; the `lwin.url`,
+  `cachePath` and `maxAge` values are retired but still accepted). nagus logs
+  once if those variables are still set.
+
+### Changed
+
+- **`lwinStamp` now selects wine sources for quark name hints.** With the
+  global `lwin.stamp` / `NAGUS_LWIN_STAMP` on, an opted-in wine source's
+  offers carry `brand` = declared producer and `text` = sanitized title (and
+  nothing else) to quark, which resolves them against its LWIN catalog and
+  returns a product id only for an auto-band match (new route `fuzzy`;
+  `adjudicate` records refused). The same three sources that stamped before
+  are identified now. `pipeline.Ingester.NameHintProducer` carries it.
+
 ### Added
 
 - **Title text hints for quark** (quark QUARK-02). A source may set

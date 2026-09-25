@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leftathome/nagus/internal/identity/lwin"
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/shipping"
@@ -170,7 +169,7 @@ func TestPrice750Equivalent(t *testing.T) {
 
 // TestWineSliceEndToEnd drives the whole wine path: connector -> channel
 // tagger (constraint layer stamps legal destinations) -> sanitize -> wine
-// extractor (critic parsing + LWIN identity) -> store -> hard-filter
+// extractor (critic parsing) -> store -> hard-filter
 // (score + destination legality) -> hedonic valuation -> score -> rank.
 // Two US retailers share one store, and the SAME corpus is surfaced for two
 // destinations -- WA (only the in-state shop may ship there) and CA (both
@@ -179,12 +178,8 @@ func TestWineSliceEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemoryStore()
 
-	lwinDB := lwin.NewDB([]lwin.Record{
-		{LWIN7: "1101245", Producer: "Leonetti Cellar", Wine: "Cabernet Sauvignon", Region: "Walla Walla", Colour: "red"},
-	})
 	deps := WineDeps{
 		Store:     st,
-		LWIN:      &lwin.Resolver{DB: lwinDB},
 		LWINStamp: true,
 		Score:     WineScoreConfig{MinScore: 92, ShipTo: "US-WA"},
 	}
@@ -247,11 +242,10 @@ func TestWineSliceEndToEnd(t *testing.T) {
 	if worst.Signal.Verdict != "poor" {
 		t.Errorf("a double-price 95-pointer should be poor, got %q (ratio %.2f)", worst.Signal.Verdict, worst.Signal.Ratio)
 	}
-	// A RETAILER declares no producer, so the LWIN match is recorded (shadow)
-	// but not stamped: stamping needs a known producer (nagus-86s).
-	if best.Item.CanonicalID != "" || best.Item.Attributes["lwin_candidate"] != "11012452019" {
-		t.Errorf("retailer listing: canonical=%q candidate=%q; want shadow candidate 11012452019 and no stamp",
-			best.Item.CanonicalID, best.Item.Attributes["lwin_candidate"])
+	// Wine identity is quark's (QUARK-04): the item carries none, and no
+	// shadow attributes from the resolver that used to run here.
+	if best.Item.CanonicalID != "" || best.Item.Attributes["lwin_candidate"] != "" || best.Item.Attributes["lwin_route"] != "" {
+		t.Errorf("wine item carries nagus-side identity: canonical=%q attrs=%v", best.Item.CanonicalID, best.Item.Attributes)
 	}
 
 	// Destination US-CA over the SAME stored corpus: both retailers may ship

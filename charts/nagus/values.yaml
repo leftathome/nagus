@@ -180,26 +180,24 @@ glovebox:
       key: eso/nagus/glovebox-sanitize
       property: TOKEN
 
-# lwin: the Liv-ex LWIN wine dictionary (CC BY), used to resolve wine listings
-# to canonical LWIN identities. OFF while url is empty.
+# lwin: wine identity. The Liv-ex LWIN dictionary and the resolver that used
+# it MOVED TO QUARK (quark QUARK-04, design D1: identity is quark's), which now
+# mirrors the export and matches against it (quark chart: catalogs.lwin.url).
 #
-# The registration form at liv-ex.com/lwin/ leads to a public object that
-# Liv-ex refreshes in place; nagus mirrors it onto the data volume, validates
-# each download (it must parse to a real dictionary) before it replaces the
-# mirror, and keeps the last good copy if the source is down.
+# stamp is the global half of the opt-in that selects which wine sources are
+# identified: a source with lwinStamp: true (and stamp here) sends its offers
+# to quark as a name hint -- the declared producer and the sanitized title --
+# and records the product id quark returns, which quark only ever does for a
+# match in its AUTO band. Off, wine offers carry whatever structured hint the
+# store states (usually none: recorded unidentifiable).
+#
+# url, cachePath and maxAge are RETIRED: still accepted, so an existing values
+# file renders, but they configure nothing. nagus logs once at startup if the
+# old NAGUS_LWIN_URL-family variables are set.
 lwin:
-  # e.g. https://s3-eu-west-1.amazonaws.com/lwin-dictionary/latest/LWINdatabase.xlsx
   url: ""
-  # On the data volume. With storage.backend=sqlite that is the PVC and a
-  # restart reuses the copy; with postgres it is an emptyDir, so each new pod
-  # downloads the export once (~26 MB) and revalidates conditionally after.
   cachePath: /data/lwin/LWINdatabase.xlsx
-  # How long a copy is used before asking the source again (a conditional
-  # request: an unchanged export costs no download).
   maxAge: 720h
-  # Write canonical ids from auto-route matches. OFF = shadow mode: the route,
-  # would-be id and score are recorded on each wine item so the false-match
-  # rate can be measured first. Keep off until it is under 5%.
   stamp: false
 
 # watches are saved search_items queries + notify thresholds that the /watches
@@ -313,8 +311,10 @@ resources:
     memory: 64Mi
   limits:
     cpu: 500m
-    # 384Mi, up from 256Mi, for the LWIN dictionary (~55 MiB resident; the
-    # Go runtime peaked ~180 MiB while building it). GOMEMLIMIT follows this.
+    # 384Mi was raised from 256Mi for the LWIN dictionary (~55 MiB resident,
+    # ~180 MiB peak while building), which moved to quark in QUARK-04. Left
+    # at 384Mi here; lowering it is a separate, measured change.
+    # GOMEMLIMIT follows this.
     memory: 384Mi
 
 nodeSelector: {}
