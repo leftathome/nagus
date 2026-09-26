@@ -145,6 +145,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Flaky wiring test on a loaded CI runner** (nagus-djd). Main pipeline
+  #2921 failed `TestWiringRunServeHappyPathServesAndShutsDownOnSignal` with
+  "did not become healthy within 5s: connection refused" while the same
+  job's sqlite suites took three minutes. The wiring waits (runServe
+  healthy, runServe shutdown, and the ingest-loop count and cancel waits)
+  now allow 20s; each returns the moment its condition holds, so a fast run
+  pays nothing. The healthy wait also watches runServe's result channel, so
+  a flag or startup error fails the test at once with that error instead of
+  a timeout. Test-only; no runtime change.
 - **A store's own non-wine declaration beats text evidence** (nagus-tmr).
   Broc Cellars' "June Taylor Mission Fig + Angelica Jam" (product_type
   Pantry, tags merch and pantry) was stored as a 2020 wine because its
