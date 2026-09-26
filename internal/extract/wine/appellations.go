@@ -214,11 +214,25 @@ var eventWords = setOfWords("dinner", "lunch", "brunch", "tasting", "tastings", 
 	"classes", "seminar", "webinar", "event", "events", "experience", "festival", "trip", "travel",
 	"book", "books", "map", "maps", "poster", "print", "prints", "puzzle", "guide", "course",
 	"cruise", "cruises", "vacation", "vacations", "visit", "visits", "hike", "hikes", "museum",
-	"voucher", "vouchers", "package", "packages", "cookbook", "cookbooks",
-	// Lodging and venues named after a wine or its place (nagus-d2u): "The
-	// Hermitage La Chapelle Inn", "Napa Valley Chateau Wedding Venue".
-	"hotel", "hotels", "inn", "resort", "resorts", "spa", "wedding", "weddings", "venue", "venues",
-	"rental", "rentals")
+	"voucher", "vouchers", "package", "packages", "cookbook", "cookbooks")
+
+// lodgingWords are lodging and venues named after a wine or its place
+// (nagus-d2u): "The Hermitage La Chapelle Inn", "Napa Valley Chateau Wedding
+// Venue". Unlike eventWords they count only AFTER the place name, where
+// English puts the head: before it they are a wine's name ("Hotel California
+// Napa Valley Red", "Inn Keeper Chianti", "Spa Rioja").
+var lodgingWords = setOfWords("hotel", "hotels", "inn", "resort", "resorts", "spa", "wedding", "weddings",
+	"venue", "venues", "rental", "rentals")
+
+// lodgingAfter reports a lodging word in words at or after index from.
+func lodgingAfter(words []string, from int) bool {
+	for _, w := range words[min(from, len(words)):] {
+		if lodgingWords[w] {
+			return true
+		}
+	}
+	return false
+}
 
 // spiritWords are the whole-word spirit and beer names
 // ("single malt" is two words; see spiritTitle).
@@ -323,12 +337,13 @@ func titleAppellations(title string) appellationEvidence {
 			return ev
 		}
 	}
-	classified := hasClassification(title) || estateNamed(words)
+	classified := hasClassification(title)
+	estate := estateNamed(words)
 	for _, m := range matches {
-		if m.broad && !classified && !colourBeside(words, m, colourNamedRegions[strings.Join(words[m.start:m.end], " ")]) {
+		if m.broad && !classified && !(estate && wineHeadAt(words, m)) && !colourBeside(words, m, colourNamedRegions[strings.Join(words[m.start:m.end], " ")]) {
 			continue
 		}
-		if nearCask(words, m.start, m.end) || spiritTitle(words, m.start) {
+		if lodgingAfter(words, m.end) || nearCask(words, m.start, m.end) || spiritTitle(words, m.start) {
 			continue
 		}
 		if culinaryAfter(words, m.end, title) {
@@ -407,6 +422,51 @@ func estateNamed(words []string) bool {
 		estate = estate || estateWords[w]
 	}
 	return estate
+}
+
+// wineStyleWords end a wine's title: a colour, a style or a house term. (A
+// title ending in a varietal, a colour keyword or a fortified style needs no
+// estate: those are wine evidence on their own.)
+var wineStyleWords = setOfWords("brut", "red", "white", "rose", "rouge", "blanc", "tinto", "rosso", "bianco",
+	"blanco", "rosado", "rosato", "reserve", "reserva", "riserva", "cuvee", "blend", "nv", "sparkling")
+
+// trailingPackWords are the size and pack words wineTail drops.
+var trailingPackWords = setOfWords("ml", "cl", "l", "magnum", "magnums", "pack", "packs", "pk")
+
+// wineTail returns the index just past the title's last word that is not a
+// trailing vintage, bottle size or pack ("2019", "750ml", "1.5L", "6-Pack").
+func wineTail(words []string) int {
+	end := len(words)
+	for end > 0 {
+		w := words[end-1]
+		i := 0
+		for i < len(w) && w[i] >= '0' && w[i] <= '9' {
+			i++
+		}
+		if trailingPackWords[w] || (i > 0 && (i == len(w) || trailingPackWords[w[i:]])) {
+			end--
+			continue
+		}
+		break
+	}
+	return end
+}
+
+// wineHeadAt reports whether a title ENDS -- after a trailing vintage, size
+// or pack -- in broad match m or in a wine or style word: the wine is the
+// head, so an estate word may vouch for the broad name (nagus-d2u). "Quinta
+// do Crasto Douro" and "Domaine Ste. Michelle Columbia Valley Brut" end in
+// the wine; "Quinta do Noval Douro Cork Screw" and "Chateau Ste Michelle
+// Columbia Valley Sweatshirt" end in merchandise, whatever the noun.
+func wineHeadAt(words []string, m phraseMatch) bool {
+	end := wineTail(words)
+	if end == m.end {
+		return true
+	}
+	if end == 0 {
+		return false
+	}
+	return wineStyleWords[words[end-1]]
 }
 
 // broadMerchNouns are things sold "in Burgundy" or "in Bordeaux Blanc": a

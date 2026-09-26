@@ -144,3 +144,68 @@ func TestLeftovers_BroadNameCuveeAndEstate(t *testing.T) {
 		{"Chateau Bordeaux Map", "", ErrNotWine},
 	})
 }
+
+// An estate word vouches for a broad name only when the wine is the head:
+// the title ends, after a trailing vintage, size or pack, in the broad name
+// or a wine or style word. Every merchandise noun of the !32 review sweep
+// that the old denylist guard let through is not wine under any of the four
+// estate prefixes (rv3132/sweep.json).
+func TestLeftovers_EstateNeedsWineHead(t *testing.T) {
+	nouns := []string{"Sweatshirt", "Tumbler", "Koozie", "Pourer", "Ornament", "Polo", "Beanie", "Visor",
+		"Umbrella", "Backpack", "Cooler", "Pen", "Notebook", "Calendar", "Journal", "Flag", "Banner", "Sign",
+		"Plaque", "Cork Screw", "Wine Key", "Coffee", "Tea", "Lotion", "Game", "Dog Collar", "Leash",
+		"Bandana", "Onesie", "Bib", "Golf Balls", "Carafe", "Throw Pillow", "Scarf"}
+	prefixes := []string{"Chateau Ste Michelle Columbia Valley", "Domaine Carneros Napa Valley",
+		"Quinta do Noval Douro", "Clos du Val Napa Valley"}
+	for _, p := range prefixes {
+		for _, n := range nouns {
+			if err := extractErr(p + " " + n); !errors.Is(err, ErrNotWine) {
+				t.Errorf("%q: %v, want not wine", p+" "+n, err)
+			}
+		}
+	}
+	checkVerdicts(t, []struct {
+		title, wineType string
+		want            error
+	}{
+		{"Quinta do Noval Douro", "", nil},
+		{"Quinta do Noval Douro 750ml", "", nil},
+		{"Quinta do Crasto Douro 6-Pack", "", nil},
+		{"Domaine Ste. Michelle Columbia Valley Brut", "", nil},
+		{"Chateau Ste Michelle Columbia Valley Riesling", "", nil},
+		{"Domaine Carneros Napa Valley Cuvee", "", nil},
+		{"Chateau Napa Valley Velvet Red", "", ErrNotWine},
+	})
+}
+
+// Lodging words withdraw a place name only AFTER it; before it they are a
+// wine's name.
+func TestLeftovers_LodgingAfterThePlace(t *testing.T) {
+	checkVerdicts(t, []struct {
+		title, wineType string
+		want            error
+	}{
+		{"Hotel California Napa Valley Red", "", nil},
+		{"Inn Keeper Chianti", "", nil},
+		{"Spa Rioja", "", nil},
+		{"Napa Valley Chateau Wedding Venue", "", ErrNotWine},
+		{"Tenuta Tuscany Villa Rental", "", ErrNotWine},
+		{"Barolo Hotel", "", ErrNotWine},
+		{"Barolo Villa Rental", "", ErrNotWine},
+		{"Chianti Classico Wedding Venue", "", ErrNotWine},
+		{"Rioja Venue", "", ErrNotWine},
+	})
+}
+
+// A vintage year turns the soft food nouns off: foods carry no vintage.
+func TestLeftovers_VintageIsNotAQuantity(t *testing.T) {
+	checkVerdicts(t, []struct {
+		title, wineType string
+		want            error
+	}{
+		{"Merlot 2019 Chocolate", "", nil},
+		{"Cabernet Sauvignon Chocolate 2019", "", nil},
+		{"Riesling Chocolate Truffles 12", "", ErrCulinary},
+		{"Syrah Dark Chocolate 1500 g", "", ErrCulinary},
+	})
+}

@@ -153,7 +153,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Chocolate Bar", "Calistoga Sparkling Water". A trailing number or
     quantity ("8oz", "12 pc") does not move the end. Anywhere else these
     words are a wine's name ("The Chocolate Block", "Truffle Hill
-    Chardonnay", "Water Street Merlot").
+    Chardonnay", "Water Street Merlot"), and a vintage year anywhere in
+    the title turns the rule off ("Merlot 2019 Chocolate", "Cabernet
+    Sauvignon Chocolate 2019").
   - A food word withdraws a fortified or appellation cue only when it
     comes AFTER the wine word ("Barolo Truffles", "Marsala Chicken Kit").
     Before it, it names the wine ("Truffle Hunter Barolo", "Chocolate
@@ -169,12 +171,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Broad appellations: "Hermitage La Chapelle" is a specific name, and
     an estate word (Chateau, Domaine, Quinta, Bodegas, Tenuta, Castello,
     Weingut, Clos, Fattoria, Podere, Herdade) supports a broad name like a
-    classification. So "Quinta do Crasto Douro", "Domaine Jean-Louis Chave
-    Hermitage" and "Clos du Val Napa Valley" are wine, and so is the real
-    corpus title "Domaine Ste. Michelle Columbia Valley Brut". The support
-    does not count in a title with an object or broad-merchandise noun.
-    Lodging and venue words (hotel, inn, resort, spa, wedding, venue,
-    rental) now withdraw an appellation. A bare broad name ("Hermitage",
+    classification, but only when the wine is the title's head: it ends,
+    after a trailing vintage, size or pack, in the broad name or a style
+    word (Brut, Red, Rouge, Blanc, Reserve, Cuvee, Blend, NV, ...). So
+    "Quinta do Crasto Douro", "Domaine Jean-Louis Chave Hermitage" and
+    "Clos du Val Napa Valley" are wine, and so is the real corpus title
+    "Domaine Ste. Michelle Columbia Valley Brut", while "Quinta do Noval
+    Douro Cork Screw" and "Chateau Ste Michelle Columbia Valley
+    Sweatshirt" are not, whatever the noun. Lodging and venue words
+    (hotel, inn, resort, spa, wedding, venue, rental) withdraw a place
+    name when they come after it ("Barolo Villa Rental"); before it they
+    are a wine's name ("Hotel California Napa Valley Red", "Inn Keeper
+    Chianti"). A bare broad name ("Hermitage",
     "Douro") is still not wine by title alone; that is the recall cost of
     the broad tier.
 - **A store's own non-wine declaration beats text evidence** (nagus-tmr).

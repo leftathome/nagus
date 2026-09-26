@@ -149,9 +149,11 @@ func nounHead(words []string, nounAt func(words []string, i int) int) (found, he
 // ("The Chocolate Block", "Truffle Hill Chardonnay", "Water Street Merlot",
 // "Sauce Boss Red Blend"), so they count only as the LAST word of the title:
 // "Merlot Chocolate Sauce", "Champagne Truffles", "Cabernet Chocolate Bar",
-// "Calistoga Sparkling Water". A trailing number or quantity ("8oz", "12 pc",
-// "2021") does not move the end; a word after the noun does ("The Chocolate
-// Block 2021" is the wine, its last word "Block").
+// "Calistoga Sparkling Water". A trailing quantity ("8oz", "12 pc") does not
+// move the end; a word after the noun does ("The Chocolate Block"). A vintage
+// year anywhere in the title turns the rule off: a food carries no vintage,
+// so "Cabernet Sauvignon Chocolate 2019" and "Merlot 2019 Chocolate" are
+// wines named Chocolate.
 var (
 	softCulinaryNouns = setOfWords("chocolate", "chocolates", "truffle", "truffles", "sauce", "sauces", "fudge")
 	softCulinaryPairs = setOfWords("chocolate bar", "chocolate bars", "sparkling water", "mineral water", "spring water")
@@ -172,6 +174,23 @@ func quantityEnd(words []string) int {
 		break
 	}
 	return end
+}
+
+// yearWord reports a four-digit year 1900-2099: a vintage, never a food
+// quantity. (quantityEnd need not exclude years: culinaryNounAt checks
+// hasYear first.)
+func yearWord(w string) bool {
+	return len(w) == 4 && allDigits(w) && (strings.HasPrefix(w, "19") || strings.HasPrefix(w, "20"))
+}
+
+// hasYear reports a yearWord among words.
+func hasYear(words []string) bool {
+	for _, w := range words {
+		if yearWord(w) {
+			return true
+		}
+	}
+	return false
 }
 
 // allDigits reports a non-empty all-digit word.
@@ -200,6 +219,9 @@ func culinaryNounAt(words []string, i int) int {
 	}
 	if culinaryNouns[words[i]] {
 		return 1
+	}
+	if hasYear(words) {
+		return 0
 	}
 	end := quantityEnd(words)
 	if i+2 == end && softCulinaryPairs[words[i]+" "+words[i+1]] {
