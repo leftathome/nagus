@@ -145,6 +145,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Wine extractor leftovers from the !30 reviews** (nagus-d2u). None of
+  these was a regression; all were wine in production.
+  - A soft food noun (chocolate, truffles, sauce, fudge, and chocolate bar,
+    sparkling, mineral or spring water) as the title's LAST word is
+    culinary: "Merlot Chocolate Sauce", "Champagne Truffles", "Cabernet
+    Chocolate Bar", "Calistoga Sparkling Water". A trailing number or
+    quantity ("8oz", "12 pc") does not move the end. Anywhere else these
+    words are a wine's name ("The Chocolate Block", "Truffle Hill
+    Chardonnay", "Water Street Merlot").
+  - A food word withdraws a fortified or appellation cue only when it
+    comes AFTER the wine word ("Barolo Truffles", "Marsala Chicken Kit").
+    Before it, it names the wine ("Truffle Hunter Barolo", "Chocolate
+    Port"), unless a conjunction makes two products ("Salami and Chianti
+    Pairing Box"). "Mix" in a pack or case is a mixed case ("Madeira Mix
+    3-Pack", "Holiday Port Mix Case"). Chicken, beef, pork, veal, braised
+    and glaze join the food words.
+  - A source-declared wine_type no longer vouches for a food made with the
+    wine: "Marsala Chicken Kit" typed Red is culinary. A colour, grape or
+    year that the listing itself names still makes it wine.
+  - "Wine" right before an object noun names the object: "Wine Tool
+    Chardonnay Edition" is merchandise.
+  - Broad appellations: "Hermitage La Chapelle" is a specific name, and
+    an estate word (Chateau, Domaine, Quinta, Bodegas, Tenuta, Castello,
+    Weingut, Clos, Fattoria, Podere, Herdade) supports a broad name like a
+    classification. So "Quinta do Crasto Douro", "Domaine Jean-Louis Chave
+    Hermitage" and "Clos du Val Napa Valley" are wine, and so is the real
+    corpus title "Domaine Ste. Michelle Columbia Valley Brut". The support
+    does not count in a title with an object or broad-merchandise noun.
+    Lodging and venue words (hotel, inn, resort, spa, wedding, venue,
+    rental) now withdraw an appellation. A bare broad name ("Hermitage",
+    "Douro") is still not wine by title alone; that is the recall cost of
+    the broad tier.
 - **A store's own non-wine declaration beats text evidence** (nagus-tmr).
   Broc Cellars' "June Taylor Mission Fig + Angelica Jam" (product_type
   Pantry, tags merch and pantry) was stored as a 2020 wine because its

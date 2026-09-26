@@ -75,6 +75,10 @@ var appellationSupplement = map[string]bool{
 	"montalcino": true,
 	"napa":       true,
 	"sonoma":     true,
+	// Famous wines named by a broad appellation and a cuvee, which no
+	// supporting cue accompanies on the label (nagus-d2u). The full name is
+	// specific; the appellation alone stays broad.
+	"hermitage la chapelle": false, // Paul Jaboulet Aine
 }
 
 // appellationMaxWords is the longest name, in words, either table holds.
@@ -210,7 +214,11 @@ var eventWords = setOfWords("dinner", "lunch", "brunch", "tasting", "tastings", 
 	"classes", "seminar", "webinar", "event", "events", "experience", "festival", "trip", "travel",
 	"book", "books", "map", "maps", "poster", "print", "prints", "puzzle", "guide", "course",
 	"cruise", "cruises", "vacation", "vacations", "visit", "visits", "hike", "hikes", "museum",
-	"voucher", "vouchers", "package", "packages", "cookbook", "cookbooks")
+	"voucher", "vouchers", "package", "packages", "cookbook", "cookbooks",
+	// Lodging and venues named after a wine or its place (nagus-d2u): "The
+	// Hermitage La Chapelle Inn", "Napa Valley Chateau Wedding Venue".
+	"hotel", "hotels", "inn", "resort", "resorts", "spa", "wedding", "weddings", "venue", "venues",
+	"rental", "rentals")
 
 // spiritWords are the whole-word spirit and beer names
 // ("single malt" is two words; see spiritTitle).
@@ -315,7 +323,7 @@ func titleAppellations(title string) appellationEvidence {
 			return ev
 		}
 	}
-	classified := hasClassification(title)
+	classified := hasClassification(title) || estateNamed(words)
 	for _, m := range matches {
 		if m.broad && !classified && !colourBeside(words, m, colourNamedRegions[strings.Join(words[m.start:m.end], " ")]) {
 			continue
@@ -323,7 +331,7 @@ func titleAppellations(title string) appellationEvidence {
 		if nearCask(words, m.start, m.end) || spiritTitle(words, m.start) {
 			continue
 		}
-		if culinaryWordRe.MatchString(strings.Join(words, " ")) {
+		if culinaryAfter(words, m.end, title) {
 			ev.culinary = true
 			return ev
 		}
@@ -378,6 +386,27 @@ func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 		}
 	}
 	return false
+}
+
+// estateWords name a wine producer's estate: beside a broad name they are the
+// supporting cue a classification would be (nagus-d2u): "Quinta do Crasto
+// Douro", "Domaine Jean-Louis Chave Hermitage", "Clos du Val Napa Valley".
+// Only the words wine estates use and little else does: not "bodega" (Bodega
+// Bay, a Sonoma town), "cantina" (restaurants) or "estate" (real estate).
+var estateWords = setOfWords("chateau", "domaine", "quinta", "bodegas", "tenuta", "castello", "weingut",
+	"clos", "fattoria", "podere", "herdade")
+
+// estateNamed reports an estate word in a title with no object or broad
+// merchandise noun ("Chateau Napa Valley Throw Pillow" is a pillow).
+func estateNamed(words []string) bool {
+	estate := false
+	for _, w := range words {
+		if broadMerchNouns[w] || objectNouns[w] {
+			return false
+		}
+		estate = estate || estateWords[w]
+	}
+	return estate
 }
 
 // broadMerchNouns are things sold "in Burgundy" or "in Bordeaux Blanc": a

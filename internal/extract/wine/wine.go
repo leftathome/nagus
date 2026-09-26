@@ -171,6 +171,9 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 			it.Attributes["colour"] = c
 		}
 	}
+	// Whether the listing's own text (not the source's wine_type) gave a
+	// colour; see the culinary check below.
+	textColour := it.Attributes["colour"] != ""
 	// The source's wine type is the colour ("Rose of Pinot Noir" is a rose,
 	// not the red its grape implies).
 	if c := sourceColour(s.Aspects["wine_type"]); c != "" {
@@ -250,13 +253,20 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	// 12 were merchandise (a foil cutter and key chains among them, on sale,
 	// which the wine-sales watch would have pinged); none of the 79 bottles.
 	// An appellation is evidence too (nagus-tmr; see appellations.go).
-	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["colour"] == "" && it.Attributes["nv"] == "" && !disgorged && !fortified && !app.wine {
-		if culinaryFortified || app.culinary {
-			// "Sherry Trifle Mix", "Marsala Chicken Sauce": a food made
-			// with the wine.
+	//
+	// A food made with the wine ("Sherry Trifle Mix", "Marsala Chicken
+	// Kit") is culinary even when the source declares a wine_type: the
+	// declared colour is the only thing vouching for it, and it says what
+	// the store's wine records carry, not that this record is a bottle
+	// (nagus-d2u). A colour, grape or year the listing itself names still
+	// makes it wine.
+	if it.Attributes["vintage"] == "" && it.Attributes["varietal"] == "" && it.Attributes["nv"] == "" && !disgorged && !fortified && !app.wine {
+		if !textColour && (culinaryFortified || app.culinary) {
 			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
 		}
-		return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+		if it.Attributes["colour"] == "" {
+			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+		}
 	}
 
 	if err := it.Validate(); err != nil {
@@ -369,8 +379,41 @@ var notWinePortRe = regexp.MustCompile(`(?i)\bport\s+(townsend|angeles|orchard|l
 //     Wine Vinegar" is culinary, "Vinegar Hill Syrah" is wine).
 //   - culinaryWordRe is words that real wine names also use ("JaM Cellars",
 //     "The Chocolate Block", "2021 Mix"): they only withdraw the fortified
-//     and appellation cues ("Sherry Trifle Mix", "Chianti Cooking Sauce").
-var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?|salami|chorizo|truffles?|pasta|marinara|capers|anchovies|oysters|pizza|gelato|risotto|foie gras|ice cream|sorbet)\b`)
+//     and appellation cues, and only AFTER the wine word ("Sherry Trifle
+//     Mix", "Chianti Cooking Sauce"; see culinaryAfter).
+//     The meats and "braised"/"glaze" are the dishes a fortified wine
+//     names ("Marsala Chicken Kit", "Port Braised Beef", "Port Glaze";
+//     nagus-d2u).
+var culinaryWordRe = regexp.MustCompile(`(?i)\b(cooking|jam|sauces?|trifle|mix|fudge|chocolates?|salami|chorizo|truffles?|pasta|marinara|capers|anchovies|oysters|pizza|gelato|risotto|foie gras|ice cream|sorbet|chicken|beef|pork|veal|braised|glaze)\b`)
+
+// casePackRe is a case of wine: with a pack count (packCountRe) it makes
+// "mix" a mixed case, not a food mix ("Madeira Mix 3-Pack", "Holiday Port
+// Mix Case").
+var casePackRe = regexp.MustCompile(`(?i)\bcases?\b`)
+
+// culinaryAfter reports a culinary word (culinaryWordRe) in words at or after
+// index from: the food is the head, as English puts it last ("Barolo
+// Truffles", "Marsala Chicken Kit"). A food word BEFORE the wine word names
+// the wine ("Truffle Hunter Barolo", "Chocolate Port"; nagus-d2u) -- unless a
+// conjunction makes them two products ("Salami and Chianti Pairing Box"), when
+// a food word anywhere counts. "Mix" in a title that is a case or pack of wine
+// is a mixed case.
+func culinaryAfter(words []string, from int, title string) bool {
+	for _, w := range words {
+		if conjunctions[w] {
+			from = 0
+			break
+		}
+	}
+	pack := packCountRe.MatchString(title) || casePackRe.MatchString(title)
+	for _, w := range culinaryWordRe.FindAllString(strings.Join(words[min(from, len(words)):], " "), -1) {
+		if pack && strings.EqualFold(w, "mix") {
+			continue
+		}
+		return true
+	}
+	return false
+}
 
 // fortifiedWine reports whether a title names a fortified-wine style once
 // the English-word uses of "port" are set aside, and no cask finish, spirit
@@ -383,6 +426,8 @@ func fortifiedWine(title string, angelica bool) (fortified, culinary bool) {
 	}
 	t = hyphenPortRe.ReplaceAllString(t, "$1 $2")
 	named, cue := false, 0
+	var cueWords []string
+	cueEnd := 0
 	for _, m := range fortifiedRe.FindAllStringIndex(t, -1) {
 		start, end := m[0], m[1]
 		// A hyphen-joined token is not the word: "Port-a-Potty".
@@ -400,6 +445,7 @@ func fortifiedWine(title string, angelica bool) (fortified, culinary bool) {
 			continue
 		}
 		named, cue = true, len(before)
+		cueWords, cueEnd = words, mEnd
 		if spiritTitle(words, cue) {
 			return false, false
 		}
@@ -408,7 +454,7 @@ func fortifiedWine(title string, angelica bool) (fortified, culinary bool) {
 	switch {
 	case !named:
 		return false, false
-	case culinaryWordRe.MatchString(t):
+	case culinaryAfter(cueWords, cueEnd, title):
 		return false, true
 	}
 	return true, false
