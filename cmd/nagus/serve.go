@@ -111,7 +111,9 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/item", s.handleItem)
 	mux.HandleFunc("/watches", s.handleWatches)
-	mux.HandleFunc("/mcp", s.handleMCP)
+	// Every method reaches the kit's server, which answers a non-POST with 405
+	// and an Allow header (the streamable HTTP transport's "no SSE stream").
+	mux.Handle("/mcp", s.mustMCPServer())
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	return mux
 }
