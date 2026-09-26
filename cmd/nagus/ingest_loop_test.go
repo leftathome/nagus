@@ -36,6 +36,12 @@ func (c *loopFakeConnector) Fetch(context.Context) ([]listing.Raw, error) {
 	return c.raws, c.err
 }
 
+// loopWaitTimeout bounds the ingest-loop waits. Like wiringHealthyTimeout it
+// only costs time on failure: each wait returns as soon as its condition
+// holds, so a loaded CI runner (nagus-djd) gets headroom and a fast one pays
+// nothing.
+const loopWaitTimeout = 20 * time.Second
+
 // loopWaitForCount polls got (an atomic counter read) until it reaches at
 // least want, or fails the test once deadline elapses. Used instead of a fixed
 // sleep so the ticking tests stay fast on quiet CI and don't hang on slow CI.
@@ -137,13 +143,13 @@ func TestRunSourceIngestLoopTicksAndReturnsOnCancel(t *testing.T) {
 	}()
 
 	// Immediate run (1) plus at least one tick (2).
-	loopWaitForCount(t, 2*time.Second, 2, conn.calls.Load)
+	loopWaitForCount(t, loopWaitTimeout, 2, conn.calls.Load)
 
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("runSourceIngestLoop did not return within 2s of context cancellation")
+	case <-time.After(loopWaitTimeout):
+		t.Fatalf("runSourceIngestLoop did not return within %s of context cancellation", loopWaitTimeout)
 	}
 }
 
@@ -172,8 +178,8 @@ func TestStartIngestPerSourceIsolationAndIntervalGating(t *testing.T) {
 
 	// Both the erroring and the healthy source must keep advancing past their
 	// immediate run and into ticks; the bad source's errors must never stall it.
-	loopWaitForCount(t, 2*time.Second, 2, goodConn.calls.Load)
-	loopWaitForCount(t, 2*time.Second, 2, badConn.calls.Load)
+	loopWaitForCount(t, loopWaitTimeout, 2, goodConn.calls.Load)
+	loopWaitForCount(t, loopWaitTimeout, 2, badConn.calls.Load)
 
 	if got := disabledConn.calls.Load(); got != 0 {
 		t.Fatalf("disabled source (interval <= 0) was fetched %d times, want 0", got)

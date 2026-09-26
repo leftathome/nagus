@@ -31,14 +31,29 @@ func wiringFreeAddr(t *testing.T) string {
 	return addr
 }
 
+// wiringHealthyTimeout bounds how long a wiring test waits for runServe to
+// come up (and to shut down). It is generous on purpose: the wait returns the
+// moment the condition holds, so a fast machine pays nothing, while a CI runner
+// under heavy load (nagus-djd: main pipeline #2921 needed more than 5s) no
+// longer fails a healthy server.
+const wiringHealthyTimeout = 20 * time.Second
+
 // wiringWaitForHealthy polls /healthz until it answers 200 or deadline
 // elapses, so tests never depend on a fixed sleep to know the server is up.
-func wiringWaitForHealthy(t *testing.T, addr string, deadline time.Duration) {
+// errc is runServe's result channel: if runServe returns while we are still
+// polling (a flag or startup error), the test fails immediately with that
+// real error instead of waiting out the deadline and reporting an opaque
+// "connection refused".
+func wiringWaitForHealthy(t *testing.T, addr string, deadline time.Duration, errc <-chan error) {
 	t.Helper()
-	cutoff := time.Now().Add(deadline)
+	cutoff := time.NewTimer(deadline)
+	defer cutoff.Stop()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	client := &http.Client{Timeout: time.Second}
 	var lastErr error
-	for time.Now().Before(cutoff) {
-		resp, err := http.Get("http://" + addr + "/healthz")
+	for {
+		resp, err := client.Get("http://" + addr + "/healthz")
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -48,9 +63,14 @@ func wiringWaitForHealthy(t *testing.T, addr string, deadline time.Duration) {
 		} else {
 			lastErr = err
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case err := <-errc:
+			t.Fatalf("runServe returned before %s became healthy: %v", addr, err)
+		case <-cutoff.C:
+			t.Fatalf("server at %s did not become healthy within %s: %v", addr, deadline, lastErr)
+		case <-tick.C:
+		}
 	}
-	t.Fatalf("server at %s did not become healthy within %s: %v", addr, deadline, lastErr)
 }
 
 // --- runServe: error/validation paths (no network, no listener started) ---
@@ -175,7 +195,7 @@ func TestWiringRunServeHappyPathServesAndShutsDownOnSignal(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() { errc <- runServe(args) }()
 
-	wiringWaitForHealthy(t, addr, 5*time.Second)
+	wiringWaitForHealthy(t, addr, wiringHealthyTimeout, errc)
 
 	resp, err := http.Get("http://" + addr + "/search?category=hdd")
 	if err != nil {
@@ -204,7 +224,7 @@ func TestWiringRunServeHappyPathServesAndShutsDownOnSignal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runServe returned an error after the shutdown signal: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("runServe did not return within 5s of the shutdown signal")
+	case <-time.After(wiringHealthyTimeout):
+		t.Fatalf("runServe did not return within %s of the shutdown signal", wiringHealthyTimeout)
 	}
 }
