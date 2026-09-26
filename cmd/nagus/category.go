@@ -313,8 +313,13 @@ func buildShopifyConnector(s SourceConfig, o categoryOpts) (listing.Connector, e
 		MaxPages:            s.MaxPages,
 		Collection:          s.Collection,
 		Collections:         s.Collections,
-		FixturePath:         s.Fixture,
-		Logf:                o.logf,
+		// Only the wine extractor reads tags (store-declared non-wine,
+		// nagus-tmr). Other categories' listings do not carry them: they
+		// would reach the fail-closed glovebox gate and every stored offer
+		// (serverpartdeals' drive tags run 277-366 characters).
+		EmitTags:    s.Category == "wine",
+		FixturePath: s.Fixture,
+		Logf:        o.logf,
 	}), nil
 }
 

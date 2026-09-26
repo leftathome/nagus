@@ -191,6 +191,11 @@ type Config struct {
 	// Sleep is the delay hook, injectable so tests do not actually wait.
 	Sleep func(ctx context.Context, d time.Duration) error
 
+	// EmitTags carries the product's tags as the "tags" aspect. Only wine
+	// sources set it (the wine extractor reads them); left off, listings do
+	// not carry the tags into the glovebox gate or the stored offer.
+	EmitTags bool
+
 	// MaxPages bounds pagination. Defaults to DefaultMaxPages. It is a guard
 	// against a mis-pointed source, not a sampling knob: set it ABOVE the
 	// store's real page count, because a fetch that stops at the cap never
@@ -562,6 +567,13 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 			if p.ProductType != "" {
 				aspects["product_type"] = p.ProductType
 			}
+			// The store's own tags, comma-joined, when configured: the wine
+			// extractor rejects a listing a store tags "merch" or "pantry"
+			// whatever its text says (nagus-tmr). Untrusted like every
+			// aspect.
+			if tags := joinTags(p.Tags); c.cfg.EmitTags && tags != "" {
+				aspects["tags"] = tags
+			}
 			if v.SKU != "" {
 				aspects["sku"] = v.SKU
 			}
@@ -595,6 +607,18 @@ func (c *Connector) mapProducts(prods []product, now time.Time) []listing.Raw {
 		}
 	}
 	return out
+}
+
+// joinTags renders a product's tags as one comma-separated aspect value,
+// trimmed, empty tags dropped.
+func joinTags(tags []string) string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // allowed reports whether a product passes the configured product_type

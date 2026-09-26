@@ -80,25 +80,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   merchandise (`wine.ErrMerchandise`): both wrap `wine.ErrNotWine` and are
   told apart in the extract skip reason, reserved for a possible future
   grocery category.
-
-### Added
-
-- **Title text hints for quark** (quark QUARK-02). A source may set
-  `quarkTextHints: true`: when it states no product identifiers (eBay search
-  results carry the part number only in the title), the listing TITLE is sent
-  to quark as hint text, and quark links it to a product only if the title
-  names a key quark already holds. The title is attached only after the
-  glovebox gate passed the listing (offers are otherwise recorded before the
-  gate), only when every structured hint field is empty, and the gate is still
-  called once per listing. Offers gain an additive `hint_text` column
-  (Postgres `ADD COLUMN IF NOT EXISTS`, SQLite `table_info`); a hint without
-  text keeps its exact old fingerprint, so nothing re-resolves on upgrade.
-  quark's `text` route stamps resolved; `unmatched` stamps refused, retried
-  when quark's catalogue generation grows. Enable only after quark accepts
-  `text` (quark MR !6): an older quark rejects the unknown field.
-
-### Changed
-
+- **Appellations are wine evidence** (nagus-tmr). Old World wines named by
+  place ("Castello di Ama Chianti Classico", "Barolo Vietti", "Sancerre
+  Vacheron", "Etna Rosso Benanti") were dropped as not-wine when the title
+  carried no year, grape or colour word. A static table generated offline
+  from the Liv-ex LWIN export (`tools/genappellations`; REGION/SUB_REGION
+  names of at least 20 live wines, CC BY 4.0, attributed in the generated
+  file) plus a hand supplement (Etna, Brunello, Amarone, Muscadet, ...)
+  now counts: specific appellations alone, broad regions and New World
+  AVAs (Burgundy, Tuscany, Napa Valley) only beside a classification token
+  (DOC, AOC, Grand Cru, Riserva, ...) or a bare colour word. Bare "Red",
+  "Rouge", "Rosso", "Tinto", "Blanco" (and Bianco, Blanc, White, Rosado,
+  Rosato) are the colour beside an appellation or NV, and nowhere else.
+  A broad name's colour word must sit next to it (at most one word between)
+  in a title with no object noun ("Burgundy Blanc Throw Pillow" is not
+  wine). Appellations that double as places or words (Vesuvio, Santorini,
+  Hermitage, Douro, Macon, Montrachet, Brunello, ...) are broad. Cask
+  finishes, spirits, events and travel, printed matter and foods withdraw
+  the cue ("Sauternes Cask Finish", "Barolo Tasting Dinner", "Douro River
+  Cruise", "Chianti Salami"). An NV marker and a bare colour need a third
+  cue ("Red NV" is not wine). nagus still loads nothing from LWIN at
+  runtime.
+- **Culinary is a head-noun rule** (nagus-tmr). A title's food noun
+  (vinegar, cake, cheese, jelly, jam, preserves, marmalade, chutney,
+  compote, syrup, honey, mustard, olive oil, cooking wine) makes it
+  culinary unless a varietal, appellation, fortified style or colour
+  keyword or bare colour word FOLLOWS it: "Sherry Vinegar", "Chardonnay
+  Jam" and "Madeira Cake" are culinary; "Cake Bread Cellars Chardonnay",
+  "Jelly Roll Zinfandel", "Vinegar Hill Syrah" and "Mustard Seed Red 2020"
+  are wine. A food word in a producer name ("Butter Chardonnay by JaM",
+  "JaM Cellars Butter") is not a food. A year never rescues one, from the
+  title or the body. A food in a wine pack or bundle ("Spritz Pack w/ ...
+  Fruit Syrup") is merchandise; a food set or duo stays culinary; mead
+  ("Honey Wine") is plain not-wine.
+- **Port styles and guards** (nagus-tmr). Oak or wood before a port word is
+  a style ("Oak Aged Port", "Wood Port"), and after a named style too ("Old
+  Oak Tawny Port", "Tawny Port, oak aged"); cask, barrel and finish still
+  withdraw it. A spirit word in a producer name right before the style is
+  the producer ("Porter Creek Tawny Port", "Gin Lane Port"). "Tawny-Port"
+  counts. "Angelica" (California's fortified dessert wine) is a fortified
+  style beside a bottle size, "dessert wine" or a declared wine type (alone
+  it is a herb or a name); "2020 Angelica" is wine by its year. "Port
+  Ellen" and "Port Askaig" are Scotch.
+- **Object merchandise is not rescued by a grape** (nagus-tmr). Towels,
+  charms, soap, flutes and tools are merchandise even with a varietal, a
+  year or a pack count ("Merlot Tea Towel", "2-Pack Champagne Flutes"),
+  unless a bottle size or an explicit pack of wine is in the title -- when
+  the object is the title's head noun ("Charm City Syrah 2020" is wine).
+  Tees, socks, stickers, magnets, mugs, perfume, sweaters, posters, prints,
+  paddles and jerseys (not New Jersey) follow the same head-noun rule:
+  "Sancerre Tee" is merchandise, "Sweater Weather Red Blend 2022" wine.
+- **Bare "Cabernet" is a varietal** (red), after every other grape.
 - **A Shopify SKU is no longer sent to quark as the part number** (quark
   QUARK-02; operator-approved re-key). serverpartdeals SKUs carry seller
   segments after the manufacturer part number (`HUS726040AL4215-DELL_DELLG13`,
@@ -113,6 +145,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A store's own non-wine declaration beats text evidence** (nagus-tmr).
+  Broc Cellars' "June Taylor Mission Fig + Angelica Jam" (product_type
+  Pantry, tags merch and pantry) was stored as a 2020 wine because its
+  description names "our 2020 Angelica dessert wine" (production,
+  2026-09-25; pre-existing since at least c4b6e98). The Shopify connector
+  now carries a product's tags as the `tags` aspect for WINE sources only
+  (other categories' listings, e.g. serverpartdeals' long drive tags, do
+  not reach the glovebox gate or the stored offer), and the wine extractor
+  rejects a listing whose product_type is Pantry, Food or Grocery
+  (culinary) or Merch, Merchandise, Apparel, Gift Card(s), (Wine)
+  Accessories, Glassware, Books, Events, Tickets or Membership
+  (merchandise), or which is tagged pantry or food (culinary) or merch,
+  merchandise, apparel or gift card (merchandise); declared both, the title
+  decides (a food title is culinary, anything else merchandise). Exact
+  words only: a wine tagged "gifts" or "holiday" stays wine. Commerce7 and Vinoshipper already
+  skip non-wine types; OrderPort publishes none.
 - **serverpartdeals was never walked to its end, so tail rows never
   refreshed** (nagus-bu2). The store's catalogue is more than 10,000 products
   (40+ full pages at 250, measured 2026-09-25) and hard drives are spread
@@ -147,6 +195,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   separately.** "143 products fetched" was 3000 store products read, of
   which 143 variants passed the allow-filter; the smaller number hid how far
   short of the catalogue the walk stopped.
+
+### Added
+
+- **Title text hints for quark** (quark QUARK-02). A source may set
+  `quarkTextHints: true`: when it states no product identifiers (eBay search
+  results carry the part number only in the title), the listing TITLE is sent
+  to quark as hint text, and quark links it to a product only if the title
+  names a key quark already holds. The title is attached only after the
+  glovebox gate passed the listing (offers are otherwise recorded before the
+  gate), only when every structured hint field is empty, and the gate is still
+  called once per listing. Offers gain an additive `hint_text` column
+  (Postgres `ADD COLUMN IF NOT EXISTS`, SQLite `table_info`); a hint without
+  text keeps its exact old fingerprint, so nothing re-resolves on upgrade.
+  quark's `text` route stamps resolved; `unmatched` stamps refused, retried
+  when quark's catalogue generation grows. Enable only after quark accepts
+  `text` (quark MR !6): an older quark rejects the unknown field.
 
 ## [0.5.1] - 2026-09-24
 
