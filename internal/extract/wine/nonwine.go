@@ -144,12 +144,90 @@ func nounHead(words []string, nounAt func(words []string, i int) int) (found, he
 	return true, true
 }
 
+// SOFT FOOD NOUNS (nagus-d2u). Chocolate, truffles, sauce, fudge and
+// sparkling water are foods, but they are also words in real wine names
+// ("The Chocolate Block", "Truffle Hill Chardonnay", "Water Street Merlot",
+// "Sauce Boss Red Blend"), so they count only as the LAST word of the title:
+// "Merlot Chocolate Sauce", "Champagne Truffles", "Cabernet Chocolate Bar",
+// "Calistoga Sparkling Water". A trailing quantity ("8oz", "12 pc") does not
+// move the end; a word after the noun does ("The Chocolate Block"). A vintage
+// year anywhere in the title turns the rule off: a food carries no vintage,
+// so "Cabernet Sauvignon Chocolate 2019" and "Merlot 2019 Chocolate" are
+// wines named Chocolate.
+var (
+	softCulinaryNouns = setOfWords("chocolate", "chocolates", "truffle", "truffles", "sauce", "sauces", "fudge")
+	softCulinaryPairs = setOfWords("chocolate bar", "chocolate bars", "sparkling water", "mineral water", "spring water")
+	// quantityWords are the units a trailing food quantity uses.
+	quantityWords = setOfWords("oz", "ounce", "ounces", "g", "gram", "grams", "lb", "lbs", "pc", "pcs", "piece", "pieces", "ct", "count")
+)
+
+// quantityEnd returns the index just past the title's last word that is not
+// part of a trailing quantity ("12 pc", "8oz", "8 oz").
+func quantityEnd(words []string) int {
+	end := len(words)
+	for end > 0 {
+		w := words[end-1]
+		if quantityWords[w] || allDigits(w) || quantityToken(w) {
+			end--
+			continue
+		}
+		break
+	}
+	return end
+}
+
+// yearWord reports a four-digit year 1900-2099: a vintage, never a food
+// quantity. (quantityEnd need not exclude years: culinaryNounAt checks
+// hasYear first.)
+func yearWord(w string) bool {
+	return len(w) == 4 && allDigits(w) && (strings.HasPrefix(w, "19") || strings.HasPrefix(w, "20"))
+}
+
+// hasYear reports a yearWord among words.
+func hasYear(words []string) bool {
+	for _, w := range words {
+		if yearWord(w) {
+			return true
+		}
+	}
+	return false
+}
+
+// allDigits reports a non-empty all-digit word.
+func allDigits(w string) bool {
+	for _, r := range w {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return w != ""
+}
+
+// quantityToken is a number glued to its unit ("8oz", "100g", "12pc").
+func quantityToken(w string) bool {
+	i := 0
+	for i < len(w) && w[i] >= '0' && w[i] <= '9' {
+		i++
+	}
+	return i > 0 && quantityWords[w[i:]]
+}
+
 // culinaryNounAt is nounAt for food nouns.
 func culinaryNounAt(words []string, i int) int {
 	if i+1 < len(words) && culinaryPairs[words[i]+" "+words[i+1]] {
 		return 2
 	}
 	if culinaryNouns[words[i]] {
+		return 1
+	}
+	if hasYear(words) {
+		return 0
+	}
+	end := quantityEnd(words)
+	if i+2 == end && softCulinaryPairs[words[i]+" "+words[i+1]] {
+		return 2
+	}
+	if i+1 == end && softCulinaryNouns[words[i]] {
 		return 1
 	}
 	return 0
@@ -221,9 +299,17 @@ var objectNouns = setOfWords("towel", "towels", "charm", "charms", "soap", "soap
 
 // objectHead reports an object noun that is the title's head ("Merlot Tea
 // Towel"), not a name word before the wine ("Charm City Syrah 2020", "Tool
-// Shed Red 2019").
+// Shed Red 2019"). "Wine" right before the object noun names the object
+// whatever follows (nagus-d2u): "Wine Tool Chardonnay Edition" is a wine
+// tool, its varietal a theme, not the head.
 func objectHead(title string) bool {
-	found, head := nounHead(normalizeWords(title), func(words []string, i int) int {
+	words := normalizeWords(title)
+	for i := 1; i < len(words); i++ {
+		if words[i-1] == "wine" && objectNouns[words[i]] {
+			return true
+		}
+	}
+	found, head := nounHead(words, func(words []string, i int) int {
 		if objectNouns[words[i]] && !(words[i] == "jersey" && i > 0 && words[i-1] == "new") {
 			return 1
 		}

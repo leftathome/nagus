@@ -145,6 +145,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Wine extractor leftovers from the !30 reviews** (nagus-d2u). None of
+  these was a regression; all were wine in production.
+  - A soft food noun (chocolate, truffles, sauce, fudge, and chocolate bar,
+    sparkling, mineral or spring water) as the title's LAST word is
+    culinary: "Merlot Chocolate Sauce", "Champagne Truffles", "Cabernet
+    Chocolate Bar", "Calistoga Sparkling Water". A trailing number or
+    quantity ("8oz", "12 pc") does not move the end. Anywhere else these
+    words are a wine's name ("The Chocolate Block", "Truffle Hill
+    Chardonnay", "Water Street Merlot"), and a vintage year anywhere in
+    the title turns the rule off ("Merlot 2019 Chocolate", "Cabernet
+    Sauvignon Chocolate 2019").
+  - A food word withdraws a fortified or appellation cue only when it
+    comes AFTER the wine word ("Barolo Truffles", "Marsala Chicken Kit").
+    Before it, it names the wine ("Truffle Hunter Barolo", "Chocolate
+    Port"), unless a conjunction makes two products ("Salami and Chianti
+    Pairing Box"). "Mix" in a pack or case is a mixed case ("Madeira Mix
+    3-Pack", "Holiday Port Mix Case"). Chicken, beef, pork, veal, braised
+    and glaze join the food words.
+  - A source-declared wine_type no longer vouches for a food made with the
+    wine: "Marsala Chicken Kit" typed Red is culinary. A colour, grape or
+    year that the listing itself names still makes it wine.
+  - "Wine" right before an object noun names the object: "Wine Tool
+    Chardonnay Edition" is merchandise.
+  - Broad appellations: "Hermitage La Chapelle" is a specific name, and
+    an estate word (Chateau, Domaine, Quinta, Bodegas, Tenuta, Castello,
+    Weingut, Clos, Fattoria, Podere, Herdade) supports a broad name like a
+    classification, but only when the wine is the title's head: it ends,
+    after a trailing vintage, size or pack, in the broad name or a style
+    word (Brut, Red, Rouge, Blanc, Reserve, Cuvee, Blend, NV, ...). So
+    "Quinta do Crasto Douro", "Domaine Jean-Louis Chave Hermitage" and
+    "Clos du Val Napa Valley" are wine, and so is the real corpus title
+    "Domaine Ste. Michelle Columbia Valley Brut", while "Quinta do Noval
+    Douro Cork Screw" and "Chateau Ste Michelle Columbia Valley
+    Sweatshirt" are not, whatever the noun. Lodging and venue words
+    (hotel, inn, resort, spa, wedding, venue, rental) withdraw a place
+    name when they come after it ("Barolo Villa Rental"); before it they
+    are a wine's name ("Hotel California Napa Valley Red", "Inn Keeper
+    Chianti"). A bare broad name ("Hermitage",
+    "Douro") is still not wine by title alone; that is the recall cost of
+    the broad tier.
 - **Flaky wiring test on a loaded CI runner** (nagus-djd). Main pipeline
   #2921 failed `TestWiringRunServeHappyPathServesAndShutsDownOnSignal` with
   "did not become healthy within 5s: connection refused" while the same
