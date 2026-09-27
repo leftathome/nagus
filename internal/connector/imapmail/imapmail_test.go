@@ -106,7 +106,8 @@ func connector(t *testing.T, addr string, p Parser) *Connector {
 	host, port, _ := net.SplitHostPort(addr)
 	c, err := NewConnector(Config{Name: "lastbottle", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: sender, Parser: p,
-		Now: func() time.Time { return now }, Logf: t.Logf})
+		// These tests exercise the opt-in A-R path (rv35 C1: off by default).
+		TrustAuthResults: true, Now: func() time.Time { return now }, Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestSubdomainSenderWithRelaxedAlignment(t *testing.T) {
 	rec := &recorder{}
 	c, err := NewConnector(Config{Name: "lb-mail", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: "offers@mail.lastbottlewines.com",
-		Parser: rec, Now: func() time.Time { return now }})
+		Parser: rec, TrustAuthResults: true, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestSubdomainSenderWithRelaxedAlignment(t *testing.T) {
 }
 
 func TestDKIMVerification(t *testing.T) {
-	c, err := NewConnector(Config{Name: "x", Host: "h", Username: "u", Password: "p", From: sender, Parser: &recorder{}})
+	c, err := NewConnector(Config{Name: "x", Host: "h", Username: "u", Password: "p", From: sender, Parser: &recorder{}, TrustAuthResults: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,10 +341,12 @@ func TestAcceptsAHouseholdForwardOfTheSendersMail(t *testing.T) {
 		t.Fatalf("saw %d messages / %d offers, want only the verified forward of the sender", len(rec.seen), len(raws))
 	}
 	m, r := rec.seen[0], raws[0]
-	if m.From != sender || m.ForwardedBy != household || !strings.Contains(m.Text, "2019 Test Cabernet $29") {
+	// Credited to the forwarder (the address DKIM verified); the original
+	// sender is only what the forwarded text claims (rv35 N1).
+	if m.From != household || m.ForwardedFrom != sender || m.ForwardedBy != household || !strings.Contains(m.Text, "2019 Test Cabernet $29") {
 		t.Fatalf("message %+v", m)
 	}
-	if r.SourceID != "imap:lastbottle" || r.Aspects["mail_forwarded_by"] != household || r.Aspects["mail_message_id"] != "fwd-1@gmail" {
+	if r.SourceID != "imap:lastbottle" || r.Aspects["mail_forwarded_by"] != household || r.Aspects["mail_forwarded_from"] != sender || r.Aspects["mail_message_id"] != "fwd-1@gmail" {
 		t.Fatalf("raw %+v", r)
 	}
 	// without the forwarder declared, the same mailbox yields nothing
