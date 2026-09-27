@@ -267,9 +267,17 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
 		}
 		// A colour the title names only as merchandise's colour ("Red Wine
-		// Tumbler") is no evidence; see titleColourEvidence.
-		if it.Attributes["colour"] == "" || (!declaredColour && !titleColourEvidence(s.Title, s.Body)) {
+		// Tumbler") is no evidence, and one that names a food's is culinary
+		// ("Red Wine Salami"); see titleColourEvidence.
+		if it.Attributes["colour"] == "" {
 			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+		}
+		if !declaredColour {
+			if ok, culinary := titleColourEvidence(s.Title, s.Body); !ok && culinary {
+				return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
+			} else if !ok {
+				return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
+			}
 		}
 	}
 
@@ -671,15 +679,18 @@ var colourKeywords = []struct {
 // A title whose colour words all fail is judged on its description alone;
 // a title with no colour word is judged as before, on title and description
 // (champagne, prosecco and cava are wines, not colours, and always count).
+// A failed colour with a food after it is culinary, as a withdrawn
+// appellation is ("Red Wine Salami", like "Chianti Cooking Sauce").
 // A colour the source declares (wine_type) is evidence whatever the title.
 
 // titleColourWords are the colourKeywords a title uses as colours.
 var titleColourWords = []string{"sparkling", "rose", "red blend", "red wine", "white blend", "white wine"}
 
 // titleColourEvidence reports whether the colour extractColour finds in a
-// listing is wine evidence: the title names no colour word, one of its colour
-// words names the wine (see above), or the description names a colour.
-func titleColourEvidence(title, body string) bool {
+// listing is wine evidence (ok): the title names no colour word, one of its
+// colour words names the wine (see above), or the description names a
+// colour. When it is not, culinary reports a food after a failed colour word.
+func titleColourEvidence(title, body string) (ok, culinary bool) {
 	words := normalizeWords(title)
 	cued := false
 	for i := range words {
@@ -687,17 +698,21 @@ func titleColourEvidence(title, body string) bool {
 			if !phraseAt(words, i, kw) {
 				continue
 			}
-			if titleColourCounts(words, i, i+len(strings.Fields(kw))) {
-				return true
+			j := i + len(strings.Fields(kw))
+			if titleColourCounts(words, i, j) {
+				return true, false
 			}
 			cued = true
+			culinary = culinary || culinaryAfter(words, j, title)
 		}
 	}
 	if !cued {
-		return true
+		return true, false
 	}
-	_, ok := extractColour(body)
-	return ok
+	if _, ok := extractColour(body); ok {
+		return true, false
+	}
+	return false, culinary
 }
 
 // titleColourCounts reports whether the colour words at words[i:j] name the

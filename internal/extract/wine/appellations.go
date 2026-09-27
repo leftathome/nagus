@@ -391,13 +391,15 @@ func titleAppellations(title string) appellationEvidence {
 // "Burgundy Blanc Throw Pillow" and "Napa Valley Cap Red" are home goods and
 // clothes in a colour. noEnglish drops "red" and "white" (englishColours).
 //
-// After the name, the colour must be the title's head (nagus-dwq): a colour
-// followed by any other word is that word's colour ("Columbia Valley Red
-// Wine Tumbler"), though a release number or label word may follow ("Red
-// Mountain Pioneer Red IV"). With a word between, a colour that ENDS the
-// title (after a vintage, size or pack) is that word's colour too: "Chateau
-// Napa Valley Sweatshirt Red", "Napa Valley Umbrella White". It still counts
-// when the word between is a style word ("Napa Valley Proprietary Red").
+// After the name, an English colour ("red", "white") must be the title's head
+// (nagus-dwq): followed by any other word it is that word's colour
+// ("Columbia Valley Red Wine Tumbler"), though a release number or label word
+// may follow ("Red Mountain Pioneer Red IV"). With a word between, an English
+// colour that ENDS the title (after a vintage, size or pack) is that word's
+// colour too: "Chateau Napa Valley Sweatshirt Red", "Napa Valley Umbrella
+// White". It still counts when the word between is a style word ("Napa Valley
+// Proprietary Red"). The wine-only colours ("Rouge", "Tinto", "Bianco") name
+// no merchandise and keep the old rule ("Cotes du Rhone Belleruche Rouge").
 func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 	for _, w := range words {
 		if broadMerchNouns[w] || objectNouns[w] {
@@ -415,11 +417,8 @@ func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 		if _, ok := bareColours[w]; !ok || (noEnglish && englishColours[w]) {
 			continue
 		}
-		if i >= m.end {
+		if i >= m.end && englishColours[w] {
 			k := i + 1
-			if k < len(words) && words[k] == "wine" {
-				k++
-			}
 			if !restIsHead(words, k, tail) {
 				continue // "Columbia Valley Red Wine Tumbler"
 			}
