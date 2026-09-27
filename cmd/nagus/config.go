@@ -116,6 +116,18 @@ type SourceConfig struct {
 	IMAPMailbox      string   `json:"imapMailbox,omitempty"`
 	IMAPLookbackDays int      `json:"imapLookbackDays,omitempty"`
 	IMAPForwarders   []string `json:"imapForwarders,omitempty"`
+	// Deal submission (imapParser "deal-jsonl-v1", nagus-4uu): the household's
+	// humans and agents email nagus.deal/v1 JSONL to the deals mailbox.
+	// imapSenders is the sender ALLOWLIST (each DKIM-verified for its own
+	// domain) and replaces imapFrom; imapSenderAliases maps an address to the
+	// principal name recorded on its offers (submitted_by) and used by the
+	// deal_submission_status tool; dealSubmitTo is the address the
+	// deal_submission_spec tool advertises (default: NAGUS_IMAP_USERNAME).
+	// Configure one deal source per enabled category, with the same
+	// allowlist. Real addresses live in gitops only, never in this repo.
+	IMAPSenders       []string          `json:"imapSenders,omitempty"`
+	IMAPSenderAliases map[string]string `json:"imapSenderAliases,omitempty"`
+	DealSubmitTo      string            `json:"dealSubmitTo,omitempty"`
 	// QuarkTextHints sends a listing's title to quark as hint text when the
 	// source states no product identifiers (quark QUARK-02). For marketplaces
 	// whose part numbers live only in the title (eBay). Title attached only

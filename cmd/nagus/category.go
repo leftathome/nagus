@@ -15,6 +15,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/ttbcola"
 	"github.com/leftathome/nagus/internal/connector/vinoshipper"
 	"github.com/leftathome/nagus/internal/connector/zillapi"
+	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/enrich/parcel"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
@@ -62,6 +63,9 @@ type categoryOpts struct {
 	lwinStamp bool
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
+	// deals is the state every deal-submission source shares (nagus-4uu);
+	// nil when none is configured (a lone deal source then gets its own).
+	deals *deal.Hub
 	// sanitizer is the trust boundary every ingested listing crosses; nil is
 	// the in-process Passthrough. Set from NAGUS_GLOVEBOX_SANITIZE_URL and
 	// NAGUS_GLOVEBOX_TOKEN by sanitizerFromEnv (nagus-9ib).
@@ -236,6 +240,9 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
 			FixturePath: s.Fixture, Logf: o.logf}), nil
 	case "imap":
+		if isDealSource(s) {
+			return buildDealConnector(s, o)
+		}
 		p, err := imapmail.Lookup(s.IMAPParser)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
@@ -346,6 +353,11 @@ func retentionForSource(s SourceConfig) (staleAfter time.Duration, ret offer.Ret
 	}
 	// Three missed polls before an offer is considered gone.
 	expireAfter = 3 * interval
+	if isDealSource(s) {
+		// A submitted deal surfaces while its email is inside the lookback
+		// window: once no poll refreshes the item it goes (nagus-4uu).
+		return max(expireAfter, 24*time.Hour), offer.Retention{Policy: offer.RetainFull}, expireAfter
+	}
 	switch s.Type {
 	case "ebay":
 		return category.EbayContentMaxAge,
@@ -389,6 +401,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		})
 		ing.TextHints = s.QuarkTextHints
+		withDealLedger(ing, conn)
 		return ing, nil
 	case "land":
 		ing := category.NewLandIngester(conn, category.LandDeps{
@@ -417,17 +430,30 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		// Name hints to quark need BOTH the global switch and this source's
 		// opt-in: the same pair that used to gate LWIN stamping, so the same
 		// sources are identified.
-		deps.LWINStamp = deps.LWINStamp && s.LWINStamp
+		//
+		// A deal-submission source is opted in by its type: the sender named
+		// the producer on purpose (the deal's brand), which is the review the
+		// per-source switch exists for. The global switch still applies.
+		deps.LWINStamp = deps.LWINStamp && (s.LWINStamp || isDealSource(s))
 		ing, err := category.NewWineIngester(conn, src, deps)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
+		withDealLedger(ing, conn)
 		return ing, nil
 	case "release":
 		// A release signal is not an offer: no offer layer, no retention purge.
 		return category.NewReleaseIngester(conn, category.ReleaseDeps{Store: st, Logf: o.logf, Sanitizer: o.sanitizer}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported category %q", s.Name, s.Category)
+	}
+}
+
+// withDealLedger settles a deal source's submitted lines after each ingest
+// pass (the deal_submission_status ledger). A no-op for other sources.
+func withDealLedger(ing *pipeline.Ingester, conn listing.Connector) {
+	if hub := dealHubOf(conn); hub != nil {
+		ing.AfterIngest = hub.Ledger.AfterIngest(ing.SourceID())
 	}
 }
 
