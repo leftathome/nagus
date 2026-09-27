@@ -65,6 +65,14 @@ type Ingester struct {
 	// keeps its structured hint. Needs an evaluating ingester (a Sanitizer).
 	NameHintProducer string
 
+	// HintsNeedGate withholds a listing's STRUCTURED product hint
+	// (brand/mpn/gtin/model) from quark unless the listing passed the sanitize
+	// gate, as NameHintProducer already does for name hints. Set for
+	// deal-submission sources, whose hints are typed by a person on an open
+	// channel (rv35 I3). Other sources record their hint before the gate
+	// (nagus-voe tracks whether they should too). Needs a Sanitizer.
+	HintsNeedGate bool
+
 	// StaleAfter, when > 0, enables a post-ingest freshness purge of this
 	// source's items older than the window (eBay License 8.1(b)). 0 disables it.
 	StaleAfter time.Duration
@@ -120,7 +128,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		var san listing.Sanitized
 		var sanErr error
 		gated := false
-		if (i.TextHints || i.NameHintProducer != "") && evaluates && i.Sanitizer != nil {
+		if (i.TextHints || i.NameHintProducer != "" || i.HintsNeedGate) && evaluates && i.Sanitizer != nil {
 			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
 			gated = true
 		}
@@ -150,6 +158,11 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 				// resolution) it already has: replacing it would change the
 				// fingerprint and throw away a resolved wine's product id
 				// every time glovebox has an outage.
+				o.ProductHint, keep = i.previousHint(ctx, o.ID)
+			case gated && sanErr != nil && i.HintsNeedGate:
+				// The gate did not pass this listing: its structured hint is
+				// withheld from quark, exactly as a name hint is (the stored
+				// hint, if any, is kept -- an outage must not unresolve it).
 				o.ProductHint, keep = i.previousHint(ctx, o.ID)
 			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title

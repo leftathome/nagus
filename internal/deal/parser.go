@@ -39,10 +39,21 @@ func (h *Hub) Principal(addr string) string {
 	return addr
 }
 
-// Recent is the ledger's newest n messages from a principal, given as its
-// alias or as the sender address (resolved to the alias).
-func (h *Hub) Recent(principalOrAddress string, n int) []MessageView {
-	return h.Ledger.Recent(h.Principal(principalOrAddress), n)
+// Recent is the ledger's newest n messages from a principal, given by its
+// ALIAS only. An address is never accepted: answering for an address would
+// confirm it is on the allowlist (rv35 N3). A sender with no alias has no
+// principal lookup; it uses its Message-IDs.
+func (h *Hub) Recent(alias string, n int) []MessageView {
+	a := strings.ToLower(strings.TrimSpace(alias))
+	if a == "" || strings.Contains(a, "@") {
+		return nil
+	}
+	for _, v := range h.Aliases {
+		if strings.ToLower(strings.TrimSpace(v)) == a {
+			return h.Ledger.Recent(a, n)
+		}
+	}
+	return nil
 }
 
 // EnabledCategories lists the categories with a deal source, sorted in
@@ -76,20 +87,59 @@ func NewParser(h *Hub, category string) (*Parser, error) {
 	return &Parser{hub: h, category: category, sourceID: id}, nil
 }
 
-// boundary ends the part of a body that is read: an RFC 3676 signature
-// delimiter, an Outlook original-message separator, a Gmail or Apple Mail
-// forward marker, or an "On ... wrote:" reply attribution.
-var boundary = regexp.MustCompile(`(?i)^(?:-- |-{3,}\s*original message\s*-{3,}|-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:|on .{1,200} wrote:)\s*$`)
+// Scan limits (rv35 I1): a body is read for at most MaxScanBytes and
+// MaxScanLines; past the 50th deal line nothing more is decoded, and the rest
+// become ONE too_many_lines entry with a count.
+const (
+	MaxScanBytes = 256 << 10
+	MaxScanLines = 10000
+)
 
-// Key is the listing source key of one line of one message: the identity
-// that makes a re-read idempotent.
-func Key(messageID string, line int) string { return fmt.Sprintf("%s#L%d", messageID, line) }
+// boundary ends the part of a body that is read: an RFC 3676 signature
+// delimiter, an Outlook original-message separator or underscore rule, a
+// Gmail or Apple Mail forward marker (quoted or not), or an "On ... wrote:"
+// reply attribution.
+var boundary = regexp.MustCompile(`(?i)^[>\s]*(?:--|-{3,}\s*original message\s*-{3,}|-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:|_{10,}|on\s.{1,200}\swrote:)\s*$`)
+
+var (
+	// A Gmail attribution wrapped across two lines: "On <date> <name>
+	// <addr>" then "wrote:".
+	onStartRe = regexp.MustCompile(`(?i)^[>\s]*on\s.{1,200}$`)
+	wroteRe   = regexp.MustCompile(`(?i)^[>\s]*.{0,200}\bwrote:\s*$`)
+	// An Outlook reply header block without the underscore rule: "From: x"
+	// followed by "Sent:" or "Date:".
+	hdrFromRe = regexp.MustCompile(`(?i)^[>\s]*from:\s*\S`)
+	hdrNextRe = regexp.MustCompile(`(?i)^[>\s]*(?:sent|date):\s*\S`)
+)
+
+// isBoundary reports whether line i starts quoted or forwarded material.
+func isBoundary(lines []string, i int) bool {
+	t := strings.TrimSpace(lines[i])
+	if boundary.MatchString(t) {
+		return true
+	}
+	next := ""
+	if i+1 < len(lines) {
+		next = strings.TrimSpace(lines[i+1])
+	}
+	if onStartRe.MatchString(t) && wroteRe.MatchString(next) && !strings.HasPrefix(next, "{") {
+		return true
+	}
+	return hdrFromRe.MatchString(t) && hdrNextRe.MatchString(next)
+}
+
+// Key is the listing source key of one line of one message from one VERIFIED
+// sender: the identity that makes a re-read idempotent. The sender is part of
+// it because the sender writes its own Message-ID (rv35 I5).
+func Key(sender, messageID string, line int) string {
+	return fmt.Sprintf("%s/%s#L%d", strings.ToLower(sender), messageID, line)
+}
 
 // Parse reads one verified message. Refused lines and message-level
 // refusals go to the ledger; lines of this parser's category become
 // listings.
 func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
-	principal := p.hub.Principal(m.From)
+	ref := msgRef{addr: strings.ToLower(m.From), id: m.ID, principal: p.hub.Principal(m.From), received: m.Received}
 	led := p.hub.Ledger
 	if strings.TrimSpace(m.Text) == "" {
 		outcome := MsgEmpty
@@ -98,56 +148,78 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 			// client. Refused whole; see the design doc.
 			outcome = MsgNoTextPart
 		}
-		led.refuseMessage(m.ID, principal, m.Date, outcome)
+		led.refuseMessage(ref, outcome)
 		return nil, nil
 	}
-	lines := strings.Split(strings.ReplaceAll(m.Text, "\r\n", "\n"), "\n")
+	text := m.Text
+	if len(text) > MaxScanBytes {
+		text = text[:MaxScanBytes]
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if len(lines) > MaxScanLines {
+		lines = lines[:MaxScanLines]
+	}
 	start := 0
 	if m.ForwardedBy != "" {
-		// A household hand-forward: read the forwarded original only.
+		// A household hand-forward: read the forwarded original only, after
+		// the marker and the forwarded header block.
 		for i, ln := range lines {
 			if isForwardMarker(ln) {
 				start = i + 1
+				for start < len(lines) && strings.TrimSpace(lines[start]) != "" {
+					start++
+				}
 				break
 			}
 		}
 	}
 	var out []listing.Raw
-	n := 0
+	n, overflowLine, overflow := 0, 0, 0
 	for i := start; i < len(lines); i++ {
-		raw := strings.TrimRight(lines[i], " \t")
-		if boundary.MatchString(strings.TrimSpace(raw)) || raw == "--" {
+		if isBoundary(lines, i) {
 			break
 		}
-		t := strings.TrimSpace(raw)
-		if !strings.HasPrefix(t, "{") {
+		t := strings.TrimSpace(lines[i])
+		bom := strings.HasPrefix(t, "\ufeff")
+		if !strings.HasPrefix(strings.TrimPrefix(t, "\ufeff"), "{") {
 			continue
 		}
 		n++
 		lineNo := i + 1
 		if n > MaxLinesPerMessage {
-			led.reject(m.ID, principal, m.Date, lineNo, "", ReasonTooManyLines)
+			if overflow == 0 {
+				overflowLine = lineNo
+			}
+			overflow++
+			continue
+		}
+		if bom {
+			// A byte-order mark is not whitespace: the line is not JSON.
+			led.reject(ref, lineNo, "", ReasonBadJSON, 0)
 			continue
 		}
 		d, why := Decode([]byte(t))
 		if why != ReasonNone {
-			led.reject(m.ID, principal, m.Date, lineNo, "", why)
+			led.reject(ref, lineNo, "", why, 0)
 			continue
 		}
 		owner, enabled := p.hub.Sources[d.Category]
+		key := Key(m.From, m.ID, lineNo)
 		switch {
 		case !enabled:
-			led.reject(m.ID, principal, m.Date, lineNo, d.Category, ReasonCategoryNotEnabled)
+			led.reject(ref, lineNo, d.Category, ReasonCategoryNotEnabled, 0)
 		case d.Category != p.category:
-			led.placeholder(m.ID, principal, m.Date, lineNo, d.Category, owner, Key(m.ID, lineNo))
+			led.placeholder(ref, lineNo, d.Category, owner, key)
 		default:
-			key := Key(m.ID, lineNo)
-			led.own(m.ID, principal, m.Date, lineNo, d.Category, p.sourceID, key)
-			out = append(out, d.ToRaw(key, principal))
+			led.own(ref, lineNo, d.Category, p.sourceID, key)
+			out = append(out, d.ToRaw(key, ref.principal))
 		}
 	}
+	if overflow > 0 {
+		led.reject(ref, overflowLine, "", ReasonTooManyLines, overflow)
+	}
 	if n == 0 {
-		led.refuseMessage(m.ID, principal, m.Date, MsgEmpty)
+		led.refuseMessage(ref, MsgEmpty)
 	}
 	return out, nil
 }

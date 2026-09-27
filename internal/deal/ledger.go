@@ -43,10 +43,31 @@ const (
 var MessageOutcomes = []string{MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, MsgNoTextPart,
 	MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid}
 
+// MaxLedgerMessages bounds the ledger: past it, the message no poll has seen
+// for longest is dropped (rv35 I1). Far above what a household sends in a
+// lookback window.
+const MaxLedgerMessages = 5000
+
+// UnverifiedRecentWindow is the window of nagus_deal_unverified_last_24h.
+const UnverifiedRecentWindow = 24 * time.Hour
+
+// msgRef identifies one message: the VERIFIED sender address and the
+// Message-ID. The sender writes its own Message-ID, so the id alone keys
+// nothing (rv35 I5): two senders can never share a ledger entry or a key.
+type msgRef struct {
+	addr      string // verified sender address, lower-cased
+	id        string // Message-ID
+	principal string // alias, or addr
+	received  time.Time
+}
+
+func (r msgRef) key() string { return r.addr + "\x00" + r.id }
+
 type lineState struct {
 	line     int
 	outcome  Outcome
 	reason   Reason
+	count    int // too_many_lines summary: deal lines not read
 	category string
 	sourceID string // the deal source that owns (ingests) the line
 	key      string // the listing source key
@@ -55,25 +76,30 @@ type lineState struct {
 }
 
 type msgState struct {
-	id        string
-	principal string
-	received  time.Time
-	refusal   string // a message-level outcome when the message had no lines to judge
-	lines     map[int]*lineState
-	lastSeen  time.Time
-	counted   bool
+	ref      msgRef
+	refusal  string // a message-level outcome when the message had no lines to judge
+	lines    map[int]*lineState
+	lastSeen time.Time
+	counted  bool
+}
+
+type observed struct {
+	outcome  string
+	received time.Time
+	lastSeen time.Time
 }
 
 // Ledger is the in-memory status of recent submissions and the source of the
 // submission counters. The imap connector re-reads the whole lookback window
 // on every poll, so the ledger is rebuilt continuously and always covers
 // exactly that window; it needs no table. Safe for concurrent use: every
-// deal source shares one ledger.
+// deal source shares one ledger. Bounded: at most MaxLedgerMessages
+// messages of at most MaxLinesPerMessage+1 lines each.
 type Ledger struct {
 	mu     sync.Mutex
-	msgs   map[string]*msgState
+	msgs   map[string]*msgState // msgRef.key() -> state
 	gen    map[string]int64     // sourceID -> current fetch generation
-	once   map[string]time.Time // connector-level outcome keys already counted
+	once   map[string]*observed // connector-level outcomes, by key
 	subs   map[string]int64     // message outcome -> count
 	lines  map[[2]string]int64  // {outcome, reason} -> count
 	now    func() time.Time
@@ -92,7 +118,7 @@ func NewLedger(retain time.Duration, now func() time.Time) *Ledger {
 	}
 	return &Ledger{
 		msgs: map[string]*msgState{}, gen: map[string]int64{},
-		once: map[string]time.Time{}, subs: map[string]int64{}, lines: map[[2]string]int64{},
+		once: map[string]*observed{}, subs: map[string]int64{}, lines: map[[2]string]int64{},
 		now: now, retain: retain,
 	}
 }
@@ -105,42 +131,59 @@ func (l *Ledger) startFetch(sourceID string) {
 }
 
 // message returns the message's state, creating it. Callers hold mu.
-func (l *Ledger) message(id, principal string, received time.Time) *msgState {
-	m, ok := l.msgs[id]
+func (l *Ledger) message(r msgRef) *msgState {
+	k := r.key()
+	m, ok := l.msgs[k]
 	if !ok {
-		if received.IsZero() {
-			received = l.now()
+		if len(l.msgs) >= MaxLedgerMessages {
+			l.evictOldest()
 		}
-		m = &msgState{id: id, received: received, lines: map[int]*lineState{}}
-		l.msgs[id] = m
+		if r.received.IsZero() {
+			r.received = l.now()
+		}
+		m = &msgState{ref: r, lines: map[int]*lineState{}}
+		l.msgs[k] = m
 	}
-	if principal != "" {
-		m.principal = principal
+	if r.principal != "" {
+		m.ref.principal = r.principal
 	}
 	m.lastSeen = l.now()
 	return m
 }
 
+func (l *Ledger) evictOldest() {
+	var oldest string
+	var at time.Time
+	for k, m := range l.msgs {
+		if oldest == "" || m.lastSeen.Before(at) {
+			oldest, at = k, m.lastSeen
+		}
+	}
+	delete(l.msgs, oldest)
+}
+
 // refuseMessage records a message-level outcome for a message nagus read but
 // could not take lines from (empty, no_text_part).
-func (l *Ledger) refuseMessage(id, principal string, received time.Time, outcome string) {
+func (l *Ledger) refuseMessage(r msgRef, outcome string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	m := l.message(id, principal, received)
+	m := l.message(r)
 	m.refusal = outcome
 	l.countMessage(m)
 }
 
 // reject records a final parser refusal for one line. Every deal source reads
 // the same message and reaches the same verdict; the line is counted once.
-func (l *Ledger) reject(id, principal string, received time.Time, line int, category string, r Reason) {
+// count is the number of unread lines on a too_many_lines summary.
+func (l *Ledger) reject(r msgRef, line int, category string, why Reason, count int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	m := l.message(id, principal, received)
-	if ls, ok := m.lines[line]; ok && ls.outcome == OutcomeRejected && ls.reason == r {
+	m := l.message(r)
+	if ls, ok := m.lines[line]; ok && ls.outcome == OutcomeRejected && ls.reason == why {
+		ls.count = count
 		return
 	}
-	ls := &lineState{line: line, outcome: OutcomeRejected, reason: r, category: category}
+	ls := &lineState{line: line, outcome: OutcomeRejected, reason: why, category: category, count: count}
 	m.lines[line] = ls
 	l.countLine(ls)
 	l.countMessage(m)
@@ -149,10 +192,10 @@ func (l *Ledger) reject(id, principal string, received time.Time, line int, cate
 // own records a line this source will ingest in its current fetch. An
 // accepted line stays accepted (a re-read is not news); anything else is
 // pending until ApplyIngest decides it.
-func (l *Ledger) own(id, principal string, received time.Time, line int, category, sourceID, key string) {
+func (l *Ledger) own(r msgRef, line int, category, sourceID, key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	m := l.message(id, principal, received)
+	m := l.message(r)
 	gen := l.gen[sourceID]
 	if ls, ok := m.lines[line]; ok && ls.sourceID == sourceID && ls.key == key && ls.outcome == OutcomeAccepted {
 		ls.gen = gen
@@ -167,10 +210,10 @@ func (l *Ledger) own(id, principal string, received time.Time, line int, categor
 
 // placeholder marks a line another deal source owns, so the message is not
 // judged final before that source has read it. It never overwrites.
-func (l *Ledger) placeholder(id, principal string, received time.Time, line int, category, sourceID, key string) {
+func (l *Ledger) placeholder(r msgRef, line int, category, sourceID, key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	m := l.message(id, principal, received)
+	m := l.message(r)
 	if _, ok := m.lines[line]; ok {
 		return
 	}
@@ -179,21 +222,22 @@ func (l *Ledger) placeholder(id, principal string, received time.Time, line int,
 
 // ObserveConnector counts a message the connector skipped before any parser
 // saw it, once per key (a Message-ID, or a UID key for mail that was never
-// fetched). outcome is one of the message outcomes. A message with a
-// Message-ID is also recorded, so its status can be looked up.
-func (l *Ledger) ObserveConnector(key, messageID, outcome string, received time.Time) {
+// fetched). outcome is one of the message outcomes; received is the server's
+// arrival time (zero when unknown). Nothing about the message is kept for
+// status: an unverified message answers exactly like one nagus never saw, so
+// the status tool is no allowlist oracle (rv35 N3).
+func (l *Ledger) ObserveConnector(key, _ /*messageID*/, outcome string, received time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	if messageID != "" {
-		m := l.message(messageID, "", time.Time{})
-		m.refusal = outcome
-	}
-	if _, ok := l.once[key]; ok {
-		l.once[key] = now
+	if o, ok := l.once[key]; ok {
+		o.lastSeen = now
 		return
 	}
-	l.once[key] = now
+	if received.IsZero() {
+		received = now
+	}
+	l.once[key] = &observed{outcome: outcome, received: received, lastSeen: now}
 	l.subs[outcome]++
 }
 
@@ -332,13 +376,13 @@ func (m *msgState) outcome() string {
 // out of the lookback window and will not be read again. Callers hold mu.
 func (l *Ledger) prune() {
 	cut := l.now().Add(-l.retain)
-	for id, m := range l.msgs {
+	for k, m := range l.msgs {
 		if m.lastSeen.Before(cut) {
-			delete(l.msgs, id)
+			delete(l.msgs, k)
 		}
 	}
-	for k, at := range l.once {
-		if at.Before(cut) {
+	for k, o := range l.once {
+		if o.lastSeen.Before(cut) {
 			delete(l.once, k)
 		}
 	}
@@ -351,12 +395,12 @@ type LineView struct {
 	Outcome  string `json:"outcome"`
 	Reason   string `json:"reason,omitempty"`
 	Category string `json:"category,omitempty"`
+	// Count is, on a too_many_lines summary entry, how many deal lines past
+	// the limit were not read.
+	Count int `json:"count,omitempty"`
 	// OfferID is set for an accepted line (message-id lookups only). It is
 	// also the item id, so get_item takes it.
 	OfferID string `json:"offer_id,omitempty"`
-	// Count is, on a too_many_lines summary entry, how many deal lines
-	// past the limit were not read.
-	Count int `json:"count,omitempty"`
 	// Resolution and ProductID are quark's answer for the offer, filled by
 	// the caller from the offer store.
 	Resolution string `json:"resolution,omitempty"`
@@ -372,18 +416,18 @@ type Counts struct {
 
 // MessageView is one message's status.
 type MessageView struct {
-	MessageID string     `json:"message_id,omitempty"`
-	Received  time.Time  `json:"received"`
-	Outcome   string     `json:"outcome"`
-	Counts    Counts     `json:"counts"`
-	Lines     []LineView `json:"lines"`
-	principal string
+	MessageID string `json:"message_id,omitempty"`
+	// Received is when the mail server received it (IMAP INTERNALDATE).
+	Received time.Time  `json:"received"`
+	Outcome  string     `json:"outcome"`
+	Counts   Counts     `json:"counts"`
+	Lines    []LineView `json:"lines"`
 }
 
 func (l *Ledger) view(m *msgState, withIDs bool) MessageView {
-	v := MessageView{Received: m.received, Outcome: m.outcome(), Lines: []LineView{}, principal: m.principal}
+	v := MessageView{Received: m.ref.received, Outcome: m.outcome(), Lines: []LineView{}}
 	if withIDs {
-		v.MessageID = m.id
+		v.MessageID = m.ref.id
 	}
 	nums := make([]int, 0, len(m.lines))
 	for n := range m.lines {
@@ -392,7 +436,7 @@ func (l *Ledger) view(m *msgState, withIDs bool) MessageView {
 	sort.Ints(nums)
 	for _, n := range nums {
 		ls := m.lines[n]
-		lv := LineView{Line: ls.line, Outcome: string(ls.outcome), Reason: string(ls.reason), Category: ls.category}
+		lv := LineView{Line: ls.line, Outcome: string(ls.outcome), Reason: string(ls.reason), Category: ls.category, Count: ls.count}
 		switch ls.outcome {
 		case OutcomeAccepted:
 			v.Counts.Accepted++
@@ -409,17 +453,36 @@ func (l *Ledger) view(m *msgState, withIDs bool) MessageView {
 	return v
 }
 
-// Lookup returns a message's status by Message-ID (angle brackets optional),
-// with offer ids for accepted lines.
-func (l *Ledger) Lookup(messageID string) (MessageView, bool) {
-	id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(messageID), "<"), ">")
+// normID strips angle brackets and space from a Message-ID.
+func normID(id string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(id), "<"), ">")
+}
+
+// LookupAll returns every verified message with this Message-ID (angle
+// brackets optional), newest first, with offer ids for accepted lines. More
+// than one only when two allowlisted senders used the same id: each keeps
+// its own entry.
+func (l *Ledger) LookupAll(messageID string) []MessageView {
+	id := normID(messageID)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	m, ok := l.msgs[id]
-	if !ok {
+	var out []MessageView
+	for _, m := range l.msgs {
+		if m.ref.id == id {
+			out = append(out, l.view(m, true))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Received.After(out[j].Received) })
+	return out
+}
+
+// Lookup is LookupAll's newest match.
+func (l *Ledger) Lookup(messageID string) (MessageView, bool) {
+	all := l.LookupAll(messageID)
+	if len(all) == 0 {
 		return MessageView{}, false
 	}
-	return l.view(m, true), true
+	return all[0], true
 }
 
 // Recent returns the newest n messages from a principal, WITHOUT message ids
@@ -431,7 +494,7 @@ func (l *Ledger) Recent(principal string, n int) []MessageView {
 	defer l.mu.Unlock()
 	var out []MessageView
 	for _, m := range l.msgs {
-		if p != "" && m.principal == p {
+		if p != "" && m.ref.principal == p {
 			out = append(out, l.view(m, false))
 		}
 	}
@@ -443,7 +506,7 @@ func (l *Ledger) Recent(principal string, n int) []MessageView {
 }
 
 // WriteMetrics renders the submission counters with every series of the
-// bounded label sets present, zeros included.
+// bounded label sets present, zeros included, and the unverified gauge.
 func (l *Ledger) WriteMetrics(w io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -461,6 +524,18 @@ func (l *Ledger) WriteMetrics(w io.Writer) {
 		}
 		fmt.Fprintf(w, "nagus_deal_submissions_lines_total{outcome=\"rejected\",reason=%q} %d\n", lr.Code, l.lines[[2]string{"rejected", string(lr.Code)}])
 	}
+	// A gauge over ARRIVAL time, so a restart that recounts the lookback
+	// window cannot re-fire the alert for old mail (rv35 N7).
+	cut := l.now().Add(-UnverifiedRecentWindow)
+	recent := 0
+	for _, o := range l.once {
+		if o.outcome == MsgUnverified && o.received.After(cut) {
+			recent++
+		}
+	}
+	fmt.Fprintf(w, "# HELP nagus_deal_unverified_last_24h Messages From an allowlisted address without a DKIM pass that ARRIVED in the last 24h (possible spoofs).\n")
+	fmt.Fprintf(w, "# TYPE nagus_deal_unverified_last_24h gauge\n")
+	fmt.Fprintf(w, "nagus_deal_unverified_last_24h %d\n", recent)
 }
 
 // AfterIngest is the pipeline.Ingester hook for a deal source.

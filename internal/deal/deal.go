@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -50,12 +51,13 @@ const (
 	MaxNoteLen         = 1000
 	MaxNameLen         = 100 // seller, brand
 	MaxMPNLen          = 64
-	MaxURLLen          = 2048
+	MaxURLLen          = 512
 	MinVintage         = 1800
 	MaxVintage         = 2100
 	MinBottleML        = 50
 	MaxBottleML        = 30000
 	MaxCapacityTB      = 1000
+	MinCapacityTB      = 0.01 // 10 GB: a smaller "drive" is a typo
 	// MaxPriceMajor bounds a price in major units (dollars, euros).
 	MaxPriceMajor = 1000000
 	// DefaultCurrency applies when a line names none.
@@ -264,16 +266,11 @@ func Decode(line []byte) (Deal, Reason) {
 		return Deal{}, ReasonBadJSON
 	}
 	// Keys first, EXACTLY: encoding/json matches keys case-insensitively, so
-	// "Title" would otherwise fill Title. The raw map also rejects a line that
-	// is not an object at all.
-	var keys map[string]json.RawMessage
-	if err := strictUnmarshal(line, &keys); err != nil {
-		return Deal{}, ReasonBadJSON
-	}
-	for k := range keys {
-		if !fieldNames[k] {
-			return Deal{}, ReasonUnknownField
-		}
+	// "Title" would otherwise fill Title, and keeps the LAST of two equal keys,
+	// so a validator and a reader could disagree on a duplicated one (rv35
+	// N4). The scan also rejects a line that is not an object at all.
+	if r := checkKeys(line); r != ReasonNone {
+		return Deal{}, r
 	}
 	var d Deal
 	if err := strictUnmarshal(line, &d); err != nil {
@@ -291,6 +288,45 @@ func Decode(line []byte) (Deal, Reason) {
 		return Deal{}, r
 	}
 	return d, ReasonNone
+}
+
+// checkKeys walks the top-level object: every key must be a Deal field,
+// spelled exactly, at most once, with nothing after the object.
+func checkKeys(line []byte) Reason {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return ReasonBadJSON
+	}
+	seen := map[string]bool{}
+	unknown := false
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return ReasonBadJSON
+		}
+		k, ok := tok.(string)
+		if !ok || seen[k] {
+			return ReasonBadJSON
+		}
+		seen[k] = true
+		if !fieldNames[k] {
+			unknown = true
+		}
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return ReasonBadJSON
+		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return ReasonBadJSON
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return ReasonBadJSON
+	}
+	if unknown {
+		return ReasonUnknownField
+	}
+	return ReasonNone
 }
 
 // strictUnmarshal decodes exactly one JSON value with no trailing data.
@@ -360,7 +396,7 @@ func (d *Deal) validate() Reason {
 	if d.BottleML != nil && (*d.BottleML < MinBottleML || *d.BottleML > MaxBottleML) {
 		return ReasonBadValue
 	}
-	if d.CapacityTB != nil && (*d.CapacityTB <= 0 || *d.CapacityTB > MaxCapacityTB) {
+	if d.CapacityTB != nil && (*d.CapacityTB < MinCapacityTB || *d.CapacityTB > MaxCapacityTB) {
 		return ReasonBadValue
 	}
 	if d.Condition != "" && !contains(Conditions, d.Condition) {
@@ -369,29 +405,59 @@ func (d *Deal) validate() Reason {
 	return ReasonNone
 }
 
-// httpsURL is an absolute https URL with a host and no userinfo.
+// httpsURL is an absolute https URL of printable ASCII (an IDN host in its
+// punycode form), at most MaxURLLen, with a public-looking DNS host: no
+// userinfo, no backslash, no IP literal, no localhost, no single-label or
+// .local/.internal/.localhost name (rv35 I2). nagus never fetches the url --
+// there is no SSRF -- but it reaches agents and pings, so it is kept tidy.
 func httpsURL(s string) bool {
-	if len(s) > MaxURLLen || strings.ContainsAny(s, " \t\r\n") {
+	if len(s) > MaxURLLen {
 		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c <= 0x20 || c >= 0x7f || c == '\\' {
+			return false
+		}
 	}
 	u, err := url.Parse(s)
-	if err != nil {
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" {
 		return false
 	}
-	return u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Opaque == ""
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" || !strings.Contains(host, ".") || net.ParseIP(host) != nil || strings.Contains(host, ":") {
+		return false
+	}
+	for _, bad := range []string{"localhost", ".localhost", ".local", ".internal", ".home.arpa", ".lan"} {
+		if host == strings.TrimPrefix(bad, ".") || strings.HasSuffix(host, bad) {
+			return false
+		}
+	}
+	return true
 }
 
-// cleanText is at most max characters (runes) with no control characters.
+// cleanText is at most max characters (runes) with no control characters and
+// no invisible ones: format characters (Cf: bidi overrides and isolates,
+// zero-width space and joiners, soft hyphen, BOM) and the other
+// default-ignorable code points, as quark (quark-d0r) and glovebox refuse
+// them. They reach agents and Telegram, where they reorder or hide text
+// (rv35 N4).
 func cleanText(s string, max int) bool {
 	if utf8.RuneCountInString(s) > max {
 		return false
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || invisible(r) {
 			return false
 		}
 	}
 	return true
+}
+
+// invisible is Cf, Other_Default_Ignorable_Code_Point or a variation
+// selector: together, Unicode's Default_Ignorable_Code_Point set.
+func invisible(r rune) bool {
+	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) ||
+		unicode.Is(unicode.Variation_Selector, r)
 }
 
 func contains(list []string, s string) bool {

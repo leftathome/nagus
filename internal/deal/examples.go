@@ -2,6 +2,7 @@ package deal
 
 import (
 	"encoding/json"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -43,6 +44,26 @@ const (
 	AspectURLText = "deal_url_text"
 )
 
+// urlText is a url's path, query and fragment, percent-decoded where
+// possible, for the gate to read as text.
+func urlText(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parts := []string{u.Host}
+	if p, err := url.PathUnescape(u.EscapedPath()); err == nil {
+		parts = append(parts, p)
+	}
+	if q, err := url.QueryUnescape(u.RawQuery); err == nil && q != "" {
+		parts = append(parts, q)
+	}
+	if u.Fragment != "" {
+		parts = append(parts, u.Fragment)
+	}
+	return strings.Join(parts, " ")
+}
+
 // ToRaw maps a validated deal onto a listing so the existing category
 // extractors, the glovebox gate and the quark hint path handle it unchanged.
 // key is the source key (message id and line); principal is who submitted it.
@@ -59,6 +80,9 @@ func (d Deal) ToRaw(key, principal string) listing.Raw {
 		}
 	}
 	set("seller", d.Seller)
+	// The url is free text that reaches agents: its path and query, decoded,
+	// cross the glovebox gate as an aspect (the gate scans aspects).
+	set(AspectURLText, urlText(d.URL))
 	switch d.Category {
 	case CategoryHDD:
 		// brand/mpn/gtin are the offer's product hint (pipeline offerFromRaw):

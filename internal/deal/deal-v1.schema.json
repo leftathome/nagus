@@ -41,10 +41,10 @@
     },
     "url": {
       "type": "string",
-      "description": "An https link to the deal, or to the store/product page it is from.",
+      "description": "An https link to the deal, or to the store/product page it is from. Printable ASCII (an IDN host as punycode), a public DNS host: no IP address, localhost, .local, userinfo or backslash.",
       "pattern": "^https://",
       "minLength": 1,
-      "maxLength": 2048
+      "maxLength": 512
     },
     "currency": {
       "type": "string",
@@ -86,7 +86,7 @@
     "capacity_tb": {
       "type": "number",
       "description": "hdd only: capacity in terabytes.",
-      "exclusiveMinimum": 0,
+      "minimum": 0.01,
       "maximum": 1000
     },
     "condition": {
