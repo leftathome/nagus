@@ -176,8 +176,10 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 	textColour := it.Attributes["colour"] != ""
 	// The source's wine type is the colour ("Rose of Pinot Noir" is a rose,
 	// not the red its grape implies).
+	declaredColour := false
 	if c := sourceColour(s.Aspects["wine_type"]); c != "" {
 		it.Attributes["colour"] = c
+		declaredColour = true
 	}
 
 	// When the store published the product (Shopify published_at): a recent
@@ -264,7 +266,9 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		if !textColour && (culinaryFortified || app.culinary) {
 			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrCulinary)
 		}
-		if it.Attributes["colour"] == "" {
+		// A colour the title names only as merchandise's colour ("Red Wine
+		// Tumbler") is no evidence; see titleColourEvidence.
+		if it.Attributes["colour"] == "" || (!declaredColour && !titleColourEvidence(s.Title, s.Body)) {
 			return item.Item{}, fmt.Errorf("wine: extract: %w", ErrNotWine)
 		}
 	}
@@ -635,6 +639,152 @@ var colourKeywords = []struct {
 	{"red wine", "red"},
 	{"white blend", "white"},
 	{"white wine", "white"},
+}
+
+// HEAD-AWARE TITLE COLOURS (nagus-dwq). A colour keyword is wine evidence on
+// its own, but a title names merchandise in a colour as readily as a wine:
+// "Chateau Ste Michelle Columbia Valley Red Wine Tumbler", "Chateau Napa
+// Valley Sparkling Tumbler", "Chateau Napa Valley Tumbler Rose". In the
+// title, the colour words (titleColourWords) therefore count as EVIDENCE only
+// where they name the wine (the colour attribute of a wine that has other
+// evidence is unchanged: "2021 Artist Series Red Wine - Sun" is a red):
+//
+//   - right before a varietal, an appellation or another wine cue ("Rose
+//     Wine Napa Valley", "Sparkling Moscato", "Red Wine Napa Valley -
+//     ARCHIVE");
+//   - in the title's head: the run of style words that ends it, after a
+//     trailing vintage, size, pack or container ("Witches Brew Red Wine",
+//     "Bubbly Brut Rose", "Love Rose Can Pack") and before a "by <producer>"
+//     ("Butter Red Blend by JaM"). A run of plain-English words ("Rose",
+//     "Sparkling") is the head only at the start of the title, right after a
+//     varietal or appellation ("Columbia Valley Rose"), or in a title that
+//     names no place before it ("La Vie en Rose"): after some other word that
+//     follows a place name it is that word's colour ("Chateau Napa Valley
+//     Tumbler Rose" is a tumbler); or
+//   - anywhere, in a title whose head is a wine-only style ("Red Blend",
+//     "Brut", "Cuvee": "Sparkling Water Cellars Brut").
+//
+// A colour followed by any other word is that word's colour: "Columbia
+// Valley Red Wine Tumbler" and "Napa Valley Sparkling Tumbler" name a
+// tumbler, even beside a place name.
+//
+// A title whose colour words all fail is judged on its description alone;
+// a title with no colour word is judged as before, on title and description
+// (champagne, prosecco and cava are wines, not colours, and always count).
+// A colour the source declares (wine_type) is evidence whatever the title.
+
+// titleColourWords are the colourKeywords a title uses as colours.
+var titleColourWords = []string{"sparkling", "rose", "red blend", "red wine", "white blend", "white wine"}
+
+// titleColourEvidence reports whether the colour extractColour finds in a
+// listing is wine evidence: the title names no colour word, one of its colour
+// words names the wine (see above), or the description names a colour.
+func titleColourEvidence(title, body string) bool {
+	words := normalizeWords(title)
+	cued := false
+	for i := range words {
+		for _, kw := range titleColourWords {
+			if !phraseAt(words, i, kw) {
+				continue
+			}
+			if titleColourCounts(words, i, i+len(strings.Fields(kw))) {
+				return true
+			}
+			cued = true
+		}
+	}
+	if !cued {
+		return true
+	}
+	_, ok := extractColour(body)
+	return ok
+}
+
+// titleColourCounts reports whether the colour words at words[i:j] name the
+// title's wine.
+func titleColourCounts(words []string, i, j int) bool {
+	if j < len(words) && words[j] == "wine" {
+		j++ // "Rose Wine", "Sparkling Wine"
+	}
+	if j < len(words) && (headCue(words, j) || appellationAt(words, j) || colourWineNouns[words[j]]) {
+		return true
+	}
+	tail := headEnd(words)
+	if s := styleRunStart(words, tail); s < tail && !englishRun(words[s:tail]) {
+		return true // the head is a wine-only style
+	}
+	if !restIsHead(words, j, tail) {
+		return false // "Red Wine Tumbler"
+	}
+	s := styleRunStart(words, j)
+	if s == 0 || appellationEndsAt(words, s) || varietalEndsAt(words, s) {
+		return true
+	}
+	return len(findAppellations(words[:s])) == 0 // "Napa Valley Tumbler Rose"
+}
+
+// colourWineNouns are wines a colour word may name that no other table holds
+// ("Chateau Diana Sparkling Moscato").
+var colourWineNouns = setOfWords("moscato", "muscat", "spumante", "frizzante")
+
+// headEnd returns the index just past a title's head: its end, or a "by"
+// that starts a producer credit ("Butter Red Blend by JaM"), less any
+// trailing vintage, size, pack or container (wineTail).
+func headEnd(words []string) int {
+	end := len(words)
+	for i := 1; i < len(words); i++ {
+		if words[i] == "by" {
+			end = i
+			break
+		}
+	}
+	return wineTail(words[:end])
+}
+
+// romanNumeralRe is a release number ("Pioneer Red IV").
+var romanNumeralRe = regexp.MustCompile(`^[ivx]{1,4}$`)
+
+// restIsHead reports whether words[from:to] holds nothing but style words,
+// "wine", release numbers and label words: whatever a colour at from-1 is
+// followed by, it is still the title's head.
+func restIsHead(words []string, from, to int) bool {
+	for _, w := range words[min(from, to):to] {
+		if !wineStyleWords[w] && w != "wine" && !romanNumeralRe.MatchString(w) && !labelWords[w] {
+			return false
+		}
+	}
+	return true
+}
+
+// appellationAt reports a known name, either tier, starting at words[i].
+func appellationAt(words []string, i int) bool {
+	for n := min(appellationMaxWords, len(words)-i); n >= 1; n-- {
+		if known, _ := appellationTier(strings.Join(words[i:i+n], " ")); known {
+			return true
+		}
+	}
+	return false
+}
+
+// appellationEndsAt reports a known name, either tier, ending just before
+// words[i].
+func appellationEndsAt(words []string, i int) bool {
+	for n := 1; n <= min(appellationMaxWords, i); n++ {
+		if known, _ := appellationTier(strings.Join(words[i-n:i], " ")); known {
+			return true
+		}
+	}
+	return false
+}
+
+// varietalEndsAt reports a varietal ending just before words[i].
+func varietalEndsAt(words []string, i int) bool {
+	for _, v := range varietals {
+		if n := len(strings.Fields(v.keyword)); n <= i && phraseAt(words, i-n, v.keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractColour(text string) (string, bool) {
