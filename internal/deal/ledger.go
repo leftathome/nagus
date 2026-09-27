@@ -181,7 +181,7 @@ func (l *Ledger) placeholder(id, principal string, received time.Time, line int,
 // saw it, once per key (a Message-ID, or a UID key for mail that was never
 // fetched). outcome is one of the message outcomes. A message with a
 // Message-ID is also recorded, so its status can be looked up.
-func (l *Ledger) ObserveConnector(key, messageID, outcome string) {
+func (l *Ledger) ObserveConnector(key, messageID, outcome string, received time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
@@ -354,6 +354,9 @@ type LineView struct {
 	// OfferID is set for an accepted line (message-id lookups only). It is
 	// also the item id, so get_item takes it.
 	OfferID string `json:"offer_id,omitempty"`
+	// Count is, on a too_many_lines summary entry, how many deal lines
+	// past the limit were not read.
+	Count int `json:"count,omitempty"`
 	// Resolution and ProductID are quark's answer for the offer, filled by
 	// the caller from the offer store.
 	Resolution string `json:"resolution,omitempty"`

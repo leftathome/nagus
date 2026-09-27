@@ -97,7 +97,14 @@ type Message struct {
 	// ForwardedBy is the forwarder address when this is a hand-forwarded copy
 	// of the sender's mail; empty for mail the sender sent directly.
 	ForwardedBy string
-	Subject     string
+	// ForwardedFrom is the original sender NAMED inside a hand-forward's
+	// text. It is unauthenticated (anyone can type a From: line) and is
+	// recorded as a claim only; the credit goes to From, the forwarder.
+	ForwardedFrom string
+	// Received is when the mail server received the message (IMAP
+	// INTERNALDATE), which the sender cannot set. Date is the sender's claim.
+	Received time.Time
+	Subject  string
 	Date        time.Time
 	Text        string // the text/plain part, if any (format=flowed is un-flowed)
 	HTML        string // the text/html part, if any
@@ -122,6 +129,7 @@ const (
 type Observation struct {
 	Key       string
 	MessageID string // "" when unknown (never fetched, or unparseable)
+	Received  time.Time
 	Reason    SkipReason
 }
 
@@ -183,8 +191,13 @@ type Config struct {
 	// DKIMDomain is the domain From's DKIM signature must be aligned to;
 	// empty = the domain of From. Senders always use their own domain.
 	DKIMDomain string
+	// TrustAuthResults turns on the Authentication-Results path. OFF by
+	// default (rv35 C1): ForwardEmail, which holds our MX, writes no A-R
+	// header, so the "topmost" one is always the SENDER's own forgery. Turn
+	// it on only for a receiving MX that prepends A-R to every message.
+	TrustAuthResults bool
 	// TrustedAuthServ are authserv-ids whose Authentication-Results header is
-	// trusted; empty = DefaultTrustedAuthServ.
+	// trusted when TrustAuthResults is on; empty = DefaultTrustedAuthServ.
 	TrustedAuthServ []string
 	// Forwarders are addresses whose DKIM-verified forwards of this sender's
 	// mail are accepted as the sender's (the household's own mailboxes).

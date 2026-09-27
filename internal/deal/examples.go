@@ -38,6 +38,9 @@ const (
 	AspectSubmittedBy = "submitted_by"
 	AspectSchema      = "deal_schema"
 	AspectDealGTIN    = "deal_gtin"
+	// AspectURLText is the url path and query, percent-decoded, as text for
+	// the glovebox gate (which scans aspects) (rv35 I2).
+	AspectURLText = "deal_url_text"
 )
 
 // ToRaw maps a validated deal onto a listing so the existing category

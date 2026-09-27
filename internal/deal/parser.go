@@ -184,7 +184,7 @@ func (s *Source) FetchComplete() bool {
 // Observer adapts the ledger to the imap connector's skip callback.
 func (h *Hub) Observer() func(imapmail.Observation) {
 	return func(o imapmail.Observation) {
-		h.Ledger.ObserveConnector(o.Key, o.MessageID, connectorOutcome(o.Reason))
+		h.Ledger.ObserveConnector(o.Key, o.MessageID, connectorOutcome(o.Reason), o.Received)
 	}
 }
 
