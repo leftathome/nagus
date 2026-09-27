@@ -546,9 +546,7 @@ func unflow(text string, delsp bool) string {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var b strings.Builder
 	for i, ln := range lines {
-		if strings.HasPrefix(ln, " ") {
-			ln = ln[1:] // space-stuffed
-		}
+		ln = strings.TrimPrefix(ln, " ") // space-stuffed
 		soft := strings.HasSuffix(ln, " ") && ln != "-- " && i < len(lines)-1
 		if soft && delsp {
 			ln = ln[:len(ln)-1]
