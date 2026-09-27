@@ -24,14 +24,14 @@ var SchemaFile []byte
 // the description and the value rules. Every limit here is one of the
 // constants the validator enforces.
 type fieldMeta struct {
-	Description string
-	Enum        []string
-	Const       string
-	Pattern     string
-	MinLength   int
-	MaxLength   int
-	Minimum     *float64
-	Maximum     *float64
+	Description  string
+	Enum         []string
+	Const        string
+	Pattern      string
+	MinLength    int
+	MaxLength    int
+	Minimum      *float64
+	Maximum      *float64
 	ExclusiveMin *float64
 }
 

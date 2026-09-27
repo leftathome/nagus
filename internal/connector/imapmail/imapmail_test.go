@@ -413,3 +413,87 @@ func TestRealCapturedMessage(t *testing.T) {
 	}
 	t.Logf("accepted: from=%s forwarded_by=%s subject=%q text=%dB html=%dB", m.From, m.ForwardedBy, m.Subject, len(m.Text), len(m.HTML))
 }
+
+// --- sender allowlist (deal submission, nagus-4uu) ----------------------------
+
+func TestSendersListConfig(t *testing.T) {
+	base := Config{Name: "deals", Host: "h", Username: "u", Password: "p", Parser: &recorder{},
+		Senders: []string{"Agent@Example.org", "human@example.org", "agent@example.org"}}
+	c, err := NewConnector(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.senders(); len(got) != 2 || got[0] != "agent@example.org" {
+		t.Fatalf("senders %v: lower-cased and deduplicated", got)
+	}
+	for name, mut := range map[string]func(*Config){
+		"bad sender":          func(c *Config) { c.Senders = []string{"nobody"} },
+		"no sender at all":    func(c *Config) { c.Senders = nil },
+		"forwarder is sender": func(c *Config) { c.Forwarders = []string{"human@example.org"} },
+	} {
+		cc := base
+		mut(&cc)
+		if _, err := NewConnector(cc); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+// Each sender on the list is held to DKIM for ITS domain, and is credited
+// with its own mail; anyone else is counted (CountIgnored), never fetched.
+func TestSendersAreEachVerifiedAndCredited(t *testing.T) {
+	kr := newKeyring(t)
+	recent := now.Add(-time.Hour)
+	addr := server(t, map[string]time.Time{
+		kr.sign(eml("a-1@x", "agent@agents.example.org", "A", ""), "agents.example.org"): recent,
+		kr.sign(eml("h-1@x", "human@example.org", "H", ""), "example.org"):               recent,
+		// signed by the OTHER sender's domain: not a pass for this one
+		kr.sign(eml("h-2@x", "human@example.org", "H2", ""), "agents.example.org"): recent,
+		kr.sign(eml("s-1@x", "stranger@example.com", "S", ""), "example.com"):      recent,
+	})
+	host, port, _ := net.SplitHostPort(addr)
+	var obs []Observation
+	rec := &recorder{}
+	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: "deals@totally.apocryph.al",
+		Password: "pw", Senders: []string{"agent@agents.example.org", "human@example.org"}, Parser: rec, CountIgnored: true,
+		Observe: func(o Observation) { obs = append(obs, o) }, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	from := map[string]string{}
+	for _, m := range rec.seen {
+		from[m.ID] = m.From
+	}
+	if len(from) != 2 || from["a-1@x"] != "agent@agents.example.org" || from["h-1@x"] != "human@example.org" {
+		t.Fatalf("parsed %v", from)
+	}
+	reasons := map[SkipReason]int{}
+	for _, o := range obs {
+		reasons[o.Reason]++
+		if o.Reason == SkipUnverified && o.MessageID != "h-2@x" {
+			t.Errorf("unverified observation %+v", o)
+		}
+	}
+	if reasons[SkipUnknownSender] != 1 || reasons[SkipUnverified] != 1 || len(obs) != 2 {
+		t.Fatalf("observations %+v", obs)
+	}
+}
+
+func TestUnflow(t *testing.T) {
+	for in, want := range map[string]string{
+		"{\"a\": \r\n\"b\"}\r\nnext":   "{\"a\": \"b\"}\nnext",
+		" >not quoted\n-- \nsig":       ">not quoted\n-- \nsig",
+		"hard\nbreak":                  "hard\nbreak",
+		"{\"title\":\"x\", \n\"p\":1}": "{\"title\":\"x\", \"p\":1}",
+	} {
+		if got := unflow(in, false); got != want {
+			t.Errorf("unflow(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := unflow("abc \ndef", true); got != "abcdef" {
+		t.Errorf("delsp: %q", got)
+	}
+}

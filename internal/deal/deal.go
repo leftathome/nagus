@@ -205,12 +205,12 @@ const (
 	ReasonBadURL              Reason = "bad_url"
 	ReasonBadValue            Reason = "bad_value"
 	// Downstream of the parser: the glovebox gate and the category extractor.
-	ReasonGateRefused    Reason = "gate_refused"
-	ReasonNotInCategory  Reason = "not_in_category"
-	ReasonExtractFailed  Reason = "extract_failed"
+	ReasonGateRefused     Reason = "gate_refused"
+	ReasonNotInCategory   Reason = "not_in_category"
+	ReasonExtractFailed   Reason = "extract_failed"
 	ReasonGateUnavailable Reason = "gate_unavailable" // transient: retried next poll
-	ReasonStoreFailed    Reason = "store_failed"     // transient
-	ReasonOfferFailed    Reason = "offer_store_failed"
+	ReasonStoreFailed     Reason = "store_failed"     // transient
+	ReasonOfferFailed     Reason = "offer_store_failed"
 )
 
 // LineReasons is every per-line reason code with its meaning, for the spec

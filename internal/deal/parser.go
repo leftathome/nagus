@@ -39,6 +39,12 @@ func (h *Hub) Principal(addr string) string {
 	return addr
 }
 
+// Recent is the ledger's newest n messages from a principal, given as its
+// alias or as the sender address (resolved to the alias).
+func (h *Hub) Recent(principalOrAddress string, n int) []MessageView {
+	return h.Ledger.Recent(h.Principal(principalOrAddress), n)
+}
+
 // EnabledCategories lists the categories with a deal source, sorted in
 // schema order.
 func (h *Hub) EnabledCategories() []string {

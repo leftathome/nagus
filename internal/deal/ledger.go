@@ -72,10 +72,10 @@ type msgState struct {
 type Ledger struct {
 	mu     sync.Mutex
 	msgs   map[string]*msgState
-	gen    map[string]int64      // sourceID -> current fetch generation
-	once   map[string]time.Time  // connector-level outcome keys already counted
-	subs   map[string]int64      // message outcome -> count
-	lines  map[[2]string]int64   // {outcome, reason} -> count
+	gen    map[string]int64     // sourceID -> current fetch generation
+	once   map[string]time.Time // connector-level outcome keys already counted
+	subs   map[string]int64     // message outcome -> count
+	lines  map[[2]string]int64  // {outcome, reason} -> count
 	now    func() time.Time
 	retain time.Duration
 }
