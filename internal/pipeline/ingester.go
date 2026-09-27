@@ -72,6 +72,10 @@ type Ingester struct {
 	Now func() time.Time
 	// Logf is an optional log sink; nil disables logging.
 	Logf func(format string, args ...any)
+	// AfterIngest, when set, is called with the result of every Ingest whose
+	// Fetch succeeded, after offer housekeeping. The deal-submission ledger
+	// uses it to settle each submitted line from the pass's skips.
+	AfterIngest func(ctx context.Context, res IngestResult)
 }
 
 func (i *Ingester) now() time.Time {
@@ -153,7 +157,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			if !keep {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: "could not read the stored hint to preserve it"})
 			} else if err := i.Offers.Put(ctx, o); err != nil {
-				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: err.Error()})
+				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: err.Error(), Err: err})
 				i.logf("ingest: offer store dropped %s: %v", r.SourceKey, err)
 			} else {
 				res.OffersRecorded++
@@ -167,13 +171,13 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
 		}
 		if sanErr != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: sanErr.Error()})
+			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: sanErr.Error(), Err: sanErr})
 			i.logf("ingest: sanitize dropped %s: %v", r.SourceKey, sanErr)
 			continue
 		}
 		it, err := i.Extractor.Extract(ctx, san)
 		if err != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "extract", Reason: err.Error()})
+			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "extract", Reason: err.Error(), Err: err})
 			i.logf("ingest: extract dropped %s: %v", r.SourceKey, err)
 			if errors.Is(err, listing.ErrNotInCategory) && i.Store != nil {
 				// An item stored before the category rule existed must not
@@ -188,7 +192,7 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			continue
 		}
 		if err := i.Store.Put(ctx, it); err != nil {
-			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "store", Reason: err.Error()})
+			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "store", Reason: err.Error(), Err: err})
 			i.logf("ingest: store dropped %s: %v", r.SourceKey, err)
 			continue
 		}
@@ -207,6 +211,9 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		}
 	}
 	i.keepOffers(ctx, &res)
+	if i.AfterIngest != nil {
+		i.AfterIngest(ctx, res)
+	}
 	return res, nil
 }
 

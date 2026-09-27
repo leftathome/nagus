@@ -32,6 +32,12 @@
 //     original names this source's sender, is that sender's mail: a person
 //     forwarding a newsletter by hand vouches for it. It is credited to the
 //     sender, marked mail_forwarded_by.
+//   - A source may instead name a LIST of senders (Senders): the deal
+//     submission format (nagus.deal/v1, package deal) is written by the
+//     household's own humans and agents, each with their own address. Every
+//     sender is held to the same DKIM rule for ITS domain, and a message is
+//     credited to the sender that actually sent it. Such a source may also
+//     count the mail it ignores (CountIgnored) without reading it.
 //   - Read-only and stateless: the mailbox is EXAMINEd, never modified; each
 //     poll searches the sender's mail over a lookback window, and the
 //     Message-ID keys every offer, so a re-read is idempotent.
@@ -53,6 +59,7 @@ import (
 	"net"
 	netmail "net/mail"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -82,15 +89,40 @@ var DefaultTrustedAuthServ = []string{"forwardemail.net"}
 
 // Message is one verified email, handed to the sender's Parser.
 type Message struct {
-	ID   string // Message-ID, without angle brackets
-	From string // the verified sender address, lower-cased
+	ID string // Message-ID, without angle brackets
+	// From is the verified sender address, lower-cased: the source's From,
+	// or, on a multi-sender source, whichever of its Senders sent it (for a
+	// hand-forward, the sender of the forwarded original).
+	From string
 	// ForwardedBy is the forwarder address when this is a hand-forwarded copy
 	// of the sender's mail; empty for mail the sender sent directly.
 	ForwardedBy string
 	Subject     string
 	Date        time.Time
-	Text        string // the text/plain part, if any
+	Text        string // the text/plain part, if any (format=flowed is un-flowed)
 	HTML        string // the text/html part, if any
+}
+
+// SkipReason is why the connector skipped a message before any parser saw
+// it. A closed set, for counting.
+type SkipReason string
+
+const (
+	SkipUnknownSender SkipReason = "unknown_sender"
+	SkipUnverified    SkipReason = "unverified"
+	SkipTooLarge      SkipReason = "too_large"
+	SkipInvalid       SkipReason = "invalid"
+	SkipParseError    SkipReason = "parse_error"
+)
+
+// Observation reports one skipped message to Config.Observe. Key identifies
+// the message stably across polls: its Message-ID when known, else a UID
+// key. A poll re-reads its whole window, so observers see the same message
+// on every poll and must count by Key.
+type Observation struct {
+	Key       string
+	MessageID string // "" when unknown (never fetched, or unparseable)
+	Reason    SkipReason
 }
 
 // Parser turns one sender's message into offers. Each implementation is
@@ -134,10 +166,22 @@ type Config struct {
 	Host, Port, Username, Password, TLS string
 	// Mailbox defaults to INBOX.
 	Mailbox string
-	// From is the one sender this source reads (required).
+	// From is the one sender this source reads. Required unless Senders is
+	// set.
 	From string
-	// DKIMDomain is the domain the sender's DKIM signature must be aligned
-	// to; empty = the domain of From.
+	// Senders is a sender ALLOWLIST: more addresses this source reads, each
+	// DKIM-verified for its own domain. A message is credited to the sender
+	// that sent it (Message.From).
+	Senders []string
+	// CountIgnored makes each poll also count the mail in the window from
+	// anyone else, by UID only (never fetched), reported to Observe as
+	// SkipUnknownSender.
+	CountIgnored bool
+	// Observe, when set, is told about every message skipped before
+	// parsing (see Observation).
+	Observe func(Observation)
+	// DKIMDomain is the domain From's DKIM signature must be aligned to;
+	// empty = the domain of From. Senders always use their own domain.
 	DKIMDomain string
 	// TrustedAuthServ are authserv-ids whose Authentication-Results header is
 	// trusted; empty = DefaultTrustedAuthServ.
@@ -164,8 +208,19 @@ type Connector struct {
 // NewConnector validates and fills defaults.
 func NewConnector(cfg Config) (*Connector, error) {
 	cfg.From = strings.ToLower(strings.TrimSpace(cfg.From))
-	if cfg.Name == "" || cfg.From == "" || !strings.Contains(cfg.From, "@") {
-		return nil, errors.New("imapmail: a source needs a name and one sender address (from)")
+	senders := make([]string, 0, len(cfg.Senders))
+	for _, a := range cfg.Senders {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if !strings.Contains(a, "@") {
+			return nil, fmt.Errorf("imapmail: sender %q is not an address", a)
+		}
+		if a != cfg.From && !slices.Contains(senders, a) {
+			senders = append(senders, a)
+		}
+	}
+	cfg.Senders = senders
+	if cfg.Name == "" || (cfg.From == "" && len(cfg.Senders) == 0) || (cfg.From != "" && !strings.Contains(cfg.From, "@")) {
+		return nil, errors.New("imapmail: a source needs a name and a sender address (from, or a senders list)")
 	}
 	if cfg.Parser == nil {
 		return nil, errors.New("imapmail: a source needs a parser")
@@ -185,13 +240,13 @@ func NewConnector(cfg Config) (*Connector, error) {
 			cfg.Port = "143"
 		}
 	}
-	if cfg.DKIMDomain == "" {
+	if cfg.DKIMDomain == "" && cfg.From != "" {
 		cfg.DKIMDomain = domainOf(cfg.From)
 	}
 	fwd := make([]string, 0, len(cfg.Forwarders))
 	for _, f := range cfg.Forwarders {
 		f = strings.ToLower(strings.TrimSpace(f))
-		if !strings.Contains(f, "@") || f == cfg.From {
+		if !strings.Contains(f, "@") || f == cfg.From || slices.Contains(cfg.Senders, f) {
 			return nil, fmt.Errorf("imapmail: forwarder %q must be an address other than the sender", f)
 		}
 		fwd = append(fwd, f)
@@ -236,16 +291,18 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		return nil, fmt.Errorf("imapmail %s: login: %w", c.cfg.Name, err)
 	}
 	// EXAMINE, not SELECT: the mailbox is never modified.
-	if _, err := cl.Select(c.cfg.Mailbox, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+	sel, err := cl.Select(c.cfg.Mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
+	if err != nil {
 		return nil, fmt.Errorf("imapmail %s: examine %q: %w", c.cfg.Name, c.cfg.Mailbox, err)
 	}
 	now := c.cfg.Now()
-	// One search per address (the sender, then each forwarder), unioned.
+	since := now.AddDate(0, 0, -c.cfg.LookbackDays)
+	// One search per address (the senders, then each forwarder), unioned.
 	seen := map[imap.UID]bool{}
 	var uids []imap.UID
-	for _, addr := range append([]string{c.cfg.From}, c.cfg.Forwarders...) {
+	for _, addr := range c.addresses() {
 		criteria := &imap.SearchCriteria{
-			Since:  now.AddDate(0, 0, -c.cfg.LookbackDays),
+			Since:  since,
 			Header: []imap.SearchCriteriaHeaderField{{Key: "From", Value: addr}},
 		}
 		found, err := cl.UIDSearch(criteria, nil).Wait()
@@ -259,6 +316,18 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			}
 		}
 	}
+	if c.cfg.CountIgnored {
+		// Everything else in the window, by UID only: counted, never fetched.
+		all, err := cl.UIDSearch(&imap.SearchCriteria{Since: since}, nil).Wait()
+		if err != nil {
+			return nil, fmt.Errorf("imapmail %s: search all: %w", c.cfg.Name, err)
+		}
+		for _, u := range all.AllUIDs() {
+			if !seen[u] {
+				c.observe(Observation{Key: fmt.Sprintf("uid:%d:%d", sel.UIDValidity, u), Reason: SkipUnknownSender})
+			}
+		}
+	}
 	var out []listing.Raw
 	skipped := map[string]int{}
 	if len(uids) > 0 {
@@ -269,8 +338,10 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			return nil, fmt.Errorf("imapmail %s: fetch: %w", c.cfg.Name, err)
 		}
 		for _, m := range msgs {
+			uidKey := fmt.Sprintf("uid:%d:%d", sel.UIDValidity, m.UID)
 			if m.RFC822Size > c.cfg.MaxBytes {
 				skipped["too large"]++
+				c.observe(Observation{Key: uidKey, Reason: SkipTooLarge})
 				continue
 			}
 			var raw []byte
@@ -280,11 +351,17 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			msg, why := c.verify(raw)
 			if why != "" {
 				skipped[why]++
+				o := Observation{Key: uidKey, Reason: skipReasonFor(why)}
+				if msg.ID != "" {
+					o.Key, o.MessageID = msg.ID, msg.ID
+				}
+				c.observe(o)
 				continue
 			}
 			raws, err := c.cfg.Parser.Parse(msg)
 			if err != nil {
 				skipped["parse: "+err.Error()]++
+				c.observe(Observation{Key: msg.ID, MessageID: msg.ID, Reason: SkipParseError})
 				continue
 			}
 			for i := range raws {
@@ -305,11 +382,58 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		}
 	}
 	if c.cfg.Logf != nil {
-		c.cfg.Logf("imapmail %s: %d messages from %s in %d days -> %d offers, skipped %v",
-			c.cfg.Name, len(uids), c.cfg.From, c.cfg.LookbackDays, len(out), skipped)
+		c.cfg.Logf("imapmail %s: %d messages from %d sender(s) in %d days -> %d offers, skipped %v",
+			c.cfg.Name, len(uids), len(c.senders()), c.cfg.LookbackDays, len(out), skipped)
 	}
 	c.setComplete(true)
 	return out, nil
+}
+
+// senders is every address this source reads as a sender.
+func (c *Connector) senders() []string {
+	out := make([]string, 0, 1+len(c.cfg.Senders))
+	if c.cfg.From != "" {
+		out = append(out, c.cfg.From)
+	}
+	return append(out, c.cfg.Senders...)
+}
+
+// addresses is every address searched: the senders, then the forwarders.
+func (c *Connector) addresses() []string {
+	return append(c.senders(), c.cfg.Forwarders...)
+}
+
+// senderDomain is the domain a sender's DKIM signature must align to.
+func (c *Connector) senderDomain(addr string) string {
+	if addr == c.cfg.From && c.cfg.DKIMDomain != "" {
+		return c.cfg.DKIMDomain
+	}
+	return domainOf(addr)
+}
+
+func (c *Connector) observe(o Observation) {
+	if c.cfg.Observe != nil {
+		c.cfg.Observe(o)
+	}
+}
+
+// Skip texts returned by verify, mapped onto SkipReason by skipReasonFor.
+const (
+	whyNotSender   = "not from the declared sender"
+	whyNoDKIM      = "no verified dkim pass"
+	whyNoID        = "no message-id"
+	whyOtherSender = "forward of another sender"
+)
+
+func skipReasonFor(why string) SkipReason {
+	switch why {
+	case whyNotSender:
+		return SkipUnknownSender
+	case whyNoDKIM:
+		return SkipUnverified
+	default:
+		return SkipInvalid
+	}
 }
 
 func (c *Connector) dial() (*imapclient.Client, error) {
@@ -336,21 +460,24 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 		return Message{}, "unparseable"
 	}
 	h := mr.Header
+	id, _ := h.MessageID()
 	from, err := h.AddressList("From")
 	if err != nil || len(from) != 1 {
-		return Message{}, "not from the declared sender"
+		return Message{}, whyNotSender
 	}
 	addr := strings.ToLower(from[0].Address)
 	forwarder := ""
-	domain := c.cfg.DKIMDomain
-	if addr != c.cfg.From {
+	var domain string
+	if slices.Contains(c.senders(), addr) {
+		domain = c.senderDomain(addr)
+	} else {
 		for _, f := range c.cfg.Forwarders {
 			if addr == f {
 				forwarder, domain = f, domainOf(f)
 			}
 		}
 		if forwarder == "" {
-			return Message{}, "not from the declared sender"
+			return Message{}, whyNotSender
 		}
 	}
 	if !c.dkimVerified(h.Values("Authentication-Results"), domain) && !c.dkimSigned(raw, domain) {
@@ -358,15 +485,16 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 			c.cfg.Logf("imapmail %s: REJECTED a message claiming to be from %s without a verified DKIM pass for %s (possible spoof)",
 				c.cfg.Name, addr, domain)
 		}
-		return Message{}, "no verified dkim pass"
+		// The id is returned (unverified) only so the skip can be counted
+		// once per message; the message itself is not.
+		return Message{ID: id}, whyNoDKIM
 	}
-	id, _ := h.MessageID()
 	if id == "" {
-		return Message{}, "no message-id"
+		return Message{}, whyNoID
 	}
 	subject, _ := h.Subject()
 	date, _ := h.Date()
-	msg := Message{ID: id, From: c.cfg.From, Subject: subject, Date: date, ForwardedBy: forwarder}
+	msg := Message{ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder}
 	for {
 		p, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -379,7 +507,7 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 		if !ok {
 			continue // attachments are never read
 		}
-		ct, _, _ := ih.ContentType()
+		ct, params, _ := ih.ContentType()
 		b, err := io.ReadAll(io.LimitReader(p.Body, c.cfg.MaxBytes))
 		if err != nil {
 			return Message{}, "unreadable part"
@@ -388,6 +516,9 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 		case "text/plain":
 			if msg.Text == "" {
 				msg.Text = string(b)
+				if strings.EqualFold(params["format"], "flowed") {
+					msg.Text = unflow(msg.Text, strings.EqualFold(params["delsp"], "yes"))
+				}
 			}
 		case "text/html":
 			if msg.HTML == "" {
@@ -400,11 +531,34 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 		if orig == "" {
 			orig = forwardedFrom(htmlText(msg.HTML))
 		}
-		if orig != c.cfg.From {
-			return Message{}, "forward of another sender"
+		if orig == "" || !slices.Contains(c.senders(), orig) {
+			return Message{}, whyOtherSender
 		}
+		msg.From = orig
 	}
 	return msg, ""
+}
+
+// unflow undoes RFC 3676 format=flowed: a line ending in a space is joined
+// to the next (the space removed too with delsp=yes). Space-stuffing is
+// removed; the signature separator "-- " is never joined.
+func unflow(text string, delsp bool) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var b strings.Builder
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, " ") {
+			ln = ln[1:] // space-stuffed
+		}
+		soft := strings.HasSuffix(ln, " ") && ln != "-- " && i < len(lines)-1
+		if soft && delsp {
+			ln = ln[:len(ln)-1]
+		}
+		b.WriteString(ln)
+		if !soft && i < len(lines)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 // forwardMarker opens the quoted original in a forward: Gmail's
