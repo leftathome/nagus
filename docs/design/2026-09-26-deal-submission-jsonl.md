@@ -228,11 +228,16 @@ channel and spam is expected. Gate outages are already covered by the
   constant.
 - **MCP tool `deal_submission_status`** (read-only): arguments
   `message_id` OR `principal` (+ `limit`, default 5, max 20).
-  - By `message_id`: `{message_id, found, outcome, reason, received, lines:
-    [{line, outcome, reason, category, offer_id, resolution, product_id}]}`.
-  - By `principal`: `{principal, messages: [{received, outcome, reason,
-    counts{accepted, rejected, pending}, lines: [{line, outcome, reason,
-    category}]}]}` -- no message ids, offer ids or product ids.
+  - By `message_id`: `{message_id, received, outcome, counts{accepted,
+    rejected, pending}, lines: [{line, outcome, reason, category, offer_id,
+    resolution, product_id}]}`; an unknown id is the kit's not-found result
+    (`isError: true`). `outcome` is `pending` or a message outcome.
+  - By `principal` (alias or address): `{messages: [{received, outcome,
+    counts, lines: [{line, outcome, reason, category}]}]}`, newest first --
+    no message ids, offer ids or product ids.
+  - Neither or both arguments, or `limit` outside 1-20, is an invalid-
+    arguments error; with no deal source configured the tool says deal
+    submission is not enabled.
   - Never any line content: only line numbers, outcomes, reason codes, the
     category enum and ids.
 - **Visibility decision.** nagus's MCP endpoint is unauthenticated and

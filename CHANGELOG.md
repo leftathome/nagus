@@ -284,6 +284,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Deal submission by email: `nagus.deal/v1` JSONL** (nagus-4uu; design
+  `docs/design/2026-09-26-deal-submission-jsonl.md`, humans
+  `docs/deal-submission.md`, agent skill `docs/deal-submission-skill.md`).
+  Household humans and agents on an allowlist email the deals mailbox with one
+  JSON deal per line in the text/plain body; each line is decoded strictly and
+  on its own (unknown or case-variant fields, bad prices, non-https urls
+  refuse that line only), mapped onto a listing, and goes through the glovebox
+  gate, the existing wine/hdd extractors and the quark hint path (hdd:
+  brand/mpn/gtin; wine: producer + title). HTML-only mail is refused whole.
+  Limits: 50 deal lines per message, 4 KiB per line. Idempotent by
+  (Message-ID, line); the mailbox is still never modified.
+  - Config: an `imap` source with `imapParser: deal-jsonl-v1`, one per
+    enabled category (`wine`, `hdd`), all with the same `imapSenders`
+    (the allowlist, which replaces `imapFrom`), `imapForwarders`,
+    `imapSenderAliases` (address -> principal, stamped on offers as
+    `submitted_by`) and optional `dealSubmitTo` (else
+    `NAGUS_IMAP_USERNAME`). Startup refuses inconsistent deal sources.
+  - `GET /schemas/deal/v1.json`: the JSON Schema, generated from the Go struct
+    and committed at `internal/deal/deal-v1.schema.json` (a test fails on drift).
+  - MCP tools (read-only): `deal_submission_spec` (schema, examples, mailbox
+    from config, when to use it, limits, reason codes) and
+    `deal_submission_status` (per-line outcomes and reason codes by
+    Message-ID, with offer and product ids; by principal, codes and counts
+    only; never line content). openclaw sees them once its toolFilter lists
+    them (gitops).
+  - Metrics `nagus_deal_submissions_total{outcome}` and
+    `nagus_deal_submissions_lines_total{outcome,reason}`; alert
+    `NagusDealSubmissionUnverified` (chart 0.13.0).
+  - imap connector: `Senders` (a DKIM-verified allowlist, each sender held to
+    its own domain and credited with its own mail), `CountIgnored`,
+    `Observe`, and RFC 3676 `format=flowed` text is un-flowed.
+  - The hdd extractor also accepts nagus's own condition words (`new`,
+    `refurb`, `used`, `parts`) as a source condition.
+  - Deferred: replying to the sender by SMTP (nagus-9xo).
 - **Title text hints for quark** (quark QUARK-02). A source may set
   `quarkTextHints: true`: when it states no product identifiers (eBay search
   results carry the part number only in the title), the listing TITLE is sent

@@ -52,6 +52,10 @@ recipient's abroad (fail closed throughout). See
 See [`docs/design/2026-07-01-nagus-design.md`](docs/design/2026-07-01-nagus-design.md)
 for the full architecture, source-access map, security model, and decision log.
 
+Household humans and agents can also email a deal nagus cannot see itself
+(in-store, image-only newsletters, tips) as one JSON object per line:
+[`docs/deal-submission.md`](docs/deal-submission.md).
+
 ## Boundaries
 
 - **glovebox** owns connectors + sanitization + extract/tokenize.

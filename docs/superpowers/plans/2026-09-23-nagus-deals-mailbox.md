@@ -82,3 +82,13 @@ It also makes nagus-9ib real: the sanitize client replaces
         concrete offer is store-wide (free shipping over $150, code, expiry).
         Needs a wine.com SALE/list mail as the parser sample.
       - Total Wine: no sample yet (filter forwarding only applies to new mail).
+- [x] nagus-4uu (2026-09-26): deal submission by email. Known household
+      humans and agents send `nagus.deal/v1` JSONL (one deal per line) from
+      an allowlist (`imapSenders`, parser `deal-jsonl-v1`, one source per
+      category). This covers the image-only newsletters (nagus-xgc) by
+      letting a person or agent type the deal in. Design:
+      `docs/design/2026-09-26-deal-submission-jsonl.md`; docs:
+      `docs/deal-submission.md`. Deferred: SMTP reply to the sender (nagus-9xo).
+- [ ] gitops: the two deal sources (placeholders in the MR description; real
+      allowlist addresses only in gitops) and the openclaw toolFilter entries
+      `deal_submission_spec`, `deal_submission_status`.

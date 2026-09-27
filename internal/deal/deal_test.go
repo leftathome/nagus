@@ -95,6 +95,32 @@ func TestExamplesDecode(t *testing.T) {
 	}
 }
 
+// The human docs show the canonical examples verbatim, and every doc about
+// the format is ASCII.
+func TestDocsCarryTheExamples(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/deal-submission.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ex := range []string{ExampleWine, ExampleHDD} {
+		if !strings.Contains(string(doc), ex) {
+			t.Errorf("docs/deal-submission.md does not show the example %s", ex)
+		}
+	}
+	for _, p := range []string{"../../docs/deal-submission.md", "../../docs/deal-submission-skill.md",
+		"../../docs/design/2026-09-26-deal-submission-jsonl.md", "deal-v1.schema.json"} {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, c := range b {
+			if c > 0x7e || (c < 0x20 && c != '\n' && c != '\t') {
+				t.Fatalf("%s: non-ASCII byte 0x%02x at %d", p, c, i)
+			}
+		}
+	}
+}
+
 func TestDecodeReasons(t *testing.T) {
 	ok := `"category":"hdd","title":"Example 18TB drive","price":"199.99","url":"https://store.example.com/x"`
 	wine := `"category":"wine","title":"Example Syrah","price":24,"url":"https://shop.example.com/y"`
