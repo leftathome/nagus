@@ -25,10 +25,12 @@ stored and other household agents can see it).
 ## Who can send
 
 Only addresses on the allowlist configured by the operator (in gitops, never
-in this repo), and the mail must pass DKIM for the sender's own domain. Mail
-from anyone else is ignored and only counted. A household member may also
-forward an allowlisted sender's submission by hand from a configured
-forwarding address; it is credited to the original sender.
+in this repo), and the mail must carry a DKIM signature for the sender's own
+domain that nagus verifies itself. Mail from anyone else is ignored and only
+counted. A household member may also forward an allowlisted sender's
+submission by hand from a configured forwarding address; it is credited to
+the FORWARDER (the address that was verified), not to whoever the forwarded
+text names.
 
 The address to send to is the deals mailbox. Ask Caspar, or read `mailbox`
 from the MCP tool `deal_submission_spec`: it comes from configuration and is
@@ -65,7 +67,7 @@ Thanks!
 | `category` | yes | `wine` or `hdd` |
 | `title` | yes | what is for sale, as the store names it (up to 300 characters) |
 | `price` | yes | major units: `"24.99"` or `24.99`; at most 2 decimals; no `$`, no commas |
-| `url` | yes | an `https://` link to the deal or the store's product page |
+| `url` | yes | an `https://` link to the deal or the store's product page: plain ASCII, at most 512 characters, a normal public host name (no IP address, no `localhost` or `.local`) |
 | `currency` | no | ISO 4217 code, default `USD` |
 | `seller` | no | the store or merchant |
 | `brand` | no | wine: the producer/winery. hdd: the manufacturer |
@@ -78,8 +80,10 @@ Thanks!
 | `note` | no | free text, stored with the deal, never used to identify it |
 | `schema` | no | if present, exactly `nagus.deal/v1` |
 
-Any other field, or a known field spelled differently (`Title`), refuses that
-line. `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
+Any other field, a known field spelled differently (`Title`), or the same
+field twice refuses that line. Text fields may use accents and any script,
+but not control characters or invisible ones (zero-width characters,
+right-to-left overrides, soft hyphens). `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
 drive; for wine, the producer in `brand` plus the title is how it recognises
 the wine, so give the producer whenever you know it.
 
@@ -89,12 +93,16 @@ and is committed at `internal/deal/deal-v1.schema.json`.
 
 ## Limits and rules
 
-- At most **50 deal lines per message**; lines past the 50th are refused.
+- At most **50 deal lines per message**; lines past the 50th are not read
+  (status shows one `too_many_lines` entry with how many).
+- Only the first 256 KiB of the message text is read.
 - At most **4096 bytes per line**.
 - Each line is judged on its own: one bad line never sinks the others.
 - Reading stops at your signature (`-- `), at a forwarded or
-  "Original Message" marker, or at an "On ... wrote:" line, so a reply that
-  quotes an earlier submission does not submit it again.
+  "Original Message" marker, at an Outlook reply header (a line of
+  underscores, or `From:` followed by `Sent:`), or at an "On ... wrote:"
+  line, so a reply that quotes an earlier submission does not submit it
+  again. Put your deals ABOVE anything quoted.
 - nagus never marks the mailbox read and never deletes mail. Re-reading a
   message never duplicates a deal. Sending the same deal in a NEW message is a
   new submission.
@@ -110,15 +118,21 @@ Submissions are processed on the deal sources' next poll (minutes). Then:
   - with `message_id` (the Message-ID of the email you sent): per line,
     `accepted` with an `offer_id` (usable with `get_item`) and quark's
     `product_id` once resolved, `rejected` with a reason code, or `pending`;
-  - with `principal` (your sender name, or your address): your latest
-    messages' outcomes and reason codes only.
+  - with `principal` (your sender NAME as the operator configured it, e.g.
+    `caspar`; never an email address): your latest messages' outcomes and
+    reason codes only.
+
+  A message nagus did not accept as yours (not on the allowlist, or no valid
+  DKIM signature) has no status at all: the tool answers "not found", exactly
+  as for an id it never saw.
 
 Status never repeats what you wrote, only line numbers and codes. Common
 reason codes:
 
 | Code | Meaning |
 |---|---|
-| `bad_json` | not one valid JSON object on the line (often: the line was wrapped) |
+| `bad_json` | not one valid JSON object on the line (often: the line was wrapped; also a repeated field) |
+| `bad_value` | out of range, too long, or contains control/invisible characters |
 | `unknown_field` | a field the spec does not have, or wrong capitalisation |
 | `missing_field` | category, title, price or url missing |
 | `bad_type` | e.g. `"vintage":"2021"` instead of `2021` |

@@ -8,7 +8,8 @@ description: >-
 type: application
 # version is the chart version; appVersion tracks the nagus image tag.
 # 0.13.0: NagusDealSubmissionUnverified (group nagus.deals) for deal submission
-#   by email (nagus-4uu). Deal sources need no template change: sources[] is
+#   by email (nagus-4uu), on the gauge nagus_deal_unverified_last_24h (arrival
+#   time, so a restart does not re-fire it). Deal sources need no template change: sources[] is
 #   rendered verbatim, imapSenders and all.
 # 0.12.0: the LWIN dictionary moved to quark (quark QUARK-04). NAGUS_LWIN_URL,
 #   _CACHE and _MAX_AGE are no longer rendered (lwin.url/cachePath/maxAge are

@@ -116,9 +116,9 @@ type Message struct {
 	// INTERNALDATE), which the sender cannot set. Date is the sender's claim.
 	Received time.Time
 	Subject  string
-	Date        time.Time
-	Text        string // the text/plain part, if any (format=flowed is un-flowed)
-	HTML        string // the text/html part, if any
+	Date     time.Time
+	Text     string // the text/plain part, if any (format=flowed is un-flowed)
+	HTML     string // the text/html part, if any
 }
 
 // SkipReason is why the connector skipped a message before any parser saw

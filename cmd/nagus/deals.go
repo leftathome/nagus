@@ -269,7 +269,8 @@ func (s *server) mcpDealSpec(_ context.Context, _ dealSpecArgs) (mcp.Result, err
 		"enabled_categories": categories,
 		"format": "Send a plain-text email (text/plain; HTML-only mail is refused) to the mailbox from your allowlisted address. " +
 			"Put ONE JSON object per line; every line that starts with { is read as a deal, everything else is ignored. " +
-			"Do not hard-wrap lines. Reading stops at a signature (-- ), a forwarded or original-message marker, or an 'On ... wrote:' line. " +
+			"Do not hard-wrap lines. Put deals ABOVE anything quoted: reading stops at a signature (-- ), a forwarded or original-message marker, " +
+			"an Outlook reply header, or an 'On ... wrote:' line. " +
 			"Each line is judged on its own. A resent message is a new submission.",
 		"examples":        deal.Examples(),
 		"example_body":    deal.ExampleBody,
@@ -278,6 +279,8 @@ func (s *server) mcpDealSpec(_ context.Context, _ dealSpecArgs) (mcp.Result, err
 		"limits": map[string]any{
 			"max_deal_lines_per_message": deal.MaxLinesPerMessage,
 			"max_line_bytes":             deal.MaxLineBytes,
+			"max_body_bytes_scanned":     deal.MaxScanBytes,
+			"max_url_chars":              deal.MaxURLLen,
 			"max_message_bytes":          imapmail.DefaultMaxBytes,
 			"status_kept_days":           lookback,
 			"processed_within":           "the next poll of the deal sources (their configured interval)",

@@ -20,13 +20,18 @@ mailbox.
   after trimming whitespace is ONE deal object. Every other line (greeting,
   signature, `Fwd:` headers, notes, quoted `>` replies) is ignored.
 - Reading stops at the first reply/forward/signature boundary: a line that is
-  exactly `-- ` (RFC 3676 signature), `-----Original Message-----`, a Gmail or
-  Apple Mail forward marker, or an `On ... wrote:` attribution. So a reply
+  `--` or `-- ` (RFC 3676 signature), `-----Original Message-----`, an Outlook
+  underscore rule (`__________`), an Outlook `From:` line followed by `Sent:`
+  or `Date:`, a Gmail or Apple Mail forward marker (quoted with `>` or not),
+  or an `On ... wrote:` attribution on one line or wrapped onto two. So a reply
   that quotes an earlier submission never resubmits it, even when the client
   does not prefix quoted lines with `>`.
 - A **hand-forwarded** message (a configured forwarder forwarding an
   allowlisted sender's mail) is read from the forwarded original, i.e. after
-  the forward marker, and stops at the next boundary.
+  the forward marker and its header block, and stops at the next boundary.
+- A line that starts with a UTF-8 byte-order mark and then `{` is a deal line
+  and is refused `bad_json`; it is not silently ignored.
+- At most 256 KiB and 10,000 lines of a body are scanned.
 - Line numbers are the 1-based line of the text body as received. They are
   stable across re-reads, which is what makes them part of the identity.
 - `format=flowed` (RFC 3676) text is un-flowed before parsing, so a client
@@ -43,7 +48,9 @@ mailbox.
 
 | Limit | Value | What happens past it |
 |---|---|---|
-| Deal lines per message | 50 | lines 51+ are refused `too_many_lines`; the first 50 are processed |
+| Deal lines per message | 50 | the first 50 are processed; the rest are not decoded and become ONE `too_many_lines` entry (at the 51st deal line) carrying a `count` |
+| Body scanned | 256 KiB, 10,000 lines | the rest of the body is not read |
+| Ledger | 5,000 messages | the message no poll has seen for longest is dropped |
 | Bytes per deal line | 4096 (after trimming) | that line is refused `line_too_long` |
 | Message size | 4 MiB (connector default) | message skipped, counted `too_large` |
 | Lookback | the source's `imapLookbackDays` (default 14) | older mail is not read; its status ages out |
@@ -65,7 +72,7 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | `category` | yes | string | `wine` or `hdd` |
 | `title` | yes | string | 1-300 chars, no control characters |
 | `price` | yes | decimal string or number | major units, `^[0-9]{1,7}(\.[0-9]{1,2})?$`, > 0, <= 1000000 |
-| `url` | yes | string | `https` only, with a host, no userinfo, <= 2048 chars |
+| `url` | yes | string | `https` only; printable ASCII (IDN hosts as punycode); <= 512 chars; a public-looking DNS host (no IP literal, `localhost`, single-label, `.local`/`.internal`/`.lan`/`.home.arpa`); no userinfo, no backslash |
 | `currency` | no | string | ISO 4217 `^[A-Z]{3}$`, default `USD` |
 | `seller` | no | string | <= 100 chars; the store/merchant |
 | `brand` | no | string | <= 100 chars; hdd: product hint; wine: the producer |
@@ -73,7 +80,7 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | `gtin` | no | string | 8, 12, 13 or 14 digits |
 | `vintage` | no | integer | wine only; 1800-2100 |
 | `bottle_ml` | no | integer | wine only; 50-30000 |
-| `capacity_tb` | no | number | hdd only; > 0, <= 1000 |
+| `capacity_tb` | no | number | hdd only; >= 0.01, <= 1000 |
 | `condition` | no | string | hdd only; `new`, `refurb`, `used`, `parts` |
 | `note` | no | string | <= 1000 chars; stored, NEVER used for identity |
 | `schema` | no | string | if present, exactly `nagus.deal/v1` |
@@ -105,8 +112,9 @@ handle it unchanged:
 | brand (wine) | aspect `wine_producer` -> with the title, the quark NAME hint |
 | gtin (wine) | aspect `deal_gtin` (informational; a wine GTIN would mint a product beside the LWIN catalog's, see pipeline `NameHintProducer`) |
 | vintage, bottle_ml (wine) | aspects `vintage`, `bottle_ml` (read by the wine extractor) |
+| url (path, query, fragment, percent-decoded) | aspect `deal_url_text`, so the url crosses the gate as text |
 | (principal) | aspect `submitted_by` |
-| (message) | aspects `mail_message_id`, `mail_forwarded_by` (connector) |
+| (message) | aspects `mail_message_id`, `mail_forwarded_by`, `mail_forwarded_from` (a claim) (connector) |
 
 A deal-jsonl wine source is opted in to name hints by its type: the sender
 named the producer on purpose, which is the review the per-source `lwinStamp`
@@ -124,15 +132,26 @@ surfaced and the status tool gives it no offer id.
 - A source is `type: imap` with `imapParser: deal-jsonl-v1` and a sender
   allowlist `imapSenders` (a LIST), configured only in gitops. The repo holds
   no real address; tests and docs use `example.org` placeholders.
-- Each sender is accepted only with a DKIM pass for its own domain (nagus's
-  own verification, or the trusted MX's topmost Authentication-Results), the
-  same rule as a single-sender source.
-- `imapForwarders` keep their meaning: a household mailbox forwarding an
-  allowlisted sender's message by hand vouches for it, and it is credited to
-  that sender.
-- The **principal** is the verified sender address, or its alias from
-  `imapSenderAliases` (address -> short name, e.g. `caspar`). It is stamped on
-  every offer as aspect `submitted_by`, next to the deal's own `seller`.
+- Each sender is accepted only when NAGUS ITSELF verifies a DKIM signature
+  aligned to the sender's own domain whose `h=` covers From. An
+  Authentication-Results header is never consulted for a deal source (startup
+  refuses `imapTrustAuthResults` on one), and is off by default for every
+  imap source: the MX for the mailbox writes none, so the topmost one is
+  whatever the sender wrote.
+- A message with more than one From, Sender, Subject or Message-ID field is
+  refused: DKIM verifies the bottom-most From its `h=` covers, so a second
+  From prepended above a genuine signature would otherwise be the one read.
+- `imapForwarders`: a household mailbox forwarding an allowlisted sender's
+  message by hand. It is read (the forwarded original must name an
+  allowlisted sender) but CREDITED TO THE FORWARDER, the only address DKIM
+  verified; the original named in the forwarded text is unauthenticated and
+  is recorded as aspect `mail_forwarded_from`, a claim.
+- The **principal** is the verified address (sender or forwarder), or its
+  alias from `imapSenderAliases` (address -> short name, e.g. `caspar`). It
+  is stamped on every offer as aspect `submitted_by`, next to the deal's own
+  `seller`.
+- IMAP `SEARCH FROM` is a substring match; each candidate's parsed envelope
+  From is checked exactly before its body is fetched.
 - Mail from anyone else is not read. The connector counts it
   (`nagus_deal_submissions_total{outcome="unknown_sender"}`) with a UID-only
   search: its bodies are never fetched.
@@ -159,10 +178,15 @@ legal to ship.
 
 ## Idempotency, flags and lifetime
 
-- Source key: `<Message-ID>#L<line>`. The offer and item id is
+- Source key: `<verified sender address>/<Message-ID>#L<line>`. The sender
+  writes its own Message-ID, so the id alone keys nothing: the ledger and the
+  offer id are both scoped to the verified sender, and two senders using one
+  Message-ID never share or overwrite an entry. The offer and item id is
   `sha256(sourceID NUL key)[:16]`, so re-reading the mailbox updates the same
   rows and never duplicates. A resent message has a new Message-ID and is a
   new submission (documented for senders).
+- Ordering and retention use the IMAP INTERNALDATE (`received`), which the
+  sender cannot set, never the Date header.
 - The mailbox is opened with EXAMINE and bodies fetched with BODY.PEEK, like
   every imap source: nagus never sets `\Seen`, never moves or deletes. Humans
   can use the mailbox normally and nothing nagus does depends on flags.
@@ -208,8 +232,12 @@ Counters are per process lifetime: a restart recounts the window once, which
 
 ### Alert
 
-`NagusDealSubmissionUnverified` (warning): any `unverified` submission in the
-last hour. Justified because it is rare and needs a human either way (spoof
+`NagusDealSubmissionUnverified` (warning): the gauge
+`nagus_deal_unverified_last_24h` is above zero, i.e. an `unverified` message
+ARRIVED (INTERNALDATE) in the last 24 hours. A gauge over arrival time rather
+than `increase()` of the counter, because a restart recounts the whole
+lookback window and would re-fire for old mail. It resolves 24 hours after the
+last such message. Justified because it is rare and needs a human either way (spoof
 attempt, or a household domain's DKIM broke and its deals are being dropped).
 No alert on rejections: a malformed line is the sender's problem and the
 status tool tells them; no alert on `unknown_sender`: the mailbox is an open
@@ -228,13 +256,20 @@ channel and spam is expected. Gate outages are already covered by the
   constant.
 - **MCP tool `deal_submission_status`** (read-only): arguments
   `message_id` OR `principal` (+ `limit`, default 5, max 20).
-  - By `message_id`: `{message_id, received, outcome, counts{accepted,
-    rejected, pending}, lines: [{line, outcome, reason, category, offer_id,
-    resolution, product_id}]}`; an unknown id is the kit's not-found result
-    (`isError: true`). `outcome` is `pending` or a message outcome.
-  - By `principal` (alias or address): `{messages: [{received, outcome,
-    counts, lines: [{line, outcome, reason, category}]}]}`, newest first --
-    no message ids, offer ids or product ids.
+  - By `message_id`: `{messages: [{message_id, received, outcome,
+    counts{accepted, rejected, pending}, lines: [{line, outcome, reason,
+    category, count, offer_id, resolution, product_id}]}]}` -- one entry per
+    verified sender that used that id (normally one). An id nagus never
+    verified -- unknown, or From an allowlisted address without a DKIM pass --
+    is the kit's not-found result (`isError: true`); the two are
+    indistinguishable. `outcome` is `pending` or a message outcome.
+  - By `principal`, an ALIAS only: `{messages: [{received, outcome, counts,
+    lines: [{line, outcome, reason, category, count}]}]}`, newest first -- no
+    message ids, offer ids or product ids. An address is never accepted (it
+    answers the same empty list as an unknown name), so the tool cannot be
+    used to test whether an address is on the allowlist. A sender with no
+    alias uses its Message-IDs.
+  - Output is bounded: at most 20 messages of at most 51 lines.
   - Neither or both arguments, or `limit` outside 1-20, is an invalid-
     arguments error; with no deal source configured the tool says deal
     submission is not enabled.
@@ -251,6 +286,34 @@ channel and spam is expected. Gate outages are already covered by the
   the caller's own principal.
 - **Humans:** `docs/deal-submission.md`. **Agents:** the skill snippet in
   `docs/deal-submission-skill.md`.
+
+## Security review (rv35, 2026-09-27) and what changed
+
+The independent review of MR !35 found the format and decoder sound and the
+sender authentication and resource bounds not. Each finding has a regression
+test that reproduced it before the fix.
+
+| # | Finding | Decision | Test |
+|---|---|---|---|
+| C1 | A forged topmost Authentication-Results header was trusted | A-R trust is OFF by default for every imap source (`imapTrustAuthResults`, `Config.TrustAuthResults`); deal sources refuse to enable it | `TestForgedTopmostAuthResultsIsNotTrusted`, `TestAuthResultsTrustIsOptIn`, `TestDealHubValidation` |
+| C2 | A duplicate From header bypassed DKIM | exactly one From, at most one Sender/Subject/Message-ID; the signature's `h=` must cover From | `TestDuplicateFromIsRefused`, `TestDuplicateIdentityHeadersAreRefused` |
+| I1 | Unbounded ledger lines and status output | one summary `too_many_lines` entry with a count; scan caps; ledger cap; status at most 20 x 51 | `TestTooManyLinesIsOneBoundedEntry` |
+| I2 | `url` never crossed the gate | `deal_url_text` aspect (gated); ASCII, 512, public DNS host only | `TestURLIsGated`, `TestDecodeHardening`, `TestInjectionIsRefusedByTheGate` |
+| I3 | A gate-refused hdd line still sent brand/mpn/gtin to quark | `Ingester.HintsNeedGate` on deal sources: the hint is withheld unless the gate passed. "Never surfaced" now also means never sent to quark. Other hdd sources: nagus-voe | `TestInjectionIsRefusedByTheGate` |
+| I4 | Incomplete reply-chain boundaries | Outlook rule and From/Sent block, wrapped Gmail attribution, quoted forward marker | `TestReplyChainBoundaries` |
+| I5 | Message-ID alone keyed everything | keys are (verified sender, Message-ID) in the ledger and the offer id | `TestKeysIncludeTheVerifiedPrincipal` |
+| N1 | A forward was credited to whoever its text named | credited to the forwarder; the named original is a claim | `TestForwardIsCreditedToTheForwarder`, `TestForwardedSubmissionIsCreditedToTheForwarder` |
+| N2 | SEARCH FROM substring match fetched strangers' bodies | envelope From checked before the body fetch | `TestDisplayNameMatchIsNotFetched` |
+| N3 | The status tool was an allowlist oracle | unverified is not recorded for status; principal lookup by alias only | `TestStatusIsNotAnAllowlistOracle`, `TestMCPDealSubmissionStatus` |
+| N4 | Duplicate keys, BOM, invisible characters | duplicate key and BOM line are `bad_json`; Cf / default-ignorable / variation selectors are `bad_value` | `TestDecodeHardening`, `TestReplyChainBoundaries` |
+| N5 | Sender-set Date used for ordering | INTERNALDATE | `TestReceivedIsTheInternalDate` |
+| N6 | The mailbox grows forever | deferred: nagus-kvk (a retention/expunge story that keeps ingest read-only) | -- |
+| N7 | The alert re-fired after a restart | alert on the `nagus_deal_unverified_last_24h` gauge | `TestUnverifiedGaugeIgnoresOldMail` |
+
+Residual, by design: an allowlisted sender whose own mail account is
+compromised can submit deals as that sender; the gate, the typed schema and
+the extractors bound what such a deal can carry. A forwarder can make nagus
+read any text it forwards, credited to the forwarder.
 
 ## Rejected alternatives
 

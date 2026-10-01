@@ -40,6 +40,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **imap sources no longer trust Authentication-Results headers by default**
+  (rv35 C1). The receiving MX for the deals mailbox writes no A-R header, so
+  the "topmost" one was whatever the sender wrote, and an unsigned message
+  carrying a forged `dkim=pass` was accepted. Only nagus's own DKIM
+  verification admits a message now; a source behind an MX that does prepend
+  A-R can opt back in with `imapTrustAuthResults: true` (refused on deal
+  sources). No imap source is configured in production, so nothing changes
+  there.
+- **imap: a message with a duplicate From, Sender, Subject or Message-ID is
+  refused** (rv35 C2: DKIM verifies the bottom-most From, the reader took the
+  top one). Each candidate's envelope From is checked before its body is
+  fetched (IMAP `SEARCH FROM` is a substring match), a hand-forward's
+  `Message.From` is the forwarder (the named original is
+  `Message.ForwardedFrom`, aspect `mail_forwarded_from`), and
+  `Message.Received` is the IMAP INTERNALDATE.
 - **`/mcp` is served by go-service-kit's `mcp` package (v0.3.0)** (quark
   QUARK-06). The hand-rolled JSON-RPC core in `cmd/nagus/mcp.go` is deleted;
   what remains is one `mcp.NewTool` per tool and one `mcp.New`. **The agent
@@ -318,6 +333,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - The hdd extractor also accepts nagus's own condition words (`new`,
     `refurb`, `used`, `parts`) as a source condition.
   - Deferred: replying to the sender by SMTP (nagus-9xo).
+  - Hardened after the security review of !35 (rv35; table in the design doc):
+    deal lines are keyed by (verified sender, Message-ID); a forward is
+    credited to the forwarder; at most 50 lines, 256 KiB and 10,000 lines of
+    a body are read and the overflow is one summary entry; the `url` is
+    gated (aspect `deal_url_text`) and must be ASCII, at most 512 characters,
+    on a public DNS host; a gate-refused drive's brand/mpn/gtin are withheld
+    from quark (`Ingester.HintsNeedGate`); duplicate JSON keys, a BOM line and
+    invisible/bidi characters are refused; status never distinguishes an
+    unverified message from an unknown one and takes a principal ALIAS only;
+    the alert reads the gauge `nagus_deal_unverified_last_24h`. Mailbox
+    retention is deferred (nagus-kvk).
 - **Title text hints for quark** (quark QUARK-02). A source may set
   `quarkTextHints: true`: when it states no product identifiers (eBay search
   results carry the part number only in the title), the listing TITLE is sent
