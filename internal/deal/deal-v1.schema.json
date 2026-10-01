@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nagus:schema:deal:v1",
+  "title": "nagus.deal/v1",
+  "description": "One deal submitted to the nagus deals mailbox. Send one object per line in the text/plain body; at most 50 deal lines per message and 4096 bytes per line. Unknown fields refuse the line. wine-only: vintage, bottle_ml. hdd-only: mpn, capacity_tb, condition. Patterns are ECMA-262, as JSON Schema specifies: $ is the end of the string. (Python's re also lets $ match before a final newline; nagus itself refuses such a value.)",
+  "type": "object",
+  "required": [
+    "category",
+    "title",
+    "price",
+    "url"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Optional format marker. If present it must be exactly nagus.deal/v1.",
+      "const": "nagus.deal/v1"
+    },
+    "category": {
+      "type": "string",
+      "description": "Which nagus category the deal is for. Each needs a deal source enabled for it.",
+      "enum": [
+        "wine",
+        "hdd"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "description": "What is for sale, as the store names it: producer, wine, vintage, size; or brand, model, capacity. Free text; untrusted. Tabs and non-breaking or typographic spaces become plain spaces, runs collapse, ends are trimmed (also in note, seller and brand); the length limit applies after that.",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "price": {
+      "type": [
+        "string",
+        "number"
+      ],
+      "description": "The price in major units (dollars, not cents), as a decimal string \"24.99\" or a JSON number 24.99. At most 2 decimals; no sign, exponent or separators.",
+      "pattern": "^[0-9]{1,7}(\\.[0-9]{1,2})?$"
+    },
+    "url": {
+      "type": "string",
+      "description": "An https link to the deal, or to the store/product page it is from. Lower-case https:// and host, printable ASCII (an IDN host as punycode), a public DNS host name: no IP address in any form, no userinfo, no port but :443, not .local/.internal/.lan/.home/.corp/.svc/.test/.invalid/.arpa/.onion. Every percent-escape must be valid and at most double-encoded.",
+      "pattern": "^https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+([a-z][a-z0-9-]{0,61}[a-z0-9])(?::443)?(?:[/?#][\\x21-\\x7e]*)?$",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "currency": {
+      "type": "string",
+      "description": "ISO 4217 currency code. Default USD.",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "seller": {
+      "type": "string",
+      "description": "The store or merchant selling it (e.g. a shop name). Free text; untrusted.",
+      "maxLength": 100
+    },
+    "brand": {
+      "type": "string",
+      "description": "hdd: the drive manufacturer (a product hint for identity). wine: the producer/winery, sent with the title as the wine's name hint.",
+      "maxLength": 100
+    },
+    "mpn": {
+      "type": "string",
+      "description": "hdd only: the manufacturer part number (a product hint for identity).",
+      "maxLength": 64
+    },
+    "gtin": {
+      "type": "string",
+      "description": "GTIN-8, UPC-A, EAN-13 or GTIN-14 digits. hdd: a product hint; wine: stored, not used for identity.",
+      "pattern": "^([0-9]{8}|[0-9]{12,14})$"
+    },
+    "vintage": {
+      "type": "integer",
+      "description": "wine only: the vintage year.",
+      "minimum": 1800,
+      "maximum": 2100
+    },
+    "bottle_ml": {
+      "type": "integer",
+      "description": "wine only: bottle size in millilitres (750 standard, 1500 magnum).",
+      "minimum": 50,
+      "maximum": 30000
+    },
+    "capacity_tb": {
+      "type": "number",
+      "description": "hdd only: capacity in terabytes.",
+      "minimum": 0.01,
+      "maximum": 1000
+    },
+    "condition": {
+      "type": "string",
+      "description": "hdd only: the drive's condition.",
+      "enum": [
+        "new",
+        "refurb",
+        "used",
+        "parts"
+      ]
+    },
+    "note": {
+      "type": "string",
+      "description": "Free-text context (\"in store only\", \"ends Sunday\"). Stored with the deal; never used for identity. Untrusted.",
+      "maxLength": 1000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "category": {
+            "const": "wine"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "mpn": false,
+          "capacity_tb": false,
+          "condition": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "category": {
+            "const": "hdd"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "vintage": false,
+          "bottle_ml": false
+        }
+      }
+    }
+  ]
+}

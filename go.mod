@@ -8,6 +8,7 @@ require (
 	github.com/emersion/go-msgauth v0.7.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/leftathome/go-service-kit v0.3.0
+	golang.org/x/net v0.58.0
 	modernc.org/sqlite v1.53.0
 )
 

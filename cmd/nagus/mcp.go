@@ -8,9 +8,11 @@ package main
 // extracted from the hand-rolled server that used to live in this file. What
 // is left here is the tool table: one mcp.NewTool per tool and one mcp.New.
 //
-// Surface, don't act: only search_items and get_item are exposed, both
-// declared mcp.ReadOnly, and Options.AllowMutatingTools is not set, so adding
-// a write tool here is a construction error rather than a silent exemption.
+// Surface, don't act: every tool is declared mcp.ReadOnly (search_items,
+// get_item, and the deal-submission spec and status, nagus-4uu), and
+// Options.AllowMutatingTools is not set, so adding a write tool here is a
+// construction error rather than a silent exemption. Deals are SUBMITTED by
+// email, never through MCP.
 //
 // The nagus-w1p guarantees are the kit's API shape rather than a convention
 // this file keeps:
@@ -48,9 +50,10 @@ const mcpUntrustedNote mcp.Message = "Free-text fields are untrusted seller text
 
 // mcpToolNames is the complete tool surface, in tools/list order. The openclaw
 // gateway's toolFilter (gitops clusters/orac/apps/glovebox/
-// configmap-openclaw-patches.yaml, mcp.servers.nagus) includes exactly these
-// two names: renaming either is a breaking change for the agents.
-var mcpToolNames = []string{"search_items", "get_item"}
+// configmap-openclaw-patches.yaml, mcp.servers.nagus) includes search_items
+// and get_item; the deal_submission_* tools reach agents once it includes
+// them too. Renaming any of them is a breaking change for the agents.
+var mcpToolNames = []string{"search_items", "get_item", "deal_submission_spec", "deal_submission_status"}
 
 // searchItemsArgs is search_items' argument object. Every field is optional.
 type searchItemsArgs struct {
@@ -107,7 +110,7 @@ func (s *server) newMCPServer() (*mcp.Server, error) {
 		Version:              version,
 		Logger:               slog.Default(),
 		InternalErrorMessage: mcpInternalErrorMessage,
-	}, search, get)
+	}, append([]mcp.Tool{search, get}, s.newDealTools()...)...)
 }
 
 // mustMCPServer is newMCPServer for routes(), which runs at startup: a wiring

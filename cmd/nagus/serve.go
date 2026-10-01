@@ -17,6 +17,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
+	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/enrich"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
@@ -42,6 +43,9 @@ type server struct {
 	// offers is the offer layer, nil when off. Read only to stamp quark's
 	// product id onto rows (withProductIDs).
 	offers offer.Store
+	// deals is the deal-submission hub (nagus-4uu); nil when no deal source
+	// is configured. Read by the deal_submission_* MCP tools and /metrics.
+	deals *deal.Hub
 }
 
 // withProductIDs stamps quark's product id onto every row whose offer quark
@@ -111,6 +115,8 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/item", s.handleItem)
 	mux.HandleFunc("/watches", s.handleWatches)
+	// The nagus.deal/v1 JSON Schema, read-only (nagus-4uu).
+	mux.HandleFunc(deal.SchemaPath, handleDealSchema)
 	// Every method reaches the kit's server, which answers a non-POST with 405
 	// and an Allow header (the streamable HTTP transport's "no SSE stream").
 	mux.Handle("/mcp", s.mustMCPServer())
@@ -144,6 +150,9 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.sanitizer != nil {
 		writeSanitizeMetrics(w, s.sanitizer)
+	}
+	if s.deals != nil {
+		s.deals.Ledger.WriteMetrics(w)
 	}
 	if len(ebaySources) == 0 {
 		return
@@ -370,6 +379,11 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	// One hub for every deal-submission source (nagus-4uu): they read the
+	// same messages and share the status ledger.
+	if opts.deals, err = buildDealHub(cfg.Sources, nil); err != nil {
+		return err
+	}
 
 	surfaces := make(map[string]*pipeline.Surface, len(cfg.Categories))
 	for name, cc := range cfg.Categories {
@@ -396,7 +410,7 @@ func runServe(args []string) error {
 		}
 	}
 	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
-		sanitizer: opts.sanitizer}
+		sanitizer: opts.sanitizer, deals: opts.deals}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -25,8 +25,12 @@ import (
 // an operator can see why a listing did not become a stored item.
 type Skip struct {
 	SourceKey string
-	Stage     string // "sanitize" | "extract" | "store"
+	Stage     string // "sanitize" | "extract" | "store" | "offer"
 	Reason    string
+	// Err is the error behind Reason, for callers that classify a skip with
+	// errors.Is (a glovebox quarantine versus an outage, say). nil for skips
+	// with no underlying error.
+	Err error
 }
 
 // IngestResult summarizes one Ingest run.

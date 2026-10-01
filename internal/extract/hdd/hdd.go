@@ -304,6 +304,12 @@ var conditionByID = map[string]string{
 	"2500": "refurb", // Seller refurbished
 	"3000": "used",   // Used
 	"7000": "parts",  // For parts or not working
+	// The normalized words themselves, for sources that state a condition in
+	// nagus's own vocabulary (a nagus.deal/v1 submission's "condition").
+	"new":    "new",
+	"refurb": "refurb",
+	"used":   "used",
+	"parts":  "parts",
 }
 
 // conditionKeywords is the Title fallback scan, used only when ConditionRaw

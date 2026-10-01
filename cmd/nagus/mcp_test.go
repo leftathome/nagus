@@ -109,8 +109,8 @@ func TestMCPToolsList(t *testing.T) {
 	if err := json.Unmarshal(env.Result, &result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
-	if len(result.Tools) != 2 {
-		t.Fatalf("got %d tools, want 2", len(result.Tools))
+	if len(result.Tools) != len(mcpToolNames) {
+		t.Fatalf("got %d tools, want %d", len(result.Tools), len(mcpToolNames))
 	}
 	byName := map[string]bool{}
 	for _, tool := range result.Tools {
@@ -422,10 +422,17 @@ func TestMCPToolSchemasUnchangedForOpenclaw(t *testing.T) {
 		"search_items": `{"additionalProperties":false,"properties":{"category":{"type":"string"},"limit":{"minimum":0,"type":"integer"},"text":{"type":"string"}},"type":"object"}`,
 		"get_item":     `{"additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"],"type":"object"}`,
 	}
-	if len(got.Tools) != len(want) {
-		t.Fatalf("%d tools, want %d", len(got.Tools), len(want))
+	if len(got.Tools) != len(mcpToolNames) {
+		t.Fatalf("%d tools, want %d", len(got.Tools), len(mcpToolNames))
 	}
 	for _, tool := range got.Tools {
+		if _, filtered := want[tool.Name]; !filtered {
+			// Not (yet) in openclaw's toolFilter; still read-only.
+			if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+				t.Errorf("%s: annotations.readOnlyHint must be true", tool.Name)
+			}
+			continue
+		}
 		var a, b any
 		if err := json.Unmarshal(tool.InputSchema, &a); err != nil {
 			t.Fatal(err)

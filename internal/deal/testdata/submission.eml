@@ -1,0 +1,61 @@
+Return-Path: <caspar@agents.example.org>
+Received: from mail.agents.example.org (mail.agents.example.org [192.0.2.10])
+	by mx1.example.net with ESMTPS id 4f1a2b3c
+	for <deals@example.net>; Sat, 26 Sep 2026 17:02:11 +0000
+Authentication-Results: relay.example.com; dkim=pass header.d=agents.example.org
+X-Mailer: example-agent-mailer 1.4
+Message-ID: <20260926170210.4f1a2b3c@agents.example.org>
+From: Caspar <caspar@agents.example.org>
+To: deals@example.net
+Subject: deals for nagus
+Date: Sat, 26 Sep 2026 17:02:10 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1_example"
+
+--b1_example
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi nagus,
+
+Three deals from this weekend (one per line, as the spec says):
+
+{"category":"wine","title":"Example Cellars Columbia Valley Syrah 2021","br=
+and":"Example Cellars","vintage":2021,"price":"24.99","url":"https://shop.e=
+xample.com/syrah-2021","seller":"Example Wine Shop","note":"in store only, =
+ends Sunday"}
+{"category":"hdd","title":"Example Digital 20TB SATA 7200rpm enterprise dri=
+ve","brand":"Example Digital","mpn":"EX20T-0001","capacity_tb":20,"conditio=
+n":"refurb","price":219.99,"url":"https://store.example.com/p/ex20t","selle=
+r":"Example Store"}
+  {"category":"wine","title":"Sample Estate Willamette Valley Pinot Noir 20=
+19 Magnum","brand":"Sample Estate","vintage":2019,"bottle_ml":1500,"price":=
+64,"url":"https://shop.example.com/pinot-2019-magnum"}
+{"category":"hdd","title":"Example 18TB drive","price":"159.00","url":"http=
+s://store.example.com/p/ex18t"
+{"category":"hdd","title":"Example 16TB drive","price":"149.00","url":"http=
+s://store.example.com/p/ex16t","colour":"black"}
+{"category":"hdd","title":"Example 12TB drive","price":"99.00","url":"http:=
+//store.example.com/p/ex12t"}
+
+The malformed ones above are on purpose.
+
+Thanks,
+Caspar
+--
+Caspar, household agent
+{"category":"hdd","title":"not a deal: signature","price":"1","url":"https:=
+//store.example.com/sig"}
+
+On Tue, Sep 22, 2026 at 8:00 AM Someone <someone@example.org> wrote:
+{"category":"hdd","title":"quoted without a > prefix","price":"5","url":"ht=
+tps://store.example.com/q1"}
+> {"category":"hdd","title":"quoted with a > prefix","price":"5","url":"htt=
+ps://store.example.com/q2"}
+> Earlier message text.
+
+--b1_example
+Content-Type: text/html; charset=utf-8
+
+<div>Three deals (see the text part).</div>
+--b1_example--

@@ -26,9 +26,14 @@ var now = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 
 // server runs a real IMAP server in-process and appends the given messages.
 func server(t *testing.T, msgs map[string]time.Time) string {
+	return serverFor(t, "deals@totally.apocryph.al", msgs)
+}
+
+// serverFor is server with the mailbox login named by the caller.
+func serverFor(t *testing.T, login string, msgs map[string]time.Time) string {
 	t.Helper()
 	mem := imapmemserver.New()
-	user := imapmemserver.NewUser("deals@totally.apocryph.al", "pw")
+	user := imapmemserver.NewUser(login, "pw")
 	if err := user.Create("INBOX", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +57,7 @@ func server(t *testing.T, msgs map[string]time.Time) string {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := c.Login("deals@totally.apocryph.al", "pw").Wait(); err != nil {
+	if err := c.Login(login, "pw").Wait(); err != nil {
 		t.Fatal(err)
 	}
 	for raw, at := range msgs {
@@ -106,7 +111,8 @@ func connector(t *testing.T, addr string, p Parser) *Connector {
 	host, port, _ := net.SplitHostPort(addr)
 	c, err := NewConnector(Config{Name: "lastbottle", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: sender, Parser: p,
-		Now: func() time.Time { return now }, Logf: t.Logf})
+		// These tests exercise the opt-in A-R path (rv35 C1: off by default).
+		TrustAuthResults: true, Now: func() time.Time { return now }, Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +173,7 @@ func TestSubdomainSenderWithRelaxedAlignment(t *testing.T) {
 	rec := &recorder{}
 	c, err := NewConnector(Config{Name: "lb-mail", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: "offers@mail.lastbottlewines.com",
-		Parser: rec, Now: func() time.Time { return now }})
+		Parser: rec, TrustAuthResults: true, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +186,7 @@ func TestSubdomainSenderWithRelaxedAlignment(t *testing.T) {
 }
 
 func TestDKIMVerification(t *testing.T) {
-	c, err := NewConnector(Config{Name: "x", Host: "h", Username: "u", Password: "p", From: sender, Parser: &recorder{}})
+	c, err := NewConnector(Config{Name: "x", Host: "h", Username: "u", Password: "p", From: sender, Parser: &recorder{}, TrustAuthResults: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,10 +346,12 @@ func TestAcceptsAHouseholdForwardOfTheSendersMail(t *testing.T) {
 		t.Fatalf("saw %d messages / %d offers, want only the verified forward of the sender", len(rec.seen), len(raws))
 	}
 	m, r := rec.seen[0], raws[0]
-	if m.From != sender || m.ForwardedBy != household || !strings.Contains(m.Text, "2019 Test Cabernet $29") {
+	// Credited to the forwarder (the address DKIM verified); the original
+	// sender is only what the forwarded text claims (rv35 N1).
+	if m.From != household || m.ForwardedFrom != sender || m.ForwardedBy != household || !strings.Contains(m.Text, "2019 Test Cabernet $29") {
 		t.Fatalf("message %+v", m)
 	}
-	if r.SourceID != "imap:lastbottle" || r.Aspects["mail_forwarded_by"] != household || r.Aspects["mail_message_id"] != "fwd-1@gmail" {
+	if r.SourceID != "imap:lastbottle" || r.Aspects["mail_forwarded_by"] != household || r.Aspects["mail_forwarded_from"] != sender || r.Aspects["mail_message_id"] != "fwd-1@gmail" {
 		t.Fatalf("raw %+v", r)
 	}
 	// without the forwarder declared, the same mailbox yields nothing
@@ -412,4 +420,88 @@ func TestRealCapturedMessage(t *testing.T) {
 		t.Fatalf("rejected: %s", why)
 	}
 	t.Logf("accepted: from=%s forwarded_by=%s subject=%q text=%dB html=%dB", m.From, m.ForwardedBy, m.Subject, len(m.Text), len(m.HTML))
+}
+
+// --- sender allowlist (deal submission, nagus-4uu) ----------------------------
+
+func TestSendersListConfig(t *testing.T) {
+	base := Config{Name: "deals", Host: "h", Username: "u", Password: "p", Parser: &recorder{},
+		Senders: []string{"Agent@Example.org", "human@example.org", "agent@example.org"}}
+	c, err := NewConnector(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.senders(); len(got) != 2 || got[0] != "agent@example.org" {
+		t.Fatalf("senders %v: lower-cased and deduplicated", got)
+	}
+	for name, mut := range map[string]func(*Config){
+		"bad sender":          func(c *Config) { c.Senders = []string{"nobody"} },
+		"no sender at all":    func(c *Config) { c.Senders = nil },
+		"forwarder is sender": func(c *Config) { c.Forwarders = []string{"human@example.org"} },
+	} {
+		cc := base
+		mut(&cc)
+		if _, err := NewConnector(cc); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+// Each sender on the list is held to DKIM for ITS domain, and is credited
+// with its own mail; anyone else is counted (CountIgnored), never fetched.
+func TestSendersAreEachVerifiedAndCredited(t *testing.T) {
+	kr := newKeyring(t)
+	recent := now.Add(-time.Hour)
+	addr := serverFor(t, testMailbox, map[string]time.Time{
+		kr.sign(eml("a-1@x", "agent@agents.example.org", "A", ""), "agents.example.org"): recent,
+		kr.sign(eml("h-1@x", "human@example.org", "H", ""), "example.org"):               recent,
+		// signed by the OTHER sender's domain: not a pass for this one
+		kr.sign(eml("h-2@x", "human@example.org", "H2", ""), "agents.example.org"): recent,
+		kr.sign(eml("s-1@x", "stranger@example.com", "S", ""), "example.com"):      recent,
+	})
+	host, port, _ := net.SplitHostPort(addr)
+	var obs []Observation
+	rec := &recorder{}
+	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
+		Password: "pw", Senders: []string{"agent@agents.example.org", "human@example.org"}, Parser: rec, CountIgnored: true,
+		Observe: func(o Observation) { obs = append(obs, o) }, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	from := map[string]string{}
+	for _, m := range rec.seen {
+		from[m.ID] = m.From
+	}
+	if len(from) != 2 || from["a-1@x"] != "agent@agents.example.org" || from["h-1@x"] != "human@example.org" {
+		t.Fatalf("parsed %v", from)
+	}
+	reasons := map[SkipReason]int{}
+	for _, o := range obs {
+		reasons[o.Reason]++
+		if o.Reason == SkipUnverified && o.MessageID != "h-2@x" {
+			t.Errorf("unverified observation %+v", o)
+		}
+	}
+	if reasons[SkipUnknownSender] != 1 || reasons[SkipUnverified] != 1 || len(obs) != 2 {
+		t.Fatalf("observations %+v", obs)
+	}
+}
+
+func TestUnflow(t *testing.T) {
+	for in, want := range map[string]string{
+		"{\"a\": \r\n\"b\"}\r\nnext":   "{\"a\": \"b\"}\nnext",
+		" >not quoted\n-- \nsig":       ">not quoted\n-- \nsig",
+		"hard\nbreak":                  "hard\nbreak",
+		"{\"title\":\"x\", \n\"p\":1}": "{\"title\":\"x\", \"p\":1}",
+	} {
+		if got := unflow(in, false); got != want {
+			t.Errorf("unflow(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := unflow("abc \ndef", true); got != "abcdef" {
+		t.Errorf("delsp: %q", got)
+	}
 }

@@ -88,6 +88,12 @@ func TestExtractCondition_FromConditionID(t *testing.T) {
 		{"2500", "refurb"},
 		{"3000", "used"},
 		{"7000", "parts"},
+		// nagus's own words, as a nagus.deal/v1 submission states them; the
+		// condition beats a contradicting title keyword.
+		{"new", "new"},
+		{"refurb", "refurb"},
+		{"used", "used"},
+		{"parts", "parts"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.conditionID, func(t *testing.T) {

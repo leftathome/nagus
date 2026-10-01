@@ -88,4 +88,23 @@ spec:
           annotations:
             summary: "nagus has not finished a clean quark resolution pass in {{ "{{ $value | humanizeDuration }}" }}"
             description: "New offers are not getting product ids. See the nagus log lines starting 'enrich:'. Usual causes: quark down or slow (quark-j7t), NetworkPolicy, or the token."
+    # Deal submission by email (nagus.deal/v1, nagus-4uu). The series exist
+    # only while a deal-jsonl-v1 source is configured. Rejected lines are the
+    # sender's problem (deal_submission_status tells them) and unknown senders
+    # are expected spam on an open channel: neither alerts. A message From an
+    # ALLOWLISTED address that fails DKIM is rare and needs a human either way.
+    - name: nagus.deals
+      interval: 1m
+      rules:
+        - alert: NagusDealSubmissionUnverified
+          # A gauge over ARRIVAL time (IMAP INTERNALDATE), not a counter: the
+          # counter recounts the whole lookback window after a restart and
+          # would re-fire for old mail (rv35 N7). Resolves 24h after the last
+          # such message arrived.
+          expr: max by (namespace) (nagus_deal_unverified_last_24h{namespace="{{ $ns }}"}) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "a deal submission claimed an allowlisted sender without a DKIM pass"
+            description: "Either a spoof attempt on the deals mailbox, or a household sender's domain stopped DKIM-signing and its deals are being dropped. The nagus log line 'REJECTED a message claiming to be from' names the address and domain."
 {{- end }}

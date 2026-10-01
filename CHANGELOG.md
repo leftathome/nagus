@@ -40,6 +40,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **imap sources no longer trust Authentication-Results headers by default**
+  (rv35 C1). The receiving MX for the deals mailbox writes no A-R header, so
+  the "topmost" one was whatever the sender wrote, and an unsigned message
+  carrying a forged `dkim=pass` was accepted. Only nagus's own DKIM
+  verification admits a message now; a source behind an MX that does prepend
+  A-R can opt back in with `imapTrustAuthResults: true` (refused on deal
+  sources). No imap source is configured in production, so nothing changes
+  there.
+- **imap: a message with a duplicate From, Sender, Subject or Message-ID is
+  refused** (rv35 C2: DKIM verifies the bottom-most From, the reader took the
+  top one). Each candidate's envelope From is checked before its body is
+  fetched (IMAP `SEARCH FROM` is a substring match), a hand-forward's
+  `Message.From` is the forwarder (the named original is
+  `Message.ForwardedFrom`, aspect `mail_forwarded_from`), and
+  `Message.Received` is the IMAP INTERNALDATE.
+- **imap: DKIM alignment has a public-suffix floor** (a signature by `org` or
+  `co.uk` no longer aligns with `example.org`; new dependency
+  `golang.org/x/net/publicsuffix`), **key lookups are bounded** (5s each, 15s
+  per message) and **a permanently refused message is remembered per UID for
+  24h** instead of being fetched and re-verified on every poll of the
+  lookback window. `Message.Reply` reports In-Reply-To / References.
 - **`/mcp` is served by go-service-kit's `mcp` package (v0.3.0)** (quark
   QUARK-06). The hand-rolled JSON-RPC core in `cmd/nagus/mcp.go` is deleted;
   what remains is one `mcp.NewTool` per tool and one `mcp.New`. **The agent
@@ -322,6 +343,73 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Deal submission by email: `nagus.deal/v1` JSONL** (nagus-4uu; design
+  `docs/design/2026-09-26-deal-submission-jsonl.md`, humans
+  `docs/deal-submission.md`, agent skill `docs/deal-submission-skill.md`).
+  Household humans and agents on an allowlist email the deals mailbox with one
+  JSON deal per line in the text/plain body; each line is decoded strictly and
+  on its own (unknown or case-variant fields, bad prices, non-https urls
+  refuse that line only), mapped onto a listing, and goes through the glovebox
+  gate, the existing wine/hdd extractors and the quark hint path (hdd:
+  brand/mpn/gtin; wine: producer + title). HTML-only mail is refused whole.
+  Limits: 50 deal lines per message, 4 KiB per line. Idempotent by
+  (Message-ID, line); the mailbox is still never modified.
+  - Config: an `imap` source with `imapParser: deal-jsonl-v1`, one per
+    enabled category (`wine`, `hdd`), all with the same `imapSenders`
+    (the allowlist, which replaces `imapFrom`), `imapForwarders`,
+    `imapSenderAliases` (address -> principal, stamped on offers as
+    `submitted_by`) and optional `dealSubmitTo` (else
+    `NAGUS_IMAP_USERNAME`). Startup refuses inconsistent deal sources.
+  - `GET /schemas/deal/v1.json`: the JSON Schema, generated from the Go struct
+    and committed at `internal/deal/deal-v1.schema.json` (a test fails on drift).
+  - MCP tools (read-only): `deal_submission_spec` (schema, examples, mailbox
+    from config, when to use it, limits, reason codes) and
+    `deal_submission_status` (per-line outcomes and reason codes by
+    Message-ID, with offer and product ids; by principal, codes and counts
+    only; never line content). openclaw sees them once its toolFilter lists
+    them (gitops).
+  - Metrics `nagus_deal_submissions_total{outcome}` and
+    `nagus_deal_submissions_lines_total{outcome,reason}`; alert
+    `NagusDealSubmissionUnverified` (chart 0.13.0).
+  - imap connector: `Senders` (a DKIM-verified allowlist, each sender held to
+    its own domain and credited with its own mail), `CountIgnored`,
+    `Observe`, and RFC 3676 `format=flowed` text is un-flowed.
+  - The hdd extractor also accepts nagus's own condition words (`new`,
+    `refurb`, `used`, `parts`) as a source condition.
+  - Deferred: replying to the sender by SMTP (nagus-9xo).
+  - Hardened after the security review of !35 (rv35; table in the design doc):
+    deal lines are keyed by (verified sender, Message-ID); a forward is
+    credited to the forwarder; at most 50 lines, 256 KiB and 10,000 lines of
+    a body are read and the overflow is one summary entry; the `url` is
+    gated (aspect `deal_url_text`) and must be ASCII, at most 512 characters,
+    on a public DNS host; a gate-refused drive's brand/mpn/gtin are withheld
+    from quark (`Ingester.HintsNeedGate`); duplicate JSON keys, a BOM line and
+    invisible/bidi characters are refused; status never distinguishes an
+    unverified message from an unknown one and takes a principal ALIAS only;
+    the alert reads the gauge `nagus_deal_unverified_last_24h`. Mailbox
+    retention is deferred (nagus-kvk).
+  - Hardened again after the re-review (rv35b): a plain sender's REPLY
+    (In-Reply-To / References) is refused whole (`reply_not_accepted`); an
+    item's `source_key` is an opaque hash (`deal-<32 hex>`), no longer
+    carrying the sender address and Message-ID; a url with an invalid or
+    over-nested percent-escape is `bad_url` and the gate also reads a
+    separator-normalised view; the url must be lower-case `https://` on a
+    lower-case public DNS host with no port but 443 (`deal.URLPattern`, the
+    schema's pattern); text fields refuse every space but U+0020, line and
+    paragraph separators, private-use, noncharacter and unassigned code
+    points and combining-mark floods; a forward marker counts only as the
+    first boundary of a forwarder's message; a body cut by the scan cap is
+    reported `scan_truncated`; skipped-mail observations are keyed by UID and
+    bounded; a duplicate-identity message counts as `unverified`.
+  - Third pass (rv35c): in `title`, `note`, `seller` and `brand`, tabs and
+    every space separator (NBSP, narrow NBSP, typographic spaces) are
+    normalised to a plain space before validation instead of refusing the
+    line (`url`, `mpn`, `gtin` and the other identity-like fields are not);
+    U+FFFC and U+1D159 are refused; `.localdomain`, `.intranet`, `.private`
+    and `.cluster` hosts are refused; unverified observations are evicted
+    last; the DKIM "temporary" flag is atomic. Open: nagus-0ji (forwarder
+    path; keep `imapForwarders` unset until real forwards are captured),
+    nagus-eg2 (tarpit DNS re-verified each poll).
 - **Title text hints for quark** (quark QUARK-02). A source may set
   `quarkTextHints: true`: when it states no product identifiers (eBay search
   results carry the part number only in the title), the listing TITLE is sent
