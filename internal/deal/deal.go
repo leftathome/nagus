@@ -235,7 +235,7 @@ var LineReasons = []struct {
 	{ReasonBadPrice, true, fmt.Sprintf("price is not a positive amount with at most 2 decimals, up to %d", MaxPriceMajor)},
 	{ReasonBadCurrency, true, "currency is not an ISO 4217 code such as USD"},
 	{ReasonBadURL, true, "url is not a lower-case, plain-ASCII https URL of at most 512 characters on a public DNS host (no IP address, no port but 443), or it has an invalid or over-nested percent-escape"},
-	{ReasonBadValue, true, "a value is out of range, too long, or contains control, invisible or unusual-space characters (zero-width, bidi overrides, non-breaking space, line separators)"},
+	{ReasonBadValue, true, "a value is out of range, too long, or contains control or invisible characters (zero-width, bidi overrides, line separators); in title, note, seller and brand, tabs and non-breaking spaces are fine (they become plain spaces)"},
 	{ReasonGateRefused, true, "the glovebox sanitize gate refused the line's text"},
 	{ReasonNotInCategory, true, "the category extractor says it is not an item of that category (e.g. an SSD as hdd)"},
 	{ReasonExtractFailed, true, "the category extractor could not form an item"},
@@ -284,10 +284,32 @@ func Decode(line []byte) (Deal, Reason) {
 			return Deal{}, ReasonBadJSON
 		}
 	}
+	// Free text is space-normalised BEFORE validation (rv35c R5): what is
+	// validated, stored and shown to the gate is the normalised text.
+	d.Title, d.Note, d.Seller, d.Brand = normSpace(d.Title), normSpace(d.Note), normSpace(d.Seller), normSpace(d.Brand)
 	if r := d.validate(); r != ReasonNone {
 		return Deal{}, r
 	}
 	return d, ReasonNone
+}
+
+// normSpace turns every space separator (Unicode Zs: NBSP, narrow NBSP, the
+// typographic and ideographic spaces) and the tab into U+0020, collapses
+// runs and trims the ends. Titles copied from retail pages routinely carry
+// an NBSP ("2015 : 75 cl"), and refusing them would refuse real deals. It is
+// applied to the FREE-TEXT fields only -- title, note, seller, brand -- and
+// never to url, mpn, gtin, currency, price or the enums, where an odd space
+// is an error. Line and paragraph separators, controls and format
+// characters are NOT spaces here: they are left alone and cleanText refuses
+// them.
+func normSpace(s string) string {
+	spaced := strings.Map(func(r rune) rune {
+		if r == '\t' || unicode.Is(unicode.Zs, r) {
+			return ' '
+		}
+		return r
+	}, s)
+	return strings.Join(strings.FieldsFunc(spaced, func(r rune) bool { return r == ' ' }), " ")
 }
 
 // checkKeys walks the top-level object: every key must be a Deal field,
@@ -418,7 +440,8 @@ var urlRe = regexp.MustCompile(URLPattern)
 // RefusedTLDs are final host labels that are never a public shop: reserved,
 // private-network and cluster-internal names. ".example" is reserved too but
 // stays usable: it is what documentation and tests use.
-var RefusedTLDs = []string{"local", "localhost", "internal", "lan", "home", "corp", "svc", "test", "invalid", "arpa", "onion"}
+var RefusedTLDs = []string{"local", "localhost", "localdomain", "internal", "intranet", "private", "lan", "home", "corp",
+	"svc", "cluster", "test", "invalid", "arpa", "onion"}
 
 // httpsURL reports whether s is an acceptable deal url (rv35 I2, rv35b
 // NEW-1, NEW-7): URLPattern, at most MaxURLLen, no backslash, a final label
@@ -448,8 +471,10 @@ const MaxCombiningMarks = 4
 // space. Everything else is refused (rv35 N4, rv35b NEW-5): controls; format
 // and other default-ignorable characters (bidi overrides and isolates,
 // zero-width space and joiners, soft hyphen, BOM, Hangul fillers, variation
-// selectors, tag characters); every separator but U+0020 (NBSP, the
-// typographic spaces, U+2028/U+2029); the Braille blank; private-use,
+// selectors, tag characters); every separator but U+0020 (U+2028/U+2029,
+// and NBSP and the typographic spaces wherever normSpace has not already
+// turned them into U+0020); blank symbols (Braille blank, object
+// replacement, musical null notehead); private-use,
 // surrogate, noncharacter and unassigned code points; the replacement
 // character; a combining mark with no base, or more than MaxCombiningMarks
 // on one. They reach agents and Telegram, where they hide, reorder or break
@@ -463,7 +488,7 @@ func cleanText(s string, max int) bool {
 		switch {
 		case r == ' ':
 			base, marks = false, 0
-		case r == utf8.RuneError || r == 0x2800 || invisible(r):
+		case r == utf8.RuneError || blank(r) || invisible(r):
 			return false
 		case unicode.IsMark(r):
 			marks++
@@ -478,6 +503,10 @@ func cleanText(s string, max int) bool {
 	}
 	return true
 }
+
+// blank is a symbol that renders as nothing: the Braille pattern blank, the
+// object replacement character and the musical null notehead.
+func blank(r rune) bool { return r == 0x2800 || r == 0xFFFC || r == 0x1D159 }
 
 // invisible is Cf, Other_Default_Ignorable_Code_Point or a variation
 // selector: together, Unicode's Default_Ignorable_Code_Point set.

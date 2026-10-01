@@ -111,6 +111,28 @@ func TestDKIMLookupTimesOut(t *testing.T) {
 	}
 }
 
+// rv35c R1: several signatures whose key lookups all time out are verified
+// concurrently; reporting "temporary" must be race-free (run with -race).
+func TestManyTimingOutSignaturesAreRaceFree(t *testing.T) {
+	kr := newKeyring(t)
+	raw := eml("slow3@x", "household@example.org", "A", "")
+	for _, d := range []string{"example.org", "one.example", "two.example", "three.example", "four.example"} {
+		raw = kr.sign(raw, d)
+	}
+	block := make(chan struct{})
+	defer close(block)
+	var calls atomic.Int64
+	c := dealConn(t, []string{"household@example.org"}, nil, func(c *Config) {
+		c.DNSTimeout = 40 * time.Millisecond
+		c.LookupTXT = func(string) ([]string, error) { calls.Add(1); <-block; return nil, nil }
+	})
+	start := time.Now()
+	_, why, temporary := c.verifyMessage([]byte(raw))
+	if why == "" || !temporary || calls.Load() < 2 || time.Since(start) > 3*time.Second {
+		t.Fatalf("why=%q temporary=%v lookups=%d elapsed=%v", why, temporary, calls.Load(), time.Since(start))
+	}
+}
+
 // NEW-10: an unverified message is verified once, not on every poll for the
 // whole lookback window.
 func TestUnverifiedVerdictIsRemembered(t *testing.T) {

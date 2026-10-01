@@ -273,17 +273,32 @@ func (l *Ledger) ObserveConnector(key, _ /*messageID*/, outcome string, received
 // evictObserved drops the tenth of the observations that ARRIVED longest ago
 // (rv35b NEW-9). An evicted message still in the lookback window is counted
 // again on the next poll; the bound matters more than that. Callers hold mu.
+//
+// Unverified observations go LAST (rv35c R3): they are what the alert gauge
+// reads, and mail from unknown senders carries no arrival time (it is never
+// fetched), so by arrival alone a flood of it would push the unverified
+// entries out and make the gauge dip mid-poll.
 func (l *Ledger) evictObserved() {
-	times := make([]time.Time, 0, len(l.once))
-	for _, o := range l.once {
-		times = append(times, o.received)
+	type entry struct {
+		key        string
+		unverified bool
+		received   time.Time
 	}
-	sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
-	cut := times[len(times)/10]
+	all := make([]entry, 0, len(l.once))
 	for k, o := range l.once {
-		if !o.received.After(cut) {
-			delete(l.once, k)
+		all = append(all, entry{k, o.outcome == MsgUnverified, o.received})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].unverified != all[j].unverified {
+			return !all[i].unverified
 		}
+		if !all[i].received.Equal(all[j].received) {
+			return all[i].received.Before(all[j].received)
+		}
+		return all[i].key < all[j].key
+	})
+	for _, e := range all[:max(1, len(all)/10)] {
+		delete(l.once, e.key)
 	}
 }
 

@@ -44,7 +44,7 @@ var meta = map[string]fieldMeta{
 		Const: SchemaID},
 	"category": {Description: "Which nagus category the deal is for. Each needs a deal source enabled for it.",
 		Enum: Categories},
-	"title": {Description: "What is for sale, as the store names it: producer, wine, vintage, size; or brand, model, capacity. Free text; untrusted.",
+	"title": {Description: "What is for sale, as the store names it: producer, wine, vintage, size; or brand, model, capacity. Free text; untrusted. Tabs and non-breaking or typographic spaces become plain spaces, runs collapse, ends are trimmed (also in note, seller and brand); the length limit applies after that.",
 		MinLength: 1, MaxLength: MaxTitleLen},
 	"price": {Description: "The price in major units (dollars, not cents), as a decimal string \"24.99\" or a JSON number 24.99. At most 2 decimals; no sign, exponent or separators.",
 		Pattern: PricePattern},
@@ -198,7 +198,9 @@ func GenerateSchema() ([]byte, error) {
 	root.set("description", fmt.Sprintf(
 		"One deal submitted to the nagus deals mailbox. Send one object per line in the text/plain body; "+
 			"at most %d deal lines per message and %d bytes per line. Unknown fields refuse the line. "+
-			"wine-only: vintage, bottle_ml. hdd-only: mpn, capacity_tb, condition.",
+			"wine-only: vintage, bottle_ml. hdd-only: mpn, capacity_tb, condition. "+
+			"Patterns are ECMA-262, as JSON Schema specifies: $ is the end of the string. "+
+			"(Python's re also lets $ match before a final newline; nagus itself refuses such a value.)",
 		MaxLinesPerMessage, MaxLineBytes))
 	root.set("type", "object")
 	root.set("required", required)

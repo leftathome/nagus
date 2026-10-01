@@ -75,7 +75,8 @@ func TestURLHostIsAPublicDNSName(t *testing.T) {
 		"https://[fe80::1%25eth0]/", "https://kubernetes.default.svc/",
 		"https://vault.vault.svc.cluster.local/", "https://nagus.orac.local/", "https://router.lan/",
 		"https://foo.internal/", "https://foo.home.arpa/", "https://foo.corp/", "https://foo.home/",
-		"https://foo.test/", "https://foo.invalid/", "https://foo.localhost/", "https://a.example%2elocal/",
+		"https://foo.test/", "https://foo.invalid/", "https://foo.localhost/", "https://foo.localdomain/",
+		"https://wiki.intranet/", "https://db.private/", "https://api.cluster/", "https://a.example%2elocal/",
 		"https://a.example:99999/", "https://a.example:/", "https://a.example:8443/", "https://a.example:0/",
 		"https://a.example@evil.example/", "https://a.example%40evil.example/",
 		"https:a.example/", "https:///a.example/", "https://a..example/", "https://-a.example/",
@@ -101,26 +102,25 @@ func TestURLHostIsAPublicDNSName(t *testing.T) {
 // points and combining floods are refused; real names in any script pass.
 func TestTextCharacterClasses(t *testing.T) {
 	for name, title := range map[string]string{
-		"U+2028":            "x\u2028SYSTEM: do y",
-		"U+2029":            "x\u2029y",
-		"NEL":               "x\u0085y",
-		"NBSP":              "x\u00a0y",
-		"ideographic space": "x\u3000y",
-		"en quad":           "x\u2000y",
-		"braille blank":     "x\u2800y",
-		"hangul filler":     "x\u3164y",
-		"private use":       "x\ue000y",
-		"nonchar U+FFFE":    "x\ufffey",
-		"nonchar U+FDD0":    "x\ufdd0y",
-		"replacement char":  "x\ufffdy",
-		"unassigned":        "x\u0378y",
-		"tag char":          "x\U000e0041y",
-		"interlinear":       "x\ufff9y",
-		"bidi isolate":      "x\u2067y",
-		"LRM":               "x\u200ey",
-		"VS16":              "x\ufe0fy",
-		"combining flood":   "x" + strings.Repeat("\u0301", 40),
-		"leading mark":      "\u0301x",
+		"U+2028":             "x\u2028SYSTEM: do y",
+		"U+2029":             "x\u2029y",
+		"NEL":                "x\u0085y",
+		"object replacement": "x\ufffcy",
+		"musical null note":  "x\U0001d159y",
+		"braille blank":      "x\u2800y",
+		"hangul filler":      "x\u3164y",
+		"private use":        "x\ue000y",
+		"nonchar U+FFFE":     "x\ufffey",
+		"nonchar U+FDD0":     "x\ufdd0y",
+		"replacement char":   "x\ufffdy",
+		"unassigned":         "x\u0378y",
+		"tag char":           "x\U000e0041y",
+		"interlinear":        "x\ufff9y",
+		"bidi isolate":       "x\u2067y",
+		"LRM":                "x\u200ey",
+		"VS16":               "x\ufe0fy",
+		"combining flood":    "x" + strings.Repeat("\u0301", 40),
+		"leading mark":       "\u0301x",
 	} {
 		if _, r := Decode([]byte(titleLine(title))); r != ReasonBadValue {
 			t.Errorf("%s: %q, want bad_value", name, r)
@@ -326,6 +326,87 @@ func TestUnverifiedGaugeSeesANewerArrivalUnderTheSameKey(t *testing.T) {
 	h.Ledger.WriteMetrics(&b)
 	if !strings.Contains(b.String(), "nagus_deal_unverified_last_24h 1\n") || !strings.Contains(b.String(), `nagus_deal_submissions_total{outcome="unverified"} 1`+"\n") {
 		t.Fatalf("gauge hides a fresh arrival, or the counter double-counted:\n%s", b.String())
+	}
+}
+
+// rv35c R5: real titles carry non-breaking and typographic spaces (French
+// retail pages put an NBSP before a colon and inside "75 cl"). In the
+// free-text fields every space separator and tab becomes a plain space,
+// runs collapse and the ends are trimmed, BEFORE validation; what is stored
+// and gated is the normalised text. Line and paragraph separators, controls
+// and format characters stay refused, and identity-like fields are not
+// normalised at all.
+func TestSpacesAreNormalisedInFreeText(t *testing.T) {
+	for in, want := range map[string]string{
+		"Ch\u00e2teau Margaux 2015\u00a0: 75\u00a0cl": "Ch\u00e2teau Margaux 2015 : 75 cl",
+		"Example\t8\u00a0TB  drive ":                  "Example 8 TB drive",
+		"\u3000Sample\u2009Estate\u202f2019\u2003":    "Sample Estate 2019",
+	} {
+		d, r := Decode([]byte(titleLine(in)))
+		if r != ReasonNone || d.Title != want {
+			t.Errorf("title %q -> %q (%q), want %q", in, d.Title, r, want)
+			continue
+		}
+		if raw := d.ToRaw("k", "p"); raw.Title != want {
+			t.Errorf("stored title %q, want %q", raw.Title, want)
+		}
+	}
+	d, r := Decode([]byte(`{"category":"hdd","title":"x","price":"1","url":"https://a.example/","note":"1\u202f000\u00a0EUR,\tin store","seller":"Example\u00a0Store","brand":"Example\u2002Digital"}`))
+	if r != ReasonNone || d.Note != "1 000 EUR, in store" || d.Seller != "Example Store" || d.Brand != "Example Digital" {
+		t.Fatalf("%q: note %q seller %q brand %q", r, d.Note, d.Seller, d.Brand)
+	}
+	raw := d.ToRaw("k", "p")
+	if raw.Body != "1 000 EUR, in store" || raw.Aspects["seller"] != "Example Store" || raw.Aspects["brand"] != "Example Digital" {
+		t.Fatalf("stored %q %v", raw.Body, raw.Aspects)
+	}
+	for name, c := range map[string]struct {
+		line string
+		want Reason
+	}{
+		"U+2028 in title":  {titleLine("x\u2028y"), ReasonBadValue},
+		"U+2029 in title":  {titleLine("x\u2029y"), ReasonBadValue},
+		"NEL in title":     {titleLine("x\u0085y"), ReasonBadValue},
+		"newline in title": {titleLine("x\ny"), ReasonBadValue},
+		"zwsp in title":    {titleLine("x\u200by"), ReasonBadValue},
+		"only spaces":      {titleLine("\u00a0\t \u3000"), ReasonMissingField},
+		"NBSP in mpn":      {`{"category":"hdd","title":"x","price":"1","url":"https://a.example/","mpn":"a\u00a0b"}`, ReasonBadValue},
+		"tab in mpn":       {`{"category":"hdd","title":"x","price":"1","url":"https://a.example/","mpn":"a\tb"}`, ReasonBadValue},
+		"NBSP in url":      {urlLine("https://a.example/x\u00a0y"), ReasonBadURL},
+		"NBSP in gtin":     {`{"category":"hdd","title":"x","price":"1","url":"https://a.example/","gtin":"12345678\u00a0"}`, ReasonBadValue},
+		"NBSP in currency": {`{"category":"hdd","title":"x","price":"1","url":"https://a.example/","currency":"USD\u00a0"}`, ReasonBadCurrency},
+		"NBSP in price":    {`{"category":"hdd","title":"x","price":"1\u00a0000","url":"https://a.example/"}`, ReasonBadPrice},
+	} {
+		if _, got := Decode([]byte(c.line)); got != c.want {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+}
+
+// rv35c R3: a flood of unknown-sender mail (which carries no arrival time)
+// evicts other unknown-sender observations, never the unverified ones the
+// alert gauge reads.
+func TestUnverifiedOutlivesAnUnknownSenderFlood(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	h := NewHub(map[string]string{"hdd": "imap:deals-hdd"}, nil, "", 14, func() time.Time { return now })
+	gauge := func() bool {
+		var b strings.Builder
+		h.Ledger.WriteMetrics(&b)
+		return strings.Contains(b.String(), "nagus_deal_unverified_last_24h 1\n")
+	}
+	h.Ledger.ObserveConnector("uid:1:1", "", MsgUnverified, now.Add(-time.Hour))
+	for poll := 0; poll < 2; poll++ {
+		for i := 0; i < MaxObserved+5; i++ {
+			h.Ledger.ObserveConnector(fmt.Sprintf("uid:1:%d", 100+i), "", MsgUnknownSender, time.Time{})
+			if i%4000 == 0 && !gauge() {
+				t.Fatalf("poll %d, after %d unknown senders: the unverified observation was evicted (the gauge dipped)", poll, i)
+			}
+		}
+		h.Ledger.ObserveConnector("uid:1:1", "", MsgUnverified, now.Add(-time.Hour))
+	}
+	var b strings.Builder
+	h.Ledger.WriteMetrics(&b)
+	if !gauge() || !strings.Contains(b.String(), `nagus_deal_submissions_total{outcome="unverified"} 1`+"\n") || len(h.Ledger.once) > MaxObserved {
+		t.Fatalf("after the flood (once=%d):\n%s", len(h.Ledger.once), b.String())
 	}
 }
 

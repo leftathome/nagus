@@ -74,6 +74,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -584,12 +585,14 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 // DNS lookup that failed or timed out): only permanent refusals are
 // remembered.
 func (c *Connector) verifyMessage(raw []byte) (Message, string, bool) {
-	temporary := false
+	// Atomic: go-msgauth verifies a message's signatures concurrently, so
+	// several key lookups may report a temporary failure at once (rv35c R1).
+	var temporary atomic.Bool
 	m, why := c.verifyWith(raw, &temporary)
-	return m, why, temporary && why == whyNoDKIM
+	return m, why, temporary.Load() && why == whyNoDKIM
 }
 
-func (c *Connector) verifyWith(raw []byte, temporary *bool) (Message, string) {
+func (c *Connector) verifyWith(raw []byte, temporary *atomic.Bool) (Message, string) {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
 		return Message{}, "unparseable"
@@ -754,7 +757,7 @@ func htmlText(s string) string {
 // Key lookups are bounded: DNSTimeout each, and three times that for the
 // whole message (rv35b NEW-10). *temporary is set when a lookup failed
 // temporarily or timed out, so the caller does not remember the refusal.
-func (c *Connector) dkimSigned(raw []byte, domain string, temporary *bool) bool {
+func (c *Connector) dkimSigned(raw []byte, domain string, temporary *atomic.Bool) bool {
 	norm := bytes.ReplaceAll(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))
 	verifs, err := dkim.VerifyWithOptions(bytes.NewReader(norm), &dkim.VerifyOptions{LookupTXT: c.boundedLookup(temporary), MaxVerifications: 5})
 	if err != nil {
@@ -782,7 +785,7 @@ func coversFrom(keys []string) bool {
 // boundedLookup wraps the DKIM key lookup with a per-lookup timeout and a
 // per-message budget. A lookup that does not answer in time is a TEMPORARY
 // failure.
-func (c *Connector) boundedLookup(temporary *bool) func(string) ([]string, error) {
+func (c *Connector) boundedLookup(temporary *atomic.Bool) func(string) ([]string, error) {
 	per := c.cfg.DNSTimeout
 	if per <= 0 {
 		per = DefaultDNSTimeout
@@ -793,7 +796,7 @@ func (c *Connector) boundedLookup(temporary *bool) func(string) ([]string, error
 		wait := min(per, time.Until(deadline))
 		timeout := &net.DNSError{Err: "dkim key lookup timed out", Name: name, IsTimeout: true, IsTemporary: true}
 		if wait <= 0 {
-			*temporary = true
+			temporary.Store(true)
 			return nil, timeout
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), wait)
@@ -816,11 +819,11 @@ func (c *Connector) boundedLookup(temporary *bool) func(string) ([]string, error
 		case a := <-ch:
 			var ne net.Error
 			if errors.As(a.err, &ne) && (ne.Timeout() || isTemporary(a.err)) {
-				*temporary = true
+				temporary.Store(true)
 			}
 			return a.txt, a.err
 		case <-ctx.Done():
-			*temporary = true
+			temporary.Store(true)
 			return nil, timeout
 		}
 	}
