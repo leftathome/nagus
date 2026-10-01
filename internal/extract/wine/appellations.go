@@ -224,10 +224,17 @@ var eventWords = setOfWords("dinner", "lunch", "brunch", "tasting", "tastings", 
 var lodgingWords = setOfWords("hotel", "hotels", "inn", "resort", "resorts", "spa", "wedding", "weddings",
 	"venue", "venues", "rental", "rentals")
 
-// lodgingAfter reports a lodging word in words at or after index from.
+// labelWords, right after a lodging word, make it the name of a label, not a
+// venue (nagus-dwq): "Chianti Classico Riserva Wedding Edition", "Napa Valley
+// Hotel Series". Every tier: limiting lodging to broad names instead would
+// make "Rioja Wedding Venue" and "Chianti Inn Stay" wine.
+var labelWords = setOfWords("edition", "editions", "label", "labels", "cuvee", "release", "series")
+
+// lodgingAfter reports a lodging word in words at or after index from that
+// is not a label's name.
 func lodgingAfter(words []string, from int) bool {
-	for _, w := range words[min(from, len(words)):] {
-		if lodgingWords[w] {
+	for i := min(from, len(words)); i < len(words); i++ {
+		if lodgingWords[words[i]] && !(i+1 < len(words) && labelWords[words[i+1]]) {
 			return true
 		}
 	}
@@ -383,12 +390,23 @@ func titleAppellations(title string) appellationEvidence {
 // -- in a title with no object noun: the supporting cue a broad name needs.
 // "Burgundy Blanc Throw Pillow" and "Napa Valley Cap Red" are home goods and
 // clothes in a colour. noEnglish drops "red" and "white" (englishColours).
+//
+// After the name, an English colour ("red", "white") must be the title's head
+// (nagus-dwq): followed by any other word it is that word's colour
+// ("Columbia Valley Red Wine Tumbler"), though a release number or label word
+// may follow ("Red Mountain Pioneer Red IV"). With a word between, an English
+// colour that ENDS the title (after a vintage, size or pack) is that word's
+// colour too: "Chateau Napa Valley Sweatshirt Red", "Napa Valley Umbrella
+// White". It still counts when the word between is a style word ("Napa Valley
+// Proprietary Red"). The wine-only colours ("Rouge", "Tinto", "Bianco") name
+// no merchandise and keep the old rule ("Cotes du Rhone Belleruche Rouge").
 func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 	for _, w := range words {
 		if broadMerchNouns[w] || objectNouns[w] {
 			return false
 		}
 	}
+	tail := headEnd(words)
 	for i, w := range words {
 		if i >= m.start && i < m.end {
 			continue
@@ -396,9 +414,19 @@ func colourBeside(words []string, m phraseMatch, noEnglish bool) bool {
 		if i < m.start-2 || i > m.end+1 {
 			continue
 		}
-		if _, ok := bareColours[w]; ok && !(noEnglish && englishColours[w]) {
-			return true
+		if _, ok := bareColours[w]; !ok || (noEnglish && englishColours[w]) {
+			continue
 		}
+		if i >= m.end && englishColours[w] {
+			k := i + 1
+			if !restIsHead(words, k, tail) {
+				continue // "Columbia Valley Red Wine Tumbler"
+			}
+			if i == m.end+1 && k >= tail && !wineStyleWords[words[m.end]] {
+				continue // "Napa Valley Sweatshirt Red"
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -426,12 +454,48 @@ func estateNamed(words []string) bool {
 
 // wineStyleWords end a wine's title: a colour, a style or a house term. (A
 // title ending in a varietal, a colour keyword or a fortified style needs no
-// estate: those are wine evidence on their own.)
+// estate: those are wine evidence on their own.) "Estate" and "superior" are
+// here for the titles an estate word vouches for ("Chateau Montelena Napa
+// Valley Estate", "Quinta do Crasto Douro Superior"; nagus-dwq), not as
+// estate words themselves.
 var wineStyleWords = setOfWords("brut", "red", "white", "rose", "rouge", "blanc", "tinto", "rosso", "bianco",
-	"blanco", "rosado", "rosato", "reserve", "reserva", "riserva", "cuvee", "blend", "nv", "sparkling")
+	"blanco", "rosado", "rosato", "reserve", "reserva", "riserva", "cuvee", "blend", "nv", "sparkling",
+	"estate", "superior", "proprietary")
 
-// trailingPackWords are the size and pack words wineTail drops.
-var trailingPackWords = setOfWords("ml", "cl", "l", "magnum", "magnums", "pack", "packs", "pk")
+// englishStyleWords are the style words that are also plain English: a
+// colour, "reserve", "estate". Ending a title after some other word, they
+// describe that word ("Tumbler Rose", "Sweatshirt Red", "Umbrella White"),
+// where a wine-only word ("Le Reve Brut", "Cuvee Rouge") is the wine
+// (nagus-dwq). "Wine" and "blend" make a colour a wine ("Red Wine", "Red
+// Blend") and are not here.
+var englishStyleWords = setOfWords("red", "white", "rose", "reserve", "estate", "superior", "sparkling")
+
+// styleRunStart returns the index where the run of style words (and "wine")
+// that ends words[:end] begins; end when words[end-1] is not one.
+func styleRunStart(words []string, end int) int {
+	s := end
+	for s > 0 && (wineStyleWords[words[s-1]] || words[s-1] == "wine") {
+		s--
+	}
+	return s
+}
+
+// englishRun reports whether words holds only englishStyleWords.
+func englishRun(words []string) bool {
+	for _, w := range words {
+		if !englishStyleWords[w] {
+			return false
+		}
+	}
+	return true
+}
+
+// trailingPackWords are the size, pack and container words wineTail drops.
+// A can, keg or collection of wine is still the wine ("Love Rose Can Pack",
+// "Analemma White Blend - 5.16G Keg", "Napa Valley Red Collection";
+// nagus-dwq).
+var trailingPackWords = setOfWords("ml", "cl", "l", "magnum", "magnums", "pack", "packs", "pk",
+	"can", "cans", "keg", "kegs", "g", "gal", "gallon", "gallons", "bottle", "bottles", "collection")
 
 // wineTail returns the index just past the title's last word that is not a
 // trailing vintage, bottle size or pack ("2019", "750ml", "1.5L", "6-Pack").
@@ -458,15 +522,22 @@ func wineTail(words []string) int {
 // do Crasto Douro" and "Domaine Ste. Michelle Columbia Valley Brut" end in
 // the wine; "Quinta do Noval Douro Cork Screw" and "Chateau Ste Michelle
 // Columbia Valley Sweatshirt" end in merchandise, whatever the noun.
+//
+// A run of plain-English style words ("Red", "Rose", "Reserve") is the head
+// only right after m ("Columbia Valley Rose", "Napa Valley Estate"): after
+// any other word it is that word's colour or kind (nagus-dwq): "Chateau Napa
+// Valley Sweatshirt Red", "... Tumbler Rose", "... Umbrella White". A wine-
+// only word in the run is the wine wherever it stands ("Le Reve Brut").
 func wineHeadAt(words []string, m phraseMatch) bool {
 	end := wineTail(words)
 	if end == m.end {
 		return true
 	}
-	if end == 0 {
+	s := styleRunStart(words, end)
+	if s == end {
 		return false
 	}
-	return wineStyleWords[words[end-1]]
+	return s == m.end || !englishRun(words[s:end])
 }
 
 // broadMerchNouns are things sold "in Burgundy" or "in Bordeaux Blanc": a
