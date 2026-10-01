@@ -41,8 +41,8 @@
     },
     "url": {
       "type": "string",
-      "description": "An https link to the deal, or to the store/product page it is from. Printable ASCII (an IDN host as punycode), a public DNS host: no IP address, localhost, .local, userinfo or backslash.",
-      "pattern": "^https://",
+      "description": "An https link to the deal, or to the store/product page it is from. Lower-case https:// and host, printable ASCII (an IDN host as punycode), a public DNS host name: no IP address in any form, no userinfo, no port but :443, not .local/.internal/.lan/.home/.corp/.svc/.test/.invalid/.arpa/.onion. Every percent-escape must be valid and at most double-encoded.",
+      "pattern": "^https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+([a-z][a-z0-9-]{0,61}[a-z0-9])(?::443)?(?:[/?#][\\x21-\\x7e]*)?$",
       "minLength": 1,
       "maxLength": 512
     },

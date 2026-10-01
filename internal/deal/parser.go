@@ -2,8 +2,11 @@ package deal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,43 +99,68 @@ const (
 )
 
 // boundary ends the part of a body that is read: an RFC 3676 signature
-// delimiter, an Outlook original-message separator or underscore rule, a
-// Gmail or Apple Mail forward marker (quoted or not), or an "On ... wrote:"
-// reply attribution.
-var boundary = regexp.MustCompile(`(?i)^[>\s]*(?:--|-{3,}\s*original message\s*-{3,}|-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:|_{10,}|on\s.{1,200}\swrote:)\s*$`)
+// delimiter, an Outlook original-message separator or underscore rule, or a
+// Gmail or Apple Mail forward marker, quoted or not.
+var boundary = regexp.MustCompile(`(?i)^[>\s]*(?:--|-{3,}\s*original message\s*-{3,}|-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:|_{5,})\s*$`)
 
 var (
-	// A Gmail attribution wrapped across two lines: "On <date> <name>
-	// <addr>" then "wrote:".
-	onStartRe = regexp.MustCompile(`(?i)^[>\s]*on\s.{1,200}$`)
-	wroteRe   = regexp.MustCompile(`(?i)^[>\s]*.{0,200}\bwrote:\s*$`)
-	// An Outlook reply header block without the underscore rule: "From: x"
-	// followed by "Sent:" or "Date:".
-	hdrFromRe = regexp.MustCompile(`(?i)^[>\s]*from:\s*\S`)
-	hdrNextRe = regexp.MustCompile(`(?i)^[>\s]*(?:sent|date):\s*\S`)
+	// A reply attribution, or its last line when the client wrapped it: a
+	// line ENDING in "wrote:" or its German, French, Spanish, Italian, Dutch
+	// or Portuguese form. The lines of a wrapped attribution above it are
+	// not deal lines, so stopping at its last line is enough.
+	attributionRe = regexp.MustCompile(`(?i)^[>\s]*(?:\S.{0,300}\s)?(?:wrote|schrieb|a\s[e\x{e9}]crit|escribi[o\x{f3}]|ha\sscritto|schreef|escreveu)\s?:\s*$`)
+	// Gmail in German puts the name after the verb: "Am ... schrieb X <a>:".
+	attributionDeRe = regexp.MustCompile(`(?i)^[>\s]*am\s.{1,300}\sschrieb\s.{1,200}:\s*$`)
+	// A quoted header block, as Outlook writes above the original: a From
+	// line (plain, bold or localized) with another header line within the
+	// next three.
+	hdrFromRe = regexp.MustCompile(`(?i)^[>\s]*\*{0,2}(?:from|von|de|da|van)\*{0,2}\s?:\*{0,2}\s*\S`)
+	hdrNextRe = regexp.MustCompile(`(?i)^[>\s]*\*{0,2}(?:sent|date|to|cc|subject|gesendet|datum|an|betreff|envoy[e\x{e9}]|objet|enviado|para|asunto|verzonden|aan)\*{0,2}\s?:`)
 )
 
 // isBoundary reports whether line i starts quoted or forwarded material.
+// These patterns are defence in depth: the structural rule is that a plain
+// sender's reply (In-Reply-To / References) is not read at all.
 func isBoundary(lines []string, i int) bool {
 	t := strings.TrimSpace(lines[i])
-	if boundary.MatchString(t) {
+	if strings.HasPrefix(stripInvisible(t), "{") {
+		return false // a deal line is never a boundary
+	}
+	if boundary.MatchString(t) || attributionRe.MatchString(t) || attributionDeRe.MatchString(t) {
 		return true
 	}
-	next := ""
-	if i+1 < len(lines) {
-		next = strings.TrimSpace(lines[i+1])
+	if hdrFromRe.MatchString(t) {
+		for j := i + 1; j < len(lines) && j <= i+3; j++ {
+			if hdrNextRe.MatchString(strings.TrimSpace(lines[j])) {
+				return true
+			}
+		}
 	}
-	if onStartRe.MatchString(t) && wroteRe.MatchString(next) && !strings.HasPrefix(next, "{") {
-		return true
-	}
-	return hdrFromRe.MatchString(t) && hdrNextRe.MatchString(next)
+	return false
+}
+
+// stripInvisible removes leading invisible characters (a BOM, zero-width
+// space, word joiner, direction marks).
+func stripInvisible(t string) string {
+	return strings.TrimLeftFunc(t, invisible)
 }
 
 // Key is the listing source key of one line of one message from one VERIFIED
 // sender: the identity that makes a re-read idempotent. The sender is part of
 // it because the sender writes its own Message-ID (rv35 I5).
+//
+// It is OPAQUE (rv35b NEW-2): an item's source key is returned by get_item
+// and GET /item, so it must not carry the sender's address (that would tell
+// any MCP caller who is on the allowlist) or the Message-ID (the capability
+// for the full status lookup). A domain-separated SHA-256 over
+// length-prefixed fields: stable across polls, and no two (sender, id, line)
+// triples share one.
 func Key(sender, messageID string, line int) string {
-	return fmt.Sprintf("%s/%s#L%d", strings.ToLower(sender), messageID, line)
+	h := sha256.New()
+	for _, f := range []string{"nagus.deal/v1 source key", strings.ToLower(sender), messageID, strconv.Itoa(line)} {
+		fmt.Fprintf(h, "%d:%s|", len(f), f)
+	}
+	return "deal-" + hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // Parse reads one verified message. Refused lines and message-level
@@ -141,6 +169,14 @@ func Key(sender, messageID string, line int) string {
 func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 	ref := msgRef{addr: strings.ToLower(m.From), id: m.ID, principal: p.hub.Principal(m.From), received: m.Received}
 	led := p.hub.Ledger
+	if m.Reply && m.ForwardedBy == "" {
+		// A submission is a fresh message (rv35b NEW-6). A reply carries a
+		// quoted original that no pattern can delimit for every mail client,
+		// so it is not read at all. A forward legitimately carries the same
+		// headers, and is read from its marker instead.
+		led.refuseMessage(ref, MsgReplyNotAccepted)
+		return nil, nil
+	}
 	if strings.TrimSpace(m.Text) == "" {
 		outcome := MsgEmpty
 		if strings.TrimSpace(m.HTML) != "" {
@@ -151,37 +187,59 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 		led.refuseMessage(ref, outcome)
 		return nil, nil
 	}
-	text := m.Text
+	text, truncated := m.Text, false
 	if len(text) > MaxScanBytes {
-		text = text[:MaxScanBytes]
+		// Cut at the cap and drop the line the cut went through: a deal
+		// line is read whole or not at all.
+		text, truncated = text[:MaxScanBytes], true
+		if i := strings.LastIndexAny(text, "\r\n"); i >= 0 {
+			text = text[:i+1]
+		} else {
+			text = ""
+		}
 	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(text, "\n")
 	if len(lines) > MaxScanLines {
-		lines = lines[:MaxScanLines]
+		lines, truncated = lines[:MaxScanLines], true
 	}
 	start := 0
 	if m.ForwardedBy != "" {
 		// A household hand-forward: read the forwarded original only, after
-		// the marker and the forwarded header block.
-		for i, ln := range lines {
-			if isForwardMarker(ln) {
+		// the marker and the forwarded header block. The marker must be the
+		// FIRST boundary in the message and unquoted: one below a reply
+		// boundary, a signature or a quote belongs to someone else's text
+		// (rv35b NEW-3) and opens nothing.
+		start = len(lines)
+		for i := range lines {
+			if !isBoundary(lines, i) {
+				continue
+			}
+			if isForwardMarker(lines[i]) {
+				// Gmail puts the header block straight after the marker,
+				// Apple Mail after a blank line.
 				start = i + 1
+				for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+					start++
+				}
 				for start < len(lines) && strings.TrimSpace(lines[start]) != "" {
 					start++
 				}
-				break
 			}
+			break
 		}
 	}
 	var out []listing.Raw
 	n, overflowLine, overflow := 0, 0, 0
+	reachedEnd := true
 	for i := start; i < len(lines); i++ {
 		if isBoundary(lines, i) {
+			reachedEnd = false
 			break
 		}
 		t := strings.TrimSpace(lines[i])
-		bom := strings.HasPrefix(t, "\ufeff")
-		if !strings.HasPrefix(strings.TrimPrefix(t, "\ufeff"), "{") {
+		bare := stripInvisible(t)
+		if !strings.HasPrefix(bare, "{") {
 			continue
 		}
 		n++
@@ -193,8 +251,9 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 			overflow++
 			continue
 		}
-		if bom {
-			// A byte-order mark is not whitespace: the line is not JSON.
+		if bare != t {
+			// A byte-order mark or another invisible character before the
+			// brace: not JSON, and reported rather than ignored.
 			led.reject(ref, lineNo, "", ReasonBadJSON, 0)
 			continue
 		}
@@ -218,13 +277,20 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 	if overflow > 0 {
 		led.reject(ref, overflowLine, "", ReasonTooManyLines, overflow)
 	}
-	if n == 0 {
+	if truncated && reachedEnd && overflow == 0 {
+		// The scan cap, not a boundary, ended the read: say so (rv35b
+		// NEW-8) instead of reporting an empty or shorter message.
+		led.reject(ref, len(lines)+1, "", ReasonScanTruncated, 0)
+	}
+	if n == 0 && !(truncated && reachedEnd) {
 		led.refuseMessage(ref, MsgEmpty)
 	}
 	return out, nil
 }
 
-var forwardRe = regexp.MustCompile(`(?i)^[\s>]*(?:-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:)\s*$`)
+// forwardRe is an UNQUOTED forward marker: where a hand-forward's original
+// begins.
+var forwardRe = regexp.MustCompile(`(?i)^\s*(?:-{3,}\s*forwarded message\s*-{3,}|begin forwarded message:)\s*$`)
 
 func isForwardMarker(ln string) bool { return forwardRe.MatchString(ln) }
 

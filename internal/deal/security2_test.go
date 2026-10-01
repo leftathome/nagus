@@ -262,12 +262,18 @@ func TestForwardMarkerBelowAReplyBoundaryIsIgnored(t *testing.T) {
 			t.Errorf("%s: %d line(s) laundered through the forwarder", name, len(keys))
 		}
 	}
-	// The genuine case still works.
-	h := testHub()
-	m := msg("ok@example.org", "FYI\n\n"+stranger)
-	m.ForwardedBy = m.From
-	if keys := fetch(t, h, "hdd", m); len(keys) != 1 {
-		t.Fatalf("a plain forward: %d line(s), want 1", len(keys))
+	// The genuine cases still work: Gmail's marker with the header block
+	// right under it, and Apple Mail's with a blank line between.
+	for name, text := range map[string]string{
+		"gmail": "FYI\n\n" + stranger,
+		"apple": "FYI\n\nBegin forwarded message:\n\nFrom: Caspar <agent@example.org>\nSubject: deals\nDate: 26 September 2026\nTo: f@example.org\n\n" + good + "\n",
+	} {
+		h := testHub()
+		m := msg("ok@example.org", text)
+		m.ForwardedBy = m.From
+		if keys := fetch(t, h, "hdd", m); len(keys) != 1 {
+			t.Errorf("a plain %s forward: %d line(s), want 1", name, len(keys))
+		}
 	}
 }
 

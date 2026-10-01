@@ -7,8 +7,7 @@ X-Mailer: example-agent-mailer 1.4
 Message-ID: <20260926170210.4f1a2b3c@agents.example.org>
 From: Caspar <caspar@agents.example.org>
 To: deals@example.net
-Subject: Re: deals for nagus
-In-Reply-To: <older-thread@example.org>
+Subject: deals for nagus
 Date: Sat, 26 Sep 2026 17:02:10 +0000
 MIME-Version: 1.0
 Content-Type: multipart/alternative; boundary="b1_example"

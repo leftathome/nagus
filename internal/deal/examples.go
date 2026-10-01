@@ -2,9 +2,11 @@ package deal
 
 import (
 	"encoding/json"
-	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/leftathome/nagus/internal/listing"
 )
@@ -44,24 +46,55 @@ const (
 	AspectURLText = "deal_url_text"
 )
 
-// urlText is a url's path, query and fragment, percent-decoded where
-// possible, for the gate to read as text.
-func urlText(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
+// MaxURLDecodeRounds bounds repeated percent-decoding of a url for the gate:
+// "%2569" is "%69" is "i". A url still holding an escape after this many
+// rounds is refused rather than gated half-decoded.
+const MaxURLDecodeRounds = 2
+
+var pctRe = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
+
+// urlGateText is what the glovebox gate reads for a url (the gate scans
+// aspects; nagus stores this as AspectURLText): the host, then the path,
+// query and fragment percent-decoded until stable, then the same text again
+// with every separator turned into a space, so "ignore+previous" and
+// "ignore%2520previous" and "ignore/previous" all read as words.
+//
+// It FAILS CLOSED (rv35b NEW-1): ok is false, and the url is refused, when
+// any "%" is not a valid escape, when escapes are nested deeper than
+// MaxURLDecodeRounds, or when the decoded text is not valid, visible text.
+// "Decode failed" never means "not gated".
+func urlGateText(raw string) (string, bool) {
+	rest, ok := strings.CutPrefix(raw, "https://")
+	if !ok {
+		return "", false
 	}
-	parts := []string{u.Host}
-	if p, err := url.PathUnescape(u.EscapedPath()); err == nil {
-		parts = append(parts, p)
+	host := rest
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		host, rest = rest[:i], rest[i:]
+	} else {
+		rest = ""
 	}
-	if q, err := url.QueryUnescape(u.RawQuery); err == nil && q != "" {
-		parts = append(parts, q)
+	// Every % must begin a valid escape.
+	if strings.Count(rest, "%") != len(pctRe.FindAllStringIndex(rest, -1)) {
+		return "", false
 	}
-	if u.Fragment != "" {
-		parts = append(parts, u.Fragment)
+	decoded := rest
+	for round := 0; pctRe.MatchString(decoded); round++ {
+		if round == MaxURLDecodeRounds {
+			return "", false
+		}
+		decoded = pctRe.ReplaceAllStringFunc(decoded, func(e string) string {
+			b, _ := strconv.ParseUint(e[1:], 16, 8)
+			return string([]byte{byte(b)})
+		})
 	}
-	return strings.Join(parts, " ")
+	if !utf8.ValidString(decoded) || !cleanText(decoded, len(decoded)) {
+		return "", false
+	}
+	words := strings.Join(strings.FieldsFunc(decoded, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}), " ")
+	return strings.TrimSpace(host + " " + decoded + " " + words), true
 }
 
 // ToRaw maps a validated deal onto a listing so the existing category
@@ -82,7 +115,9 @@ func (d Deal) ToRaw(key, principal string) listing.Raw {
 	set("seller", d.Seller)
 	// The url is free text that reaches agents: its path and query, decoded,
 	// cross the glovebox gate as an aspect (the gate scans aspects).
-	set(AspectURLText, urlText(d.URL))
+	if text, ok := urlGateText(d.URL); ok {
+		set(AspectURLText, text)
+	}
 	switch d.Category {
 	case CategoryHDD:
 		// brand/mpn/gtin are the offer's product hint (pipeline offerFromRaw):

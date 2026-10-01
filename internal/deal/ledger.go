@@ -44,7 +44,7 @@ const (
 
 // MessageOutcomes is every message outcome, in metric order.
 var MessageOutcomes = []string{MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, MsgNoTextPart,
-	MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid}
+	MsgReplyNotAccepted, MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid}
 
 // MaxLedgerMessages bounds the ledger: past it, the message no poll has seen
 // for longest is dropped (rv35 I1). Far above what a household sends in a
@@ -244,8 +244,28 @@ func (l *Ledger) ObserveConnector(key, _ /*messageID*/, outcome string, received
 	if received.IsZero() {
 		received = now
 	}
+	if len(l.once) >= MaxObserved {
+		l.evictObserved()
+	}
 	l.once[key] = &observed{outcome: outcome, received: received, lastSeen: now}
 	l.subs[outcome]++
+}
+
+// evictObserved drops the tenth of the observations that ARRIVED longest ago
+// (rv35b NEW-9). An evicted message still in the lookback window is counted
+// again on the next poll; the bound matters more than that. Callers hold mu.
+func (l *Ledger) evictObserved() {
+	times := make([]time.Time, 0, len(l.once))
+	for _, o := range l.once {
+		times = append(times, o.received)
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
+	cut := times[len(times)/10]
+	for k, o := range l.once {
+		if !o.received.After(cut) {
+			delete(l.once, k)
+		}
+	}
 }
 
 // ApplyIngest settles this source's lines from one ingest pass: a skip at the

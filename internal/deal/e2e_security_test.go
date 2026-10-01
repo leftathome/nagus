@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -70,6 +71,27 @@ func TestURLQueryEscapeCannotBypassTheGate(t *testing.T) {
 	}
 	if n := r.itemCount(t); n != 0 {
 		t.Fatalf("EXPLOIT: %d item(s) surfaced with an injected url", n)
+	}
+}
+
+// NEW-6: the realistic submission, sent as a REPLY (In-Reply-To), is refused
+// whole: nothing is read, and status says why.
+func TestARealisticReplyIsRefusedWhole(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/submission.eml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := strings.Replace(string(fixture), "Subject: ", "In-Reply-To: <older-thread@example.org>\r\nSubject: Re: ", 1)
+	kr := &keyring{t: t, keys: map[string]ed25519.PrivateKey{}}
+	addr := mailServer(t, []string{kr.sign(reply, "agents.example.org")})
+	r := newRig(t, addr, kr)
+	r.poll(t)
+	v, ok := r.hub.Ledger.Lookup("20260926170210.4f1a2b3c@agents.example.org")
+	if !ok || v.Outcome != deal.MsgReplyNotAccepted || len(v.Lines) != 0 {
+		t.Fatalf("reply status %+v %v", v, ok)
+	}
+	if n := r.itemCount(t); n != 0 || r.offers.Len() != 0 {
+		t.Fatalf("a reply produced %d item(s), %d offer(s)", n, r.offers.Len())
 	}
 }
 

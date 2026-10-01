@@ -20,8 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -225,6 +223,7 @@ var LineReasons = []struct {
 }{
 	{ReasonLineTooLong, true, fmt.Sprintf("the line is longer than %d bytes", MaxLineBytes)},
 	{ReasonTooManyLines, true, fmt.Sprintf("more than %d deal lines in one message; only the first %d are read", MaxLinesPerMessage, MaxLinesPerMessage)},
+	{ReasonScanTruncated, true, "the message body is longer than the part that is read; anything past that point was not read"},
 	{ReasonBadJSON, true, "not one valid JSON object (a hard-wrapped line, a repeated field, or a line starting with a byte-order mark lands here)"},
 	{ReasonUnknownField, true, "a field the schema does not define, or a known field spelled with different case"},
 	{ReasonBadType, true, "a field has the wrong JSON type (e.g. vintage as a string)"},
@@ -235,8 +234,8 @@ var LineReasons = []struct {
 	{ReasonFieldNotForCategory, true, "a field that does not apply to this category (vintage on hdd, capacity_tb on wine)"},
 	{ReasonBadPrice, true, fmt.Sprintf("price is not a positive amount with at most 2 decimals, up to %d", MaxPriceMajor)},
 	{ReasonBadCurrency, true, "currency is not an ISO 4217 code such as USD"},
-	{ReasonBadURL, true, "url is not a plain-ASCII https URL of at most 512 characters on a public DNS host"},
-	{ReasonBadValue, true, "a value is out of range, too long, or contains control or invisible characters (zero-width, bidi overrides)"},
+	{ReasonBadURL, true, "url is not a lower-case, plain-ASCII https URL of at most 512 characters on a public DNS host (no IP address, no port but 443), or it has an invalid or over-nested percent-escape"},
+	{ReasonBadValue, true, "a value is out of range, too long, or contains control, invisible or unusual-space characters (zero-width, bidi overrides, non-breaking space, line separators)"},
 	{ReasonGateRefused, true, "the glovebox sanitize gate refused the line's text"},
 	{ReasonNotInCategory, true, "the category extractor says it is not an item of that category (e.g. an SSD as hdd)"},
 	{ReasonExtractFailed, true, "the category extractor could not form an item"},
@@ -406,48 +405,74 @@ func (d *Deal) validate() Reason {
 	return ReasonNone
 }
 
-// httpsURL is an absolute https URL of printable ASCII (an IDN host in its
-// punycode form), at most MaxURLLen, with a public-looking DNS host: no
-// userinfo, no backslash, no IP literal, no localhost, no single-label or
-// .local/.internal/.localhost name (rv35 I2). nagus never fetches the url --
-// there is no SSRF -- but it reaches agents and pings, so it is kept tidy.
+// URLPattern is the shape a deal url must have, and is the schema's pattern
+// for it: the scheme exactly "https://" in lower case; a lower-case DNS host
+// of at least two labels with no empty label and no trailing dot, whose last
+// label starts with a letter (so no IP literal in any spelling: dotted,
+// short, octal, hex or bracketed); no userinfo; no port but an explicit
+// :443; then printable ASCII.
+const URLPattern = `^https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z][a-z0-9-]{0,61}[a-z0-9])(?::443)?(?:[/?#][\x21-\x7e]*)?$`
+
+var urlRe = regexp.MustCompile(URLPattern)
+
+// RefusedTLDs are final host labels that are never a public shop: reserved,
+// private-network and cluster-internal names. ".example" is reserved too but
+// stays usable: it is what documentation and tests use.
+var RefusedTLDs = []string{"local", "localhost", "internal", "lan", "home", "corp", "svc", "test", "invalid", "arpa", "onion"}
+
+// httpsURL reports whether s is an acceptable deal url (rv35 I2, rv35b
+// NEW-1, NEW-7): URLPattern, at most MaxURLLen, no backslash, a final label
+// not in RefusedTLDs, and a path/query/fragment whose every percent-escape is
+// valid and decodes to clean text (urlGateText). nagus never fetches the url
+// -- there is no SSRF -- but it reaches agents and pings, so it must be
+// something the gate has fully read.
 func httpsURL(s string) bool {
-	if len(s) > MaxURLLen {
+	if len(s) > MaxURLLen || strings.Contains(s, `\`) {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; c <= 0x20 || c >= 0x7f || c == '\\' {
-			return false
-		}
-	}
-	u, err := url.Parse(s)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" {
+	m := urlRe.FindStringSubmatch(s)
+	if m == nil || contains(RefusedTLDs, m[1]) {
 		return false
 	}
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "" || !strings.Contains(host, ".") || net.ParseIP(host) != nil || strings.Contains(host, ":") {
-		return false
-	}
-	for _, bad := range []string{"localhost", ".localhost", ".local", ".internal", ".home.arpa", ".lan"} {
-		if host == strings.TrimPrefix(bad, ".") || strings.HasSuffix(host, bad) {
-			return false
-		}
-	}
-	return true
+	_, ok := urlGateText(s)
+	return ok
 }
 
-// cleanText is at most max characters (runes) with no control characters and
-// no invisible ones: format characters (Cf: bidi overrides and isolates,
-// zero-width space and joiners, soft hyphen, BOM) and the other
-// default-ignorable code points, as quark (quark-d0r) and glovebox refuse
-// them. They reach agents and Telegram, where they reorder or hide text
-// (rv35 N4).
+// MaxCombiningMarks is how many combining marks may follow one base
+// character: enough for any real orthography (Vietnamese stacks two), far
+// too few for a "zalgo" flood.
+const MaxCombiningMarks = 4
+
+// cleanText is at most max characters (runes) of visible text: letters,
+// marks, numbers, punctuation and symbols of any script, and the plain ASCII
+// space. Everything else is refused (rv35 N4, rv35b NEW-5): controls; format
+// and other default-ignorable characters (bidi overrides and isolates,
+// zero-width space and joiners, soft hyphen, BOM, Hangul fillers, variation
+// selectors, tag characters); every separator but U+0020 (NBSP, the
+// typographic spaces, U+2028/U+2029); the Braille blank; private-use,
+// surrogate, noncharacter and unassigned code points; the replacement
+// character; a combining mark with no base, or more than MaxCombiningMarks
+// on one. They reach agents and Telegram, where they hide, reorder or break
+// text. quark (quark-d0r) and glovebox refuse the same classes.
 func cleanText(s string, max int) bool {
 	if utf8.RuneCountInString(s) > max {
 		return false
 	}
+	base, marks := false, 0
 	for _, r := range s {
-		if unicode.IsControl(r) || invisible(r) {
+		switch {
+		case r == ' ':
+			base, marks = false, 0
+		case r == utf8.RuneError || r == 0x2800 || invisible(r):
+			return false
+		case unicode.IsMark(r):
+			marks++
+			if !base || marks > MaxCombiningMarks {
+				return false
+			}
+		case unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsPunct(r) || unicode.IsSymbol(r):
+			base, marks = true, 0
+		default:
 			return false
 		}
 	}
