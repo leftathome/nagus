@@ -292,10 +292,13 @@ func phraseAt(words []string, i int, phrase string) bool {
 }
 
 // objectNouns are objects no bottle of wine is sold as. See isMerchandise.
+// The tumbler, sweatshirt and umbrella (nagus-dwq) are here because a
+// vintage is wine evidence on its own, so no colour rule can reject "Chateau
+// Napa Valley Tumbler 2019".
 var objectNouns = setOfWords("towel", "towels", "charm", "charms", "soap", "soaps", "flute", "flutes", "tool", "tools",
 	"tee", "tees", "sock", "socks", "sticker", "stickers", "magnet", "magnets", "mug", "mugs", "perfume",
 	"perfumes", "sweater", "sweaters", "poster", "posters", "print", "prints", "paddle", "paddles",
-	"jersey", "jerseys")
+	"jersey", "jerseys", "tumbler", "tumblers", "sweatshirt", "sweatshirts", "umbrella", "umbrellas")
 
 // objectHead reports an object noun that is the title's head ("Merlot Tea
 // Towel"), not a name word before the wine ("Charm City Syrah 2020", "Tool

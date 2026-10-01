@@ -203,6 +203,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Wine extractor: colour and style words are evidence only where they name
+  the wine** (nagus-dwq). Before, a colour or style word anywhere in the
+  title made merchandise wine: "Chateau Ste Michelle Columbia Valley Red
+  Wine Tumbler", "Chateau Napa Valley Sweatshirt Red", "... Tumbler Rose",
+  "... Umbrella White". This was in production before nagus-d2u.
+  - A title colour word (rose, sparkling, red/white wine, red/white blend)
+    is evidence only right before another wine cue ("Rose Wine Napa
+    Valley", "Sparkling Moscato"), in the run of style words that ends the
+    title after a trailing vintage, size, pack or container and before a
+    "by <producer>" credit ("Witches Brew Red Wine", "Love Rose Can Pack",
+    "Butter Red Blend by JaM"), or anywhere in a title whose head is a
+    wine-only style ("Sparkling Water Cellars Brut"). A plain-English run
+    ("Rose", "Sparkling") after some other word that follows a place name
+    is that word's colour. A failed colour word falls back to the
+    description, is culinary with a food after it ("Red Wine Salami"), and
+    never overrides a source-declared wine_type. The colour ATTRIBUTE of a
+    wine with other evidence is unchanged.
+  - Beside a broad appellation, "red" or "white" must be the title's head
+    (a release number or label word may follow: "Red Mountain Pioneer Red
+    IV"), and after a one-word gap it must not end the title unless the gap
+    is a style word ("Napa Valley Proprietary Red"). The wine-only colours
+    (Rouge, Tinto, Bianco ...) keep the old rule.
+  - With an estate word, a trailing plain-English style run (Red, Rose,
+    Reserve, Estate) is the head only right after the broad name; a
+    wine-only word (Brut, Cuvee, Rouge) is the head anywhere.
+  - Recall: "estate", "superior" and "proprietary" are style words
+    ("Chateau Montelena Napa Valley Estate", "Quinta do Crasto Douro
+    Superior"); a lodging word followed by a label word (edition, label,
+    series ...) names a label, not a venue ("Chianti Classico Riserva
+    Wedding Edition"); a can, keg, bottle or collection ends a title like a
+    pack does.
+  - Tumbler, sweatshirt and umbrella are object nouns: a vintage alone no
+    longer makes "Chateau Napa Valley Tumbler 2019" wine.
+  - Known cost: a cuvee name between a place and a bare English colour
+    with no other evidence ("Red Mountain Pioneer Red") reads like
+    merchandise in a colour and is not wine; no such title is in the
+    corpus or live data.
+
 - **Wine extractor leftovers from the !30 reviews** (nagus-d2u). None of
   these was a regression; all were wine in production.
   - A soft food noun (chocolate, truffles, sauce, fudge, and chocolate bar,
