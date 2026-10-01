@@ -19,19 +19,35 @@ mailbox.
 - The **text/plain** part is read line by line. A line that starts with `{`
   after trimming whitespace is ONE deal object. Every other line (greeting,
   signature, `Fwd:` headers, notes, quoted `>` replies) is ignored.
-- Reading stops at the first reply/forward/signature boundary: a line that is
-  `--` or `-- ` (RFC 3676 signature), `-----Original Message-----`, an Outlook
-  underscore rule (`__________`), an Outlook `From:` line followed by `Sent:`
-  or `Date:`, a Gmail or Apple Mail forward marker (quoted with `>` or not),
-  or an `On ... wrote:` attribution on one line or wrapped onto two. So a reply
+- **A submission is a fresh message.** A plain sender's message that carries
+  `In-Reply-To` or `References` is refused whole, outcome
+  `reply_not_accepted`: a reply carries a quoted original, and no pattern
+  delimits that for every mail client and language. Forwards from a
+  configured forwarder are exempt, because mail clients set those headers on
+  a forward too (see "Security re-review"); they are read from the forward
+  marker.
+- As defence in depth, reading also stops at the first reply/forward/signature
+  boundary: a line that is `--` or `-- ` (RFC 3676 signature),
+  `-----Original Message-----`, an underscore rule of five or more, a `From:`
+  line (plain, bold, or `Von:`/`De:`/`Da:`/`Van:`) with another header line
+  within the next three, a Gmail or Apple Mail forward marker (quoted with
+  `>` or not), or a line ending in `wrote:` or its German, French, Spanish,
+  Italian, Dutch or Portuguese form (which also ends a wrapped
+  attribution). So a reply
   that quotes an earlier submission never resubmits it, even when the client
   does not prefix quoted lines with `>`.
 - A **hand-forwarded** message (a configured forwarder forwarding an
   allowlisted sender's mail) is read from the forwarded original, i.e. after
   the forward marker and its header block, and stops at the next boundary.
-- A line that starts with a UTF-8 byte-order mark and then `{` is a deal line
-  and is refused `bad_json`; it is not silently ignored.
-- At most 256 KiB and 10,000 lines of a body are scanned.
+  The marker must be the FIRST boundary in the message and unquoted: one that
+  appears below a reply boundary, a signature or a quote is part of someone
+  else's text and opens nothing.
+- A line that starts with a byte-order mark or another invisible character
+  and then `{` is a deal line and is refused `bad_json`; it is not silently
+  ignored. Bare-CR line endings split lines like LF.
+- At most 256 KiB and 10,000 lines of a body are scanned. When that cap, and
+  not a boundary, ends the read, status carries one `scan_truncated` entry;
+  a line the cut went through is not read.
 - Line numbers are the 1-based line of the text body as received. They are
   stable across re-reads, which is what makes them part of the identity.
 - `format=flowed` (RFC 3676) text is un-flowed before parsing, so a client
@@ -49,8 +65,8 @@ mailbox.
 | Limit | Value | What happens past it |
 |---|---|---|
 | Deal lines per message | 50 | the first 50 are processed; the rest are not decoded and become ONE `too_many_lines` entry (at the 51st deal line) carrying a `count` |
-| Body scanned | 256 KiB, 10,000 lines | the rest of the body is not read |
-| Ledger | 5,000 messages | the message no poll has seen for longest is dropped |
+| Body scanned | 256 KiB, 10,000 lines | the rest of the body is not read; one `scan_truncated` entry |
+| Ledger | 5,000 messages; 20,000 skipped-mail observations | the oldest are dropped |
 | Bytes per deal line | 4096 (after trimming) | that line is refused `line_too_long` |
 | Message size | 4 MiB (connector default) | message skipped, counted `too_large` |
 | Lookback | the source's `imapLookbackDays` (default 14) | older mail is not read; its status ages out |
@@ -70,9 +86,9 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | Field | Req | Type | Rule |
 |---|---|---|---|
 | `category` | yes | string | `wine` or `hdd` |
-| `title` | yes | string | 1-300 chars, no control characters |
+| `title` | yes | string | 1-300 chars of visible text (see Text) |
 | `price` | yes | decimal string or number | major units, `^[0-9]{1,7}(\.[0-9]{1,2})?$`, > 0, <= 1000000 |
-| `url` | yes | string | `https` only; printable ASCII (IDN hosts as punycode); <= 512 chars; a public-looking DNS host (no IP literal, `localhost`, single-label, `.local`/`.internal`/`.lan`/`.home.arpa`); no userinfo, no backslash |
+| `url` | yes | string | exactly lower-case `https://`; printable ASCII; <= 512 chars; a lower-case DNS host of two or more labels whose last label starts with a letter (so no IP literal in any spelling) and is not `local`, `localhost`, `internal`, `lan`, `home`, `corp`, `svc`, `test`, `invalid`, `arpa`, `onion`; no userinfo, no backslash, no port but `:443`; every `%` a valid escape, nested at most twice. The schema's `pattern` is the same regular expression the validator uses (`deal.URLPattern`) |
 | `currency` | no | string | ISO 4217 `^[A-Z]{3}$`, default `USD` |
 | `seller` | no | string | <= 100 chars; the store/merchant |
 | `brand` | no | string | <= 100 chars; hdd: product hint; wine: the producer |
@@ -85,6 +101,15 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | `note` | no | string | <= 1000 chars; stored, NEVER used for identity |
 | `schema` | no | string | if present, exactly `nagus.deal/v1` |
 
+- **Text.** Every text field (title, note, seller, brand, mpn, and the
+  decoded url) may hold letters, marks, numbers, punctuation and symbols of
+  any script and the plain ASCII space. Refused (`bad_value`, or `bad_url`):
+  controls; format and other default-ignorable characters (bidi overrides and
+  isolates, zero-width characters, soft hyphen, BOM, Hangul fillers,
+  variation selectors, tag characters); every space but U+0020 (NBSP, the
+  typographic spaces, U+2028/U+2029); the Braille blank; private-use,
+  noncharacter, unassigned and replacement code points; a combining mark with
+  no base or more than four on one base. Accented and non-Latin names pass.
 - **Strict decode.** Unknown fields refuse the line (`unknown_field`), and so
   do case variants of a known key (`Title`): Go's decoder matches keys
   case-insensitively, so keys are checked against the exact names first.
@@ -112,7 +137,7 @@ handle it unchanged:
 | brand (wine) | aspect `wine_producer` -> with the title, the quark NAME hint |
 | gtin (wine) | aspect `deal_gtin` (informational; a wine GTIN would mint a product beside the LWIN catalog's, see pipeline `NameHintProducer`) |
 | vintage, bottle_ml (wine) | aspects `vintage`, `bottle_ml` (read by the wine extractor) |
-| url (path, query, fragment, percent-decoded) | aspect `deal_url_text`, so the url crosses the gate as text |
+| url | aspect `deal_url_text`, so the url crosses the gate as text: the host, then path+query+fragment percent-decoded until stable, then the same with every separator turned into a space. Decoding fails closed: a url the gate could not be shown in full is refused `bad_url`, never surfaced ungated |
 | (principal) | aspect `submitted_by` |
 | (message) | aspects `mail_message_id`, `mail_forwarded_by`, `mail_forwarded_from` (a claim) (connector) |
 
@@ -178,10 +203,18 @@ legal to ship.
 
 ## Idempotency, flags and lifetime
 
-- Source key: `<verified sender address>/<Message-ID>#L<line>`. The sender
-  writes its own Message-ID, so the id alone keys nothing: the ledger and the
-  offer id are both scoped to the verified sender, and two senders using one
-  Message-ID never share or overwrite an entry. The offer and item id is
+- Source key: `deal-` plus 32 hex characters of a domain-separated SHA-256
+  over (verified sender address, Message-ID, line). The sender writes its own
+  Message-ID, so the id alone keys nothing: the ledger and the offer id are
+  both scoped to the verified sender, and two senders using one Message-ID
+  never share or overwrite an entry. The key is OPAQUE because an item's
+  `source_key` is returned by `get_item`, `GET /item` and stored with the
+  item: it must not reveal an allowlisted address, nor the Message-ID, which
+  is the capability for the full status lookup. Nothing else on an ITEM
+  carries either (asserted end to end); the address or alias
+  (`submitted_by`), `mail_message_id`, `mail_forwarded_by` and the claimed
+  `mail_forwarded_from` are aspects of the OFFER row, which no read surface
+  returns. The offer and item id is
   `sha256(sourceID NUL key)[:16]`, so re-reading the mailbox updates the same
   rows and never duplicates. A resent message has a new Message-ID and is a
   new submission (documented for senders).
@@ -314,6 +347,41 @@ Residual, by design: an allowlisted sender whose own mail account is
 compromised can submit deals as that sender; the gate, the typed schema and
 the extractors bound what such a deal can carry. A forwarder can make nagus
 read any text it forwards, credited to the forwarder.
+
+## Security re-review (rv35b, 2026-09-28) and what changed
+
+| # | Finding | Decision | Test |
+|---|---|---|---|
+| NEW-1 | An invalid percent-escape dropped the url query from the gate text | invalid or over-nested escapes are `bad_url`; the gate also gets a separator-normalised view | `TestURLEscapesFailClosed`, `TestURLQueryEscapeCannotBypassTheGate` |
+| NEW-2 | `source_key` exposed the sender address and Message-ID | opaque hashed key; items asserted free of both | `TestKeyIsOpaqueAndStable`, `TestItemsCarryNoSenderAddressOrMessageID` |
+| NEW-3 | A forwarder's reply laundered a stranger's quoted lines | the forward marker must be the first boundary, unquoted | `TestForwardMarkerBelowAReplyBoundaryIsIgnored`, `TestForwarderCannotLaunderAQuotedStranger` |
+| NEW-4 | Unverified observations keyed by Message-ID; duplicate-From never alerted | observations keyed by UID; a duplicate identity header counts as `unverified` | `TestUnverifiedObservationsAreKeyedByUID` |
+| NEW-5 | U+2028 and friends accepted | character-class whitelist, combining-mark cap | `TestTextCharacterClasses` |
+| NEW-6 | Reply formats read past | replies refused whole (`reply_not_accepted`); more patterns kept as defence in depth | `TestRepliesAreNotAccepted`, `TestARealisticReplyIsRefusedWhole`, `TestMoreReplyFormats`, `TestReplyHeadersAreReported` |
+| NEW-7 | Loose host check | `deal.URLPattern` (schema and code agree) plus refused final labels | `TestURLHostIsAPublicDNSName` |
+| NEW-8 | Lines past the scan cap vanished | one `scan_truncated` entry; invisible-prefixed lines are `bad_json` | `TestScanTruncationIsReported` |
+| NEW-9 | `Ledger.once` unbounded | capped at 20,000, oldest arrivals evicted | `TestObservationsAreBounded` |
+| NEW-10 | DKIM DNS lookups unbounded; re-verified every poll | per-lookup timeout (5s) and per-message budget (15s); a permanent refusal is remembered per UID for 24h (bounded), a temporary one is not | `TestDKIMLookupTimesOut`, `TestUnverifiedVerdictIsRemembered` |
+| nit | DKIM alignment had no public-suffix floor | the signing domain must be the From domain or a parent no shallower than its registrable domain (`golang.org/x/net/publicsuffix`) | `TestAlignmentHasAPublicSuffixFloor` |
+
+**The In-Reply-To / References rule.** Adopted for plain senders. The only
+cost is that a sender cannot submit by replying in a thread, which is
+documented and answered with its own outcome. It is NOT applied to
+forwarders: Gmail, Apple Mail and Outlook all write `References` (and
+usually `In-Reply-To`) on a forward so that it threads with the original, so
+the rule would refuse every forward. That statement is from the clients'
+known behaviour; it was not re-captured for this change (the opt-in
+`TestRealCapturedMessage` is the place to confirm it against a real forward).
+The forwarder path therefore keeps the marker logic, tightened per NEW-3.
+
+**Accepted, no code change.** Five or more junk `DKIM-Signature` headers above
+a genuine one make verification stop before reaching it (`MaxVerifications:
+5`), so a legitimate message is refused. Adding headers needs modification in
+transit, and the result is a refusal, never an acceptance; raising the bound
+would only raise the work an unsigned flood can cause.
+
+**Operator-visible only.** The connector's log line for a refused spoof names
+the claimed address and domain. Logs are not an MCP surface.
 
 ## Rejected alternatives
 

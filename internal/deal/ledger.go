@@ -46,6 +46,19 @@ const (
 var MessageOutcomes = []string{MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, MsgNoTextPart,
 	MsgReplyNotAccepted, MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid}
 
+// MessageOutcomeMeanings explains the outcomes a SENDER can see in status
+// (the connector-level ones -- unknown_sender, unverified, too_large, invalid
+// -- are counted but never reported for a message).
+var MessageOutcomeMeanings = map[string]string{
+	string(OutcomePending): "not every deal line has been processed yet; ask again after the next poll",
+	MsgAccepted:            "every deal line was accepted",
+	MsgPartial:             "some deal lines were accepted and some rejected; see each line's reason",
+	MsgRejected:            "the message had deal lines and none was accepted",
+	MsgEmpty:               "no line starting with { was found above the first signature, quote or forward",
+	MsgNoTextPart:          "the message had no text/plain part (HTML only); send plain text",
+	MsgReplyNotAccepted:    "the message is a reply (In-Reply-To or References); send a new message, replies are not read",
+}
+
 // MaxLedgerMessages bounds the ledger: past it, the message no poll has seen
 // for longest is dropped (rv35 I1). Far above what a household sends in a
 // lookback window.
@@ -239,6 +252,12 @@ func (l *Ledger) ObserveConnector(key, _ /*messageID*/, outcome string, received
 	now := l.now()
 	if o, ok := l.once[key]; ok {
 		o.lastSeen = now
+		// The same key with a LATER arrival is a newer message (a caller
+		// keying by something the sender controls must not hide it from the
+		// gauge); it is still counted once.
+		if received.After(o.received) {
+			o.received = received
+		}
 		return
 	}
 	if received.IsZero() {

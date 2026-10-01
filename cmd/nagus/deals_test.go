@@ -227,6 +227,11 @@ func TestMCPDealSubmissionSpec(t *testing.T) {
 		sc.StatusTool != "deal_submission_status" || sc.Reasons["bad_url"] == nil {
 		t.Fatalf("spec %s", r.StructuredContent)
 	}
+	for _, want := range []string{`"max_body_bytes_scanned":262144`, `"max_url_chars":512`, `"reply_not_accepted"`, `"scan_truncated"`, `"message_outcomes"`} {
+		if !bytes.Contains(r.StructuredContent, []byte(want)) {
+			t.Errorf("spec lacks %s", want)
+		}
+	}
 	// Without deal sources the spec still answers, disabled, with no address.
 	plain := newTestServer(t)
 	r2, _ := callDealTool(t, plain, "deal_submission_spec", `{}`)

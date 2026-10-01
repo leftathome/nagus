@@ -38,7 +38,10 @@ not written down here on purpose.
 
 ## The format: one JSON object per line
 
-Send a **plain-text** email. Every line that starts with `{` is one deal; all
+Send a **new, plain-text** email -- not a reply. A message that is a reply
+(it carries `In-Reply-To` or `References`, which every mail client adds when
+you hit Reply) is refused as a whole, with outcome `reply_not_accepted`:
+start a new message each time. Every line that starts with `{` is one deal; all
 other lines (greetings, notes, signatures) are ignored. HTML-only email is
 refused as a whole: every mail client can send plain text.
 
@@ -67,7 +70,7 @@ Thanks!
 | `category` | yes | `wine` or `hdd` |
 | `title` | yes | what is for sale, as the store names it (up to 300 characters) |
 | `price` | yes | major units: `"24.99"` or `24.99`; at most 2 decimals; no `$`, no commas |
-| `url` | yes | an `https://` link to the deal or the store's product page: plain ASCII, at most 512 characters, a normal public host name (no IP address, no `localhost` or `.local`) |
+| `url` | yes | a lower-case `https://` link to the deal or the store's product page: plain ASCII, at most 512 characters, a normal lower-case public host name (no IP address, no `localhost` or `.local`), no port other than 443, and every `%xx` escape valid |
 | `currency` | no | ISO 4217 code, default `USD` |
 | `seller` | no | the store or merchant |
 | `brand` | no | wine: the producer/winery. hdd: the manufacturer |
@@ -81,9 +84,10 @@ Thanks!
 | `schema` | no | if present, exactly `nagus.deal/v1` |
 
 Any other field, a known field spelled differently (`Title`), or the same
-field twice refuses that line. Text fields may use accents and any script,
-but not control characters or invisible ones (zero-width characters,
-right-to-left overrides, soft hyphens). `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
+field twice refuses that line. Text fields may use accents and any script (Chateau with a circumflex,
+Rose with an acute, umlauts, Japanese), but not control characters, invisible
+ones (zero-width characters, right-to-left overrides, soft hyphens), or
+unusual spaces: use the ordinary space, not a non-breaking one. `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
 drive; for wine, the producer in `brand` plus the title is how it recognises
 the wine, so give the producer whenever you know it.
 
@@ -95,7 +99,8 @@ and is committed at `internal/deal/deal-v1.schema.json`.
 
 - At most **50 deal lines per message**; lines past the 50th are not read
   (status shows one `too_many_lines` entry with how many).
-- Only the first 256 KiB of the message text is read.
+- Only the first 256 KiB (and 10,000 lines) of the message text is read;
+  status shows `scan_truncated` when that cut anything off.
 - At most **4096 bytes per line**.
 - Each line is judged on its own: one bad line never sinks the others.
 - Reading stops at your signature (`-- `), at a forwarded or
@@ -132,7 +137,8 @@ reason codes:
 | Code | Meaning |
 |---|---|
 | `bad_json` | not one valid JSON object on the line (often: the line was wrapped; also a repeated field) |
-| `bad_value` | out of range, too long, or contains control/invisible characters |
+| `bad_value` | out of range, too long, or contains control/invisible characters or unusual spaces |
+| `scan_truncated` | the message was longer than the part that is read |
 | `unknown_field` | a field the spec does not have, or wrong capitalisation |
 | `missing_field` | category, title, price or url missing |
 | `bad_type` | e.g. `"vintage":"2021"` instead of `2021` |
@@ -145,4 +151,9 @@ reason codes:
 | `too_many_lines`, `line_too_long` | over the limits above |
 | `gate_unavailable` (pending) | the gate was down; retried automatically |
 
-The full list is in `deal_submission_spec` (`reason_codes`).
+A whole message can also be refused: `reply_not_accepted` (it was a reply;
+send a new message), `no_text_part` (HTML only), `empty` (no deal line
+found).
+
+The full lists are in `deal_submission_spec` (`reason_codes`,
+`message_outcomes`).

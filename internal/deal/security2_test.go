@@ -314,6 +314,21 @@ func TestScanTruncationIsReported(t *testing.T) {
 	}
 }
 
+// NEW-4: a later arrival under an already-seen key still shows in the gauge.
+func TestUnverifiedGaugeSeesANewerArrivalUnderTheSameKey(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	clock := now
+	h := NewHub(map[string]string{"hdd": "imap:deals-hdd"}, nil, "", 14, func() time.Time { return clock })
+	h.Ledger.ObserveConnector("k", "", MsgUnverified, clock.Add(-time.Minute))
+	clock = now.Add(72 * time.Hour)
+	h.Ledger.ObserveConnector("k", "", MsgUnverified, clock.Add(-time.Minute))
+	var b strings.Builder
+	h.Ledger.WriteMetrics(&b)
+	if !strings.Contains(b.String(), "nagus_deal_unverified_last_24h 1\n") || !strings.Contains(b.String(), `nagus_deal_submissions_total{outcome="unverified"} 1`+"\n") {
+		t.Fatalf("gauge hides a fresh arrival, or the counter double-counted:\n%s", b.String())
+	}
+}
+
 // NEW-9: connector-level observations are bounded like the message map.
 func TestObservationsAreBounded(t *testing.T) {
 	h := testHub()

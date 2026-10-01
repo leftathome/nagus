@@ -55,6 +55,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Message.From` is the forwarder (the named original is
   `Message.ForwardedFrom`, aspect `mail_forwarded_from`), and
   `Message.Received` is the IMAP INTERNALDATE.
+- **imap: DKIM alignment has a public-suffix floor** (a signature by `org` or
+  `co.uk` no longer aligns with `example.org`; new dependency
+  `golang.org/x/net/publicsuffix`), **key lookups are bounded** (5s each, 15s
+  per message) and **a permanently refused message is remembered per UID for
+  24h** instead of being fetched and re-verified on every poll of the
+  lookback window. `Message.Reply` reports In-Reply-To / References.
 - **`/mcp` is served by go-service-kit's `mcp` package (v0.3.0)** (quark
   QUARK-06). The hand-rolled JSON-RPC core in `cmd/nagus/mcp.go` is deleted;
   what remains is one `mcp.NewTool` per tool and one `mcp.New`. **The agent
@@ -344,6 +350,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     unverified message from an unknown one and takes a principal ALIAS only;
     the alert reads the gauge `nagus_deal_unverified_last_24h`. Mailbox
     retention is deferred (nagus-kvk).
+  - Hardened again after the re-review (rv35b): a plain sender's REPLY
+    (In-Reply-To / References) is refused whole (`reply_not_accepted`); an
+    item's `source_key` is an opaque hash (`deal-<32 hex>`), no longer
+    carrying the sender address and Message-ID; a url with an invalid or
+    over-nested percent-escape is `bad_url` and the gate also reads a
+    separator-normalised view; the url must be lower-case `https://` on a
+    lower-case public DNS host with no port but 443 (`deal.URLPattern`, the
+    schema's pattern); text fields refuse every space but U+0020, line and
+    paragraph separators, private-use, noncharacter and unassigned code
+    points and combining-mark floods; a forward marker counts only as the
+    first boundary of a forwarder's message; a body cut by the scan cap is
+    reported `scan_truncated`; skipped-mail observations are keyed by UID and
+    bounded; a duplicate-identity message counts as `unverified`.
 - **Title text hints for quark** (quark QUARK-02). A source may set
   `quarkTextHints: true`: when it states no product identifiers (eBay search
   results carry the part number only in the title), the listing TITLE is sent
