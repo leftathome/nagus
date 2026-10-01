@@ -125,9 +125,15 @@ type SourceConfig struct {
 	// deal_submission_spec tool advertises (default: NAGUS_IMAP_USERNAME).
 	// Configure one deal source per enabled category, with the same
 	// allowlist. Real addresses live in gitops only, never in this repo.
-	IMAPSenders       []string          `json:"imapSenders,omitempty"`
-	IMAPSenderAliases map[string]string `json:"imapSenderAliases,omitempty"`
-	DealSubmitTo      string            `json:"dealSubmitTo,omitempty"`
+	//
+	// imapTrustAuthResults (non-deal imap sources only) turns on trusting the
+	// topmost Authentication-Results header of a trusted MX. OFF by default:
+	// ForwardEmail writes no A-R header, so the topmost one would be the
+	// sender's own forgery (rv35 C1). Deal sources refuse it.
+	IMAPTrustAuthResults bool              `json:"imapTrustAuthResults,omitempty"`
+	IMAPSenders          []string          `json:"imapSenders,omitempty"`
+	IMAPSenderAliases    map[string]string `json:"imapSenderAliases,omitempty"`
+	DealSubmitTo         string            `json:"dealSubmitTo,omitempty"`
 	// QuarkTextHints sends a listing's title to quark as hint text when the
 	// source states no product identifiers (quark QUARK-02). For marketplaces
 	// whose part numbers live only in the title (eBay). Title attached only

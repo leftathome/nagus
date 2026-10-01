@@ -56,12 +56,30 @@ func TestDealHubValidation(t *testing.T) {
 		"source-wide producer":  func(s []SourceConfig) { s[0].WineProducer = "Example Cellars" },
 		"mailboxes differ":      func(s []SourceConfig) { s[1].DealSubmitTo = "other@example.net" },
 		"fixture on deal input": func(s []SourceConfig) { s[1].Fixture = "x.json" },
+		"trusts A-R headers":    func(s []SourceConfig) { s[0].IMAPTrustAuthResults, s[1].IMAPTrustAuthResults = true, true },
+		"alias used twice": func(s []SourceConfig) {
+			for i := range s {
+				s[i].IMAPSenderAliases = map[string]string{"caspar@agents.example.org": "x", "human@example.org": "X"}
+			}
+		},
 	} {
 		s := dealSources()
 		mut(s)
 		if _, err := buildDealHub(s, nil); err == nil {
 			t.Errorf("%s: want a startup error", name)
 		}
+	}
+}
+
+// A forward is credited to the forwarder, so a forwarder may have an alias.
+func TestForwarderMayHaveAnAlias(t *testing.T) {
+	s := dealSources()
+	for i := range s {
+		s[i].IMAPSenderAliases = map[string]string{"forwarder@example.org": "household"}
+	}
+	hub, err := buildDealHub(s, nil)
+	if err != nil || hub.Principal("forwarder@example.org") != "household" {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -223,10 +241,13 @@ func TestMCPDealSubmissionStatus(t *testing.T) {
 	if env.Error != nil || r.IsError {
 		t.Fatalf("%+v %+v", env.Error, r)
 	}
-	var v deal.MessageView
-	if err := json.Unmarshal(r.StructuredContent, &v); err != nil {
-		t.Fatal(err)
+	var sc struct {
+		Messages []deal.MessageView `json:"messages"`
 	}
+	if err := json.Unmarshal(r.StructuredContent, &sc); err != nil || len(sc.Messages) != 1 {
+		t.Fatalf("%v %s", err, r.StructuredContent)
+	}
+	v := sc.Messages[0]
 	if v.MessageID != "sub-1@agents.example.org" || len(v.Lines) != 2 || v.Outcome != deal.MsgPartial {
 		t.Fatalf("status %s", r.StructuredContent)
 	}
@@ -244,17 +265,19 @@ func TestMCPDealSubmissionStatus(t *testing.T) {
 		}
 	}
 
-	// By principal (alias or address): outcomes and codes only, no ids.
-	for _, who := range []string{"caspar", "caspar@agents.example.org"} {
-		r, _ = callDealTool(t, srv, "deal_submission_status", `{"principal":"`+who+`","limit":3}`)
-		if bytes.Contains(r.StructuredContent, []byte("offer_id")) || bytes.Contains(r.StructuredContent, []byte("sub-1")) ||
-			!bytes.Contains(r.StructuredContent, []byte(`"reason":"bad_url"`)) {
-			t.Fatalf("principal %s view %s", who, r.StructuredContent)
-		}
+	// By principal ALIAS: outcomes and codes only, no ids.
+	r, _ = callDealTool(t, srv, "deal_submission_status", `{"principal":"caspar","limit":3}`)
+	if bytes.Contains(r.StructuredContent, []byte("offer_id")) || bytes.Contains(r.StructuredContent, []byte("sub-1")) ||
+		!bytes.Contains(r.StructuredContent, []byte(`"reason":"bad_url"`)) {
+		t.Fatalf("principal view %s", r.StructuredContent)
 	}
-	r, _ = callDealTool(t, srv, "deal_submission_status", `{"principal":"human@example.org"}`)
-	if string(r.StructuredContent) != `{"messages":[]}` {
-		t.Fatalf("another sender sees %s", r.StructuredContent)
+	// Never by address, allowlisted or not: the answers must not tell them
+	// apart (rv35 N3).
+	for _, who := range []string{"caspar@agents.example.org", "human@example.org", "stranger@evil.example", "nobody"} {
+		r, _ = callDealTool(t, srv, "deal_submission_status", `{"principal":"`+who+`"}`)
+		if string(r.StructuredContent) != `{"messages":[]}` {
+			t.Fatalf("principal %s sees %s", who, r.StructuredContent)
+		}
 	}
 
 	if r, _ := callDealTool(t, srv, "deal_submission_status", `{"message_id":"nope@example.org"}`); !r.IsError {

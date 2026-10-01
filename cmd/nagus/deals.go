@@ -67,12 +67,23 @@ func validateDealSource(s SourceConfig) error {
 		return fmt.Errorf("source %q: a %s source takes each deal's producer from the deal; drop wineProducer/producerFromBody", s.Name, deal.ParserName)
 	case s.Fixture != "":
 		return fmt.Errorf("source %q: a %s source has no fixture mode", s.Name, deal.ParserName)
+	case s.IMAPTrustAuthResults:
+		// Only nagus's own DKIM verification may admit a deal (rv35 C1).
+		return fmt.Errorf("source %q: a %s source never trusts Authentication-Results headers; drop imapTrustAuthResults", s.Name, deal.ParserName)
 	}
-	senders := lowerSet(s.IMAPSenders)
+	// A forward is credited to the forwarder (rv35 N1), so forwarders are
+	// principals too and may have aliases.
+	principals := append(lowerSet(s.IMAPSenders), lowerSet(s.IMAPForwarders)...)
+	seenAlias := map[string]bool{}
 	for addr, alias := range s.IMAPSenderAliases {
-		if !slices.Contains(senders, strings.ToLower(strings.TrimSpace(addr))) {
-			return fmt.Errorf("source %q: imapSenderAliases names %q, which is not in imapSenders", s.Name, addr)
+		if !slices.Contains(principals, strings.ToLower(strings.TrimSpace(addr))) {
+			return fmt.Errorf("source %q: imapSenderAliases names %q, which is not in imapSenders or imapForwarders", s.Name, addr)
 		}
+		a := strings.ToLower(strings.TrimSpace(alias))
+		if seenAlias[a] {
+			return fmt.Errorf("source %q: alias %q is used twice", s.Name, alias)
+		}
+		seenAlias[a] = true
 		if strings.TrimSpace(alias) == "" || strings.Contains(alias, "@") {
 			return fmt.Errorf("source %q: the alias for %q must be a short name, not empty or an address", s.Name, addr)
 		}
@@ -218,13 +229,13 @@ func (s *server) newDealTools() []mcp.Tool {
 	status := mcp.NewTool(mcp.ToolSpec{
 		Name: "deal_submission_status",
 		Description: "READ-ONLY per-line results for a deal submission email: accepted (with offer_id, usable with get_item, and quark's product_id once resolved), " +
-			"rejected (a reason code), or pending. Give message_id (the Message-ID you sent) for full detail, OR principal (your sender name) " +
+			"rejected (a reason code), or pending. Give message_id (the Message-ID you sent) for full detail, OR principal (your sender NAME, never an address) " +
 			"for your latest messages' outcomes and reason codes only. Never returns line content.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"message_id": map[string]any{"type": "string", "description": "The submission's Message-ID, with or without angle brackets."},
-				"principal":  map[string]any{"type": "string", "description": "Your sender name (alias) or sender address; returns outcomes and reason codes only."},
+				"principal":  map[string]any{"type": "string", "description": "Your sender name (alias, not an address); returns outcomes and reason codes only."},
 				"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": dealStatusMaxLimit},
 			},
 			"additionalProperties": false,
@@ -298,12 +309,20 @@ func (s *server) mcpDealStatus(ctx context.Context, a dealStatusArgs) (mcp.Resul
 		}
 		return mcp.Structured(len(msgs), map[string]any{"messages": msgs}), nil
 	}
-	v, ok := s.deals.Ledger.Lookup(a.MessageID)
-	if !ok {
+	// Every verified sender's message with that id: ids are sender-chosen,
+	// so two allowlisted senders may share one, and each keeps its own entry
+	// (rv35 I5). Unknown and unverified ids both answer not-found (N3).
+	msgs := s.deals.Ledger.LookupAll(a.MessageID)
+	if len(msgs) == 0 {
 		return mcp.NotFound(), nil
 	}
-	s.withResolutions(ctx, v.Lines)
-	return mcp.Structured(1, v), nil
+	if len(msgs) > limit {
+		msgs = msgs[:limit]
+	}
+	for i := range msgs {
+		s.withResolutions(ctx, msgs[i].Lines)
+	}
+	return mcp.Structured(len(msgs), map[string]any{"messages": msgs}), nil
 }
 
 // withResolutions stamps quark's answer onto accepted lines from the offer

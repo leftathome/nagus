@@ -97,7 +97,11 @@ spec:
       interval: 1m
       rules:
         - alert: NagusDealSubmissionUnverified
-          expr: sum by (namespace) (increase(nagus_deal_submissions_total{namespace="{{ $ns }}", outcome="unverified"}[1h])) > 0
+          # A gauge over ARRIVAL time (IMAP INTERNALDATE), not a counter: the
+          # counter recounts the whole lookback window after a restart and
+          # would re-fire for old mail (rv35 N7). Resolves 24h after the last
+          # such message arrived.
+          expr: max by (namespace) (nagus_deal_unverified_last_24h{namespace="{{ $ns }}"}) > 0
           labels:
             severity: warning
           annotations:
