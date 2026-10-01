@@ -401,6 +401,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     first boundary of a forwarder's message; a body cut by the scan cap is
     reported `scan_truncated`; skipped-mail observations are keyed by UID and
     bounded; a duplicate-identity message counts as `unverified`.
+  - Third pass (rv35c): in `title`, `note`, `seller` and `brand`, tabs and
+    every space separator (NBSP, narrow NBSP, typographic spaces) are
+    normalised to a plain space before validation instead of refusing the
+    line (`url`, `mpn`, `gtin` and the other identity-like fields are not);
+    U+FFFC and U+1D159 are refused; `.localdomain`, `.intranet`, `.private`
+    and `.cluster` hosts are refused; unverified observations are evicted
+    last; the DKIM "temporary" flag is atomic. Open: nagus-0ji (forwarder
+    path; keep `imapForwarders` unset until real forwards are captured),
+    nagus-eg2 (tarpit DNS re-verified each poll).
 - **Title text hints for quark** (quark QUARK-02). A source may set
   `quarkTextHints: true`: when it states no product identifiers (eBay search
   results carry the part number only in the title), the listing TITLE is sent

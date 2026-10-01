@@ -30,7 +30,13 @@ domain that nagus verifies itself. Mail from anyone else is ignored and only
 counted. A household member may also forward an allowlisted sender's
 submission by hand from a configured forwarding address; it is credited to
 the FORWARDER (the address that was verified), not to whoever the forwarded
-text names.
+text names. A forwarding-only address that sends a fresh message of its own
+(not a forward) is not a sender: nothing is read and there is no status for
+it at all. To submit directly, the address must be on the sender list.
+
+Operator note: forwarding is optional and should stay OFF (`imapForwarders`
+unset) until real forwards from the household's mail clients have been
+captured and checked (nagus-0ji). Direct submission does not need it.
 
 The address to send to is the deals mailbox. Ask Caspar, or read `mailbox`
 from the MCP tool `deal_submission_spec`: it comes from configuration and is
@@ -85,9 +91,13 @@ Thanks!
 
 Any other field, a known field spelled differently (`Title`), or the same
 field twice refuses that line. Text fields may use accents and any script (Chateau with a circumflex,
-Rose with an acute, umlauts, Japanese), but not control characters, invisible
-ones (zero-width characters, right-to-left overrides, soft hyphens), or
-unusual spaces: use the ordinary space, not a non-breaking one. `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
+Rose with an acute, umlauts, Japanese), but not control characters or
+invisible ones (zero-width characters, right-to-left overrides, soft hyphens,
+line separators). In `title`, `note`, `seller` and `brand` you can paste text
+as it is: tabs, non-breaking spaces and other typographic spaces are turned
+into ordinary spaces (so "2015 : 75 cl" copied from a French shop page is
+fine). In `url`, `mpn`, `gtin`, `currency` and `price` an odd space is an
+error. `brand`, `mpn` and `gtin` are how nagus's catalog (quark) recognises a
 drive; for wine, the producer in `brand` plus the title is how it recognises
 the wine, so give the producer whenever you know it.
 
@@ -137,7 +147,7 @@ reason codes:
 | Code | Meaning |
 |---|---|
 | `bad_json` | not one valid JSON object on the line (often: the line was wrapped; also a repeated field) |
-| `bad_value` | out of range, too long, or contains control/invisible characters or unusual spaces |
+| `bad_value` | out of range, too long, or contains control/invisible characters |
 | `scan_truncated` | the message was longer than the part that is read |
 | `unknown_field` | a field the spec does not have, or wrong capitalisation |
 | `missing_field` | category, title, price or url missing |

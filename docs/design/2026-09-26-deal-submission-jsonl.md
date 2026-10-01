@@ -88,7 +88,7 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | `category` | yes | string | `wine` or `hdd` |
 | `title` | yes | string | 1-300 chars of visible text (see Text) |
 | `price` | yes | decimal string or number | major units, `^[0-9]{1,7}(\.[0-9]{1,2})?$`, > 0, <= 1000000 |
-| `url` | yes | string | exactly lower-case `https://`; printable ASCII; <= 512 chars; a lower-case DNS host of two or more labels whose last label starts with a letter (so no IP literal in any spelling) and is not `local`, `localhost`, `internal`, `lan`, `home`, `corp`, `svc`, `test`, `invalid`, `arpa`, `onion`; no userinfo, no backslash, no port but `:443`; every `%` a valid escape, nested at most twice. The schema's `pattern` is the same regular expression the validator uses (`deal.URLPattern`) |
+| `url` | yes | string | exactly lower-case `https://`; printable ASCII; <= 512 chars; a lower-case DNS host of two or more labels whose last label starts with a letter (so no IP literal in any spelling) and is not `local`, `localhost`, `localdomain`, `internal`, `intranet`, `private`, `lan`, `home`, `corp`, `svc`, `cluster`, `test`, `invalid`, `arpa`, `onion`; no userinfo, no backslash, no port but `:443`; every `%` a valid escape, nested at most twice. The schema's `pattern` is the same regular expression the validator uses (`deal.URLPattern`) |
 | `currency` | no | string | ISO 4217 `^[A-Z]{3}$`, default `USD` |
 | `seller` | no | string | <= 100 chars; the store/merchant |
 | `brand` | no | string | <= 100 chars; hdd: product hint; wine: the producer |
@@ -101,13 +101,23 @@ and `TestSchemaMetaCoversEveryField` fails if a field has no metadata.
 | `note` | no | string | <= 1000 chars; stored, NEVER used for identity |
 | `schema` | no | string | if present, exactly `nagus.deal/v1` |
 
+- **Spaces in free text are normalised, not refused.** In `title`, `note`,
+  `seller` and `brand`, every space separator (Unicode Zs: NBSP, narrow NBSP,
+  the typographic and ideographic spaces) and the tab becomes U+0020, runs
+  collapse and the ends are trimmed, BEFORE validation; the stored and gated
+  text is the normalised one. Titles copied from retail pages routinely carry
+  an NBSP ("2015 : 75 cl"). `url`, `mpn`, `gtin`, `currency`, `price` and the
+  enums are never normalised: an odd space there is an error. Line and
+  paragraph separators, controls and format characters are not spaces and
+  stay refused everywhere.
 - **Text.** Every text field (title, note, seller, brand, mpn, and the
   decoded url) may hold letters, marks, numbers, punctuation and symbols of
   any script and the plain ASCII space. Refused (`bad_value`, or `bad_url`):
   controls; format and other default-ignorable characters (bidi overrides and
   isolates, zero-width characters, soft hyphen, BOM, Hangul fillers,
-  variation selectors, tag characters); every space but U+0020 (NBSP, the
-  typographic spaces, U+2028/U+2029); the Braille blank; private-use,
+  variation selectors, tag characters); U+2028/U+2029, and any other space
+  but U+0020 where normalisation does not apply; blank symbols (Braille
+  blank, object replacement, musical null notehead); private-use,
   noncharacter, unassigned and replacement code points; a combining mark with
   no base or more than four on one base. Accented and non-Latin names pass.
 - **Strict decode.** Unknown fields refuse the line (`unknown_field`), and so
@@ -382,6 +392,38 @@ would only raise the work an unsigned flood can cause.
 
 **Operator-visible only.** The connector's log line for a refused spoof names
 the claimed address and domain. Logs are not an MCP surface.
+
+## Third security pass (rv35c, 2026-09-30)
+
+Approved with nits; fixed in the same MR:
+
+| # | Finding | Decision | Test |
+|---|---|---|---|
+| R1 | Data race on the "temporary" flag when several signatures' key lookups time out | `atomic.Bool` | `TestManyTimingOutSignaturesAreRaceFree` (under `-race`) |
+| R3 | A flood of unknown-sender mail evicted the unverified observations the gauge reads | unverified entries are evicted last | `TestUnverifiedOutlivesAnUnknownSenderFlood` |
+| R5 | Refusing NBSP and friends refused real titles | space normalisation in title, note, seller, brand (see Spec) | `TestSpacesAreNormalisedInFreeText` |
+| nits | U+FFFC and U+1D159 refused; `.localdomain`, `.intranet`, `.private`, `.cluster` refused; the schema says its patterns are ECMA-262 (`$` is end of string; Python's `re` differs) | -- | `TestTextCharacterClasses`, `TestURLHostIsAPublicDNSName` |
+
+Open, by bead:
+
+- **nagus-0ji (R2).** The forwarder path is the weakest part: it is exempt
+  from the reply rule on the unverified claim that mail clients set
+  `References` on forwards, and a forwarder's reply from a non-quoting client
+  with a header block nagus does not recognise (a language not in the
+  pattern list) could still carry a stranger's fake forward marker.
+  **Recommendation: leave `imapForwarders` unset** until real forwards from
+  the household's clients have been captured with `TestRealCapturedMessage`.
+  Without forwarders, only directly sent, fresh, DKIM-verified messages are
+  read.
+- **nagus-eg2 (R4).** A DKIM key lookup that never answers makes the refusal
+  temporary, so it is not remembered and costs up to the per-message budget
+  on every poll; bounded and linear. The same bead notes that the source-key
+  hash has no server secret (confirming a guessed address needs the
+  Message-ID).
+
+A configured forwarding address that sends a FRESH message (not a forward)
+is not a sender: the message is counted `invalid` and has no status at all.
+To submit directly, the address must be in `imapSenders`.
 
 ## Rejected alternatives
 
