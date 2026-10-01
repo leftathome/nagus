@@ -194,6 +194,7 @@ const (
 	ReasonNone                Reason = ""
 	ReasonLineTooLong         Reason = "line_too_long"
 	ReasonTooManyLines        Reason = "too_many_lines"
+	ReasonScanTruncated       Reason = "scan_truncated"
 	ReasonBadJSON             Reason = "bad_json"
 	ReasonUnknownField        Reason = "unknown_field"
 	ReasonBadType             Reason = "bad_type"

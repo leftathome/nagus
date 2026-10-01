@@ -28,15 +28,18 @@ const (
 // Message outcomes: the bounded label set of nagus_deal_submissions_total.
 // The first three are derived from a message's lines once all are final.
 const (
-	MsgAccepted      = "accepted" // every deal line accepted
-	MsgPartial       = "partial"  // some accepted, some rejected
-	MsgRejected      = "rejected" // had deal lines, none accepted
-	MsgEmpty         = "empty"    // a verified message with no deal line
-	MsgNoTextPart    = "no_text_part"
-	MsgUnknownSender = "unknown_sender"
-	MsgUnverified    = "unverified"
-	MsgTooLarge      = "too_large"
-	MsgInvalid       = "invalid"
+	MsgAccepted   = "accepted" // every deal line accepted
+	MsgPartial    = "partial"  // some accepted, some rejected
+	MsgRejected   = "rejected" // had deal lines, none accepted
+	MsgEmpty      = "empty"    // a verified message with no deal line
+	MsgNoTextPart = "no_text_part"
+	// MsgReplyNotAccepted: a plain sender's message carried In-Reply-To or
+	// References. A submission is a fresh message; replies are not read.
+	MsgReplyNotAccepted = "reply_not_accepted"
+	MsgUnknownSender    = "unknown_sender"
+	MsgUnverified       = "unverified"
+	MsgTooLarge         = "too_large"
+	MsgInvalid          = "invalid"
 )
 
 // MessageOutcomes is every message outcome, in metric order.
@@ -47,6 +50,10 @@ var MessageOutcomes = []string{MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, M
 // for longest is dropped (rv35 I1). Far above what a household sends in a
 // lookback window.
 const MaxLedgerMessages = 5000
+
+// MaxObserved bounds the connector-level observations (unknown senders,
+// unverified mail) remembered for once-only counting (rv35b NEW-9).
+const MaxObserved = 20000
 
 // UnverifiedRecentWindow is the window of nagus_deal_unverified_last_24h.
 const UnverifiedRecentWindow = 24 * time.Hour

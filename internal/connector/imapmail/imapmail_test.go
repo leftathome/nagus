@@ -26,9 +26,14 @@ var now = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 
 // server runs a real IMAP server in-process and appends the given messages.
 func server(t *testing.T, msgs map[string]time.Time) string {
+	return serverFor(t, "deals@totally.apocryph.al", msgs)
+}
+
+// serverFor is server with the mailbox login named by the caller.
+func serverFor(t *testing.T, login string, msgs map[string]time.Time) string {
 	t.Helper()
 	mem := imapmemserver.New()
-	user := imapmemserver.NewUser("deals@totally.apocryph.al", "pw")
+	user := imapmemserver.NewUser(login, "pw")
 	if err := user.Create("INBOX", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +57,7 @@ func server(t *testing.T, msgs map[string]time.Time) string {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := c.Login("deals@totally.apocryph.al", "pw").Wait(); err != nil {
+	if err := c.Login(login, "pw").Wait(); err != nil {
 		t.Fatal(err)
 	}
 	for raw, at := range msgs {
@@ -447,7 +452,7 @@ func TestSendersListConfig(t *testing.T) {
 func TestSendersAreEachVerifiedAndCredited(t *testing.T) {
 	kr := newKeyring(t)
 	recent := now.Add(-time.Hour)
-	addr := server(t, map[string]time.Time{
+	addr := serverFor(t, testMailbox, map[string]time.Time{
 		kr.sign(eml("a-1@x", "agent@agents.example.org", "A", ""), "agents.example.org"): recent,
 		kr.sign(eml("h-1@x", "human@example.org", "H", ""), "example.org"):               recent,
 		// signed by the OTHER sender's domain: not a pass for this one
@@ -457,7 +462,7 @@ func TestSendersAreEachVerifiedAndCredited(t *testing.T) {
 	host, port, _ := net.SplitHostPort(addr)
 	var obs []Observation
 	rec := &recorder{}
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: "deals@totally.apocryph.al",
+	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
 		Password: "pw", Senders: []string{"agent@agents.example.org", "human@example.org"}, Parser: rec, CountIgnored: true,
 		Observe: func(o Observation) { obs = append(obs, o) }, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
 	if err != nil {

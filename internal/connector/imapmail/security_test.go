@@ -34,8 +34,8 @@ func dealConn(t *testing.T, senders []string, kr *keyring, mut ...func(*Config))
 // written by the SENDER (ForwardEmail writes none, so nothing sits above it)
 // must not be accepted. A-R trust is off unless a source opts in.
 func TestForgedTopmostAuthResultsIsNotTrusted(t *testing.T) {
-	c := dealConn(t, []string{"household@gmail.com"}, nil)
-	raw := eml("forged-1@x", "household@gmail.com", "S", "mx1.forwardemail.net; dkim=pass header.d=gmail.com")
+	c := dealConn(t, []string{"household@example.com"}, nil)
+	raw := eml("forged-1@x", "household@example.com", "S", "mx1.forwardemail.net; dkim=pass header.d=example.com")
 	if msg, why := c.verify([]byte(raw)); why == "" {
 		t.Fatalf("EXPLOIT: unsigned mail with a forged topmost A-R accepted as %s", msg.From)
 	}
@@ -105,10 +105,10 @@ func TestDisplayNameMatchIsNotFetched(t *testing.T) {
 	big := strings.Repeat("padding line\r\n", 400)
 	raw := "Message-ID: <dn-1@x>\r\nFrom: \"human@example.org\" <stranger@evil.example>\r\nTo: deals@example.net\r\nSubject: x\r\n" +
 		"Date: Tue, 22 Sep 2026 08:00:00 +0000\r\n\r\n" + big
-	addr := server(t, map[string]time.Time{raw: now.Add(-time.Hour)})
+	addr := serverFor(t, testMailbox, map[string]time.Time{raw: now.Add(-time.Hour)})
 	host, port, _ := net.SplitHostPort(addr)
 	var obs []Observation
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: "deals@totally.apocryph.al",
+	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
 		Password: "pw", Senders: []string{"human@example.org"}, Parser: &recorder{}, MaxBytes: 1024,
 		Observe: func(o Observation) { obs = append(obs, o) }, Now: func() time.Time { return now }})
 	if err != nil {
@@ -128,10 +128,10 @@ func TestReceivedIsTheInternalDate(t *testing.T) {
 	kr := newKeyring(t)
 	arrived := now.Add(-3 * time.Hour).Truncate(time.Second)
 	raw := strings.Replace(eml("d-1@x", "human@example.org", "A", ""), "Date: Tue, 22 Sep 2026 08:00:00", "Date: Fri, 01 Jan 2100 00:00:00", 1)
-	addr := server(t, map[string]time.Time{kr.sign(raw, "example.org"): arrived})
+	addr := serverFor(t, testMailbox, map[string]time.Time{kr.sign(raw, "example.org"): arrived})
 	host, port, _ := net.SplitHostPort(addr)
 	rec := &recorder{}
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: "deals@totally.apocryph.al",
+	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
 		Password: "pw", Senders: []string{"human@example.org"}, Parser: rec, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)

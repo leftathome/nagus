@@ -94,6 +94,9 @@ const DefaultLookbackDays = 14
 // DefaultMaxBytes bounds one message; a larger one is skipped, not truncated.
 const DefaultMaxBytes = 4 << 20
 
+// DefaultDNSTimeout bounds one DKIM key lookup.
+const DefaultDNSTimeout = 5 * time.Second
+
 // DefaultTrustedAuthServ is the receiving MX whose Authentication-Results
 // header is trusted: ForwardEmail holds the MX for apocryph.al.
 var DefaultTrustedAuthServ = []string{"forwardemail.net"}
@@ -115,10 +118,13 @@ type Message struct {
 	// Received is when the mail server received the message (IMAP
 	// INTERNALDATE), which the sender cannot set. Date is the sender's claim.
 	Received time.Time
-	Subject  string
-	Date     time.Time
-	Text     string // the text/plain part, if any (format=flowed is un-flowed)
-	HTML     string // the text/html part, if any
+	// Reply reports an In-Reply-To or References header: the message is a
+	// reply or a forward, not a fresh one.
+	Reply   bool
+	Subject string
+	Date    time.Time
+	Text    string // the text/plain part, if any (format=flowed is un-flowed)
+	HTML    string // the text/html part, if any
 }
 
 // SkipReason is why the connector skipped a message before any parser saw
@@ -213,6 +219,9 @@ type Config struct {
 	// Forwarders are addresses whose DKIM-verified forwards of this sender's
 	// mail are accepted as the sender's (the household's own mailboxes).
 	Forwarders []string
+	// DNSTimeout bounds one DKIM key lookup; 0 = DefaultDNSTimeout. A whole
+	// message's verification gets three times that.
+	DNSTimeout time.Duration
 	// LookupTXT resolves DKIM public keys; nil = the system resolver.
 	LookupTXT    func(domain string) ([]string, error)
 	LookbackDays int
