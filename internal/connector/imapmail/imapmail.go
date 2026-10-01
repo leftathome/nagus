@@ -81,6 +81,7 @@ import (
 	_ "github.com/emersion/go-message/charset" // non-UTF-8 bodies
 	"github.com/emersion/go-message/mail"
 	"github.com/emersion/go-msgauth/dkim"
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/leftathome/nagus/internal/listing"
 )
@@ -236,6 +237,48 @@ type Connector struct {
 	cfg          Config
 	mu           sync.Mutex
 	lastComplete bool
+	// verdicts remembers, per UID key, a message this connector already
+	// refused for a PERMANENT reason, so it is not fetched and re-verified
+	// (a DNS lookup each) on every poll of the lookback window (rv35b
+	// NEW-10). Bounded; entries expire so a sender that fixes its DKIM is
+	// picked up again.
+	verdicts map[string]verdict
+}
+
+type verdict struct {
+	why string
+	at  time.Time
+}
+
+const (
+	maxVerdicts = 10000
+	verdictTTL  = 24 * time.Hour
+)
+
+// remembered returns a fresh stored verdict for a UID key.
+func (c *Connector) remembered(key string, now time.Time) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.verdicts[key]
+	if !ok || now.Sub(v.at) > verdictTTL {
+		delete(c.verdicts, key)
+		return "", false
+	}
+	return v.why, true
+}
+
+func (c *Connector) remember(key, why string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.verdicts == nil {
+		c.verdicts = map[string]verdict{}
+	}
+	if len(c.verdicts) >= maxVerdicts {
+		// Full: forget everything. The cost is one more verification each;
+		// the bound is what matters.
+		c.verdicts = map[string]verdict{}
+	}
+	c.verdicts[key] = verdict{why: why, at: now}
 }
 
 // NewConnector validates and fills defaults.
@@ -387,6 +430,12 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 				c.observe(Observation{Key: uidKey(m.UID), Reason: SkipTooLarge, Received: m.InternalDate})
 				continue
 			}
+			if why, ok := c.remembered(uidKey(m.UID), now); ok {
+				// Refused on an earlier poll: reported again, not re-read.
+				skipped[why]++
+				c.observe(Observation{Key: uidKey(m.UID), Reason: skipReasonFor(why), Received: m.InternalDate})
+				continue
+			}
 			fetchUIDs = append(fetchUIDs, m.UID)
 		}
 	}
@@ -408,21 +457,22 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			for _, b := range m.BodySection {
 				raw = b.Bytes
 			}
-			msg, why := c.verify(raw)
+			msg, why, temporary := c.verifyMessage(raw)
 			if why != "" {
 				skipped[why]++
-				o := Observation{Key: uidKey(m.UID), Reason: skipReasonFor(why), Received: at}
-				if msg.ID != "" {
-					o.Key, o.MessageID = msg.ID, msg.ID
+				if !temporary {
+					c.remember(uidKey(m.UID), why, now)
 				}
-				c.observe(o)
+				// Keyed by UID, never by the Message-ID: a spoofer writes
+				// that, and reusing one would hide later spoofs (rv35b NEW-4).
+				c.observe(Observation{Key: uidKey(m.UID), MessageID: msg.ID, Reason: skipReasonFor(why), Received: at})
 				continue
 			}
 			msg.Received = at
 			raws, err := c.cfg.Parser.Parse(msg)
 			if err != nil {
 				skipped["parse: "+err.Error()]++
-				c.observe(Observation{Key: msg.ID, MessageID: msg.ID, Reason: SkipParseError, Received: at})
+				c.observe(Observation{Key: uidKey(m.UID), MessageID: msg.ID, Reason: SkipParseError, Received: at})
 				continue
 			}
 			for i := range raws {
@@ -497,7 +547,10 @@ func skipReasonFor(why string) SkipReason {
 	switch why {
 	case whyNotSender:
 		return SkipUnknownSender
-	case whyNoDKIM:
+	case whyNoDKIM, whyDupHeader:
+		// A duplicated identity header reached verify only because its
+		// envelope From is an allowlisted address: it is an attempt on that
+		// identity, and counts (and alerts) with the unverified.
 		return SkipUnverified
 	default:
 		return SkipInvalid
@@ -523,6 +576,20 @@ func (c *Connector) dial() (*imapclient.Client, error) {
 // declared forwarder) with a DKIM pass for that address's domain. A non-empty
 // reason means it was skipped.
 func (c *Connector) verify(raw []byte) (Message, string) {
+	m, why, _ := c.verifyMessage(raw)
+	return m, why
+}
+
+// verifyMessage is verify, also reporting whether a refusal is TEMPORARY (a
+// DNS lookup that failed or timed out): only permanent refusals are
+// remembered.
+func (c *Connector) verifyMessage(raw []byte) (Message, string, bool) {
+	temporary := false
+	m, why := c.verifyWith(raw, &temporary)
+	return m, why, temporary && why == whyNoDKIM
+}
+
+func (c *Connector) verifyWith(raw []byte, temporary *bool) (Message, string) {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
 		return Message{}, "unparseable"
@@ -556,7 +623,7 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 			return Message{}, whyNotSender
 		}
 	}
-	if !(c.cfg.TrustAuthResults && c.dkimVerified(h.Values("Authentication-Results"), domain)) && !c.dkimSigned(raw, domain) {
+	if !(c.cfg.TrustAuthResults && c.dkimVerified(h.Values("Authentication-Results"), domain)) && !c.dkimSigned(raw, domain, temporary) {
 		if c.cfg.Logf != nil {
 			c.cfg.Logf("imapmail %s: REJECTED a message claiming to be from %s without a verified DKIM pass for %s (possible spoof)",
 				c.cfg.Name, addr, domain)
@@ -570,7 +637,8 @@ func (c *Connector) verify(raw []byte) (Message, string) {
 	}
 	subject, _ := h.Subject()
 	date, _ := h.Date()
-	msg := Message{ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder}
+	msg := Message{ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder,
+		Reply: h.Has("In-Reply-To") || h.Has("References")}
 	for {
 		p, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -682,9 +750,13 @@ func htmlText(s string) string {
 // dkimSigned verifies the message's DKIM signatures itself and reports whether
 // one that verifies is aligned to domain. Bare LF line endings are restored to
 // CRLF first: DKIM canonicalization is defined over CRLF.
-func (c *Connector) dkimSigned(raw []byte, domain string) bool {
+//
+// Key lookups are bounded: DNSTimeout each, and three times that for the
+// whole message (rv35b NEW-10). *temporary is set when a lookup failed
+// temporarily or timed out, so the caller does not remember the refusal.
+func (c *Connector) dkimSigned(raw []byte, domain string, temporary *bool) bool {
 	norm := bytes.ReplaceAll(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))
-	verifs, err := dkim.VerifyWithOptions(bytes.NewReader(norm), &dkim.VerifyOptions{LookupTXT: c.cfg.LookupTXT, MaxVerifications: 5})
+	verifs, err := dkim.VerifyWithOptions(bytes.NewReader(norm), &dkim.VerifyOptions{LookupTXT: c.boundedLookup(temporary), MaxVerifications: 5})
 	if err != nil {
 		return false
 	}
@@ -707,10 +779,72 @@ func coversFrom(keys []string) bool {
 	return false
 }
 
-// aligned is relaxed DKIM alignment: the signing domain d is the domain
-// itself or one of its parents.
+// boundedLookup wraps the DKIM key lookup with a per-lookup timeout and a
+// per-message budget. A lookup that does not answer in time is a TEMPORARY
+// failure.
+func (c *Connector) boundedLookup(temporary *bool) func(string) ([]string, error) {
+	per := c.cfg.DNSTimeout
+	if per <= 0 {
+		per = DefaultDNSTimeout
+	}
+	deadline := time.Now().Add(3 * per)
+	base := c.cfg.LookupTXT
+	return func(name string) ([]string, error) {
+		wait := min(per, time.Until(deadline))
+		timeout := &net.DNSError{Err: "dkim key lookup timed out", Name: name, IsTimeout: true, IsTemporary: true}
+		if wait <= 0 {
+			*temporary = true
+			return nil, timeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), wait)
+		defer cancel()
+		type answer struct {
+			txt []string
+			err error
+		}
+		ch := make(chan answer, 1)
+		go func() {
+			var a answer
+			if base != nil {
+				a.txt, a.err = base(name)
+			} else {
+				a.txt, a.err = net.DefaultResolver.LookupTXT(ctx, name)
+			}
+			ch <- a
+		}()
+		select {
+		case a := <-ch:
+			var ne net.Error
+			if errors.As(a.err, &ne) && (ne.Timeout() || isTemporary(a.err)) {
+				*temporary = true
+			}
+			return a.txt, a.err
+		case <-ctx.Done():
+			*temporary = true
+			return nil, timeout
+		}
+	}
+}
+
+func isTemporary(err error) bool {
+	var de *net.DNSError
+	return errors.As(err, &de) && de.IsTemporary
+}
+
+// aligned is relaxed DKIM alignment with a public-suffix floor: the signing
+// domain d is the From domain itself or one of its parents, and no shallower
+// than the From domain's registrable domain (eTLD+1). So d=example.org
+// vouches for mail.example.org, but d=org or d=co.uk vouches for nothing
+// (rv35b). When the registrable domain cannot be determined, d must have at
+// least two labels.
 func aligned(d, domain string) bool {
-	return d != "" && (d == domain || strings.HasSuffix(domain, "."+d))
+	if d == "" || (d != domain && !strings.HasSuffix(domain, "."+d)) {
+		return false
+	}
+	if reg, err := publicsuffix.EffectiveTLDPlusOne(domain); err == nil {
+		return d == reg || strings.HasSuffix(d, "."+reg)
+	}
+	return strings.Contains(d, ".")
 }
 
 func domainOf(addr string) string {
