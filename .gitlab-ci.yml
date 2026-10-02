@@ -273,6 +273,7 @@ test:
 # :latest single-arch.
 # ---------------------------------------------------------------------------
 build-amd64:
+  tags: [cluster]
   extends: .kaniko-build-amd64
   stage: build
   needs: ["test"]
@@ -283,6 +284,7 @@ build-amd64:
     DOCKERFILE: ./Dockerfile
 
 build-arm64:
+  tags: [cluster]
   extends: .kaniko-build-arm64
   stage: build
   needs: ["test"]
@@ -295,6 +297,7 @@ build-arm64:
 # The index. This is the job whose output the HelmRelease consumes -- the legs'
 # per-arch tags are an implementation detail and are never deployed directly.
 build:
+  tags: [cluster]
   extends: .manifest-merge
   stage: build
   needs: ["build-amd64", "build-arm64"]
@@ -307,6 +310,7 @@ build:
 # stamps chart version/appVersion from the tag.
 # ---------------------------------------------------------------------------
 chart:
+  tags: [cluster]
   extends: .helm-push
   stage: chart
   needs: ["build"]
