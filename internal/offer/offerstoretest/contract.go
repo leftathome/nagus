@@ -95,6 +95,8 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("SellerFilterIsCaseSensitive", func(t *testing.T) { sellerFilterIsCaseSensitive(t, newStore(t)) })
 	t.Run("AspectsRoundTrip", func(t *testing.T) { aspectsRoundTrip(t, newStore(t)) })
 	t.Run("ConcurrentWritesFromManySources", func(t *testing.T) { concurrentWrites(t, newStore(t)) })
+	// offer timing (nagus-417) -- see timing.go.
+	runTiming(t, newStore)
 }
 
 // offer.Store documents that implementations MUST be safe for concurrent use,

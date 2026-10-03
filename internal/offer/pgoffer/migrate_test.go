@@ -76,3 +76,58 @@ func TestMigrationAddsResolutionToExistingTable(t *testing.T) {
 		t.Fatalf("resolution lost across reopen: %+v", again.Resolution)
 	}
 }
+
+// The prod table as it stands before the offer-timing columns (nagus-417):
+// every column up to vintage_mode, with a live row that has a first_seen.
+const preTimingRows = `
+ALTER TABLE offers ADD COLUMN resolution_state TEXT NOT NULL DEFAULT 'unattempted';
+ALTER TABLE offers ADD COLUMN product_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE offers ADD COLUMN resolution_generation BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE offers ADD COLUMN resolved_at_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE offers ADD COLUMN hint_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE offers ADD COLUMN vintage_mode TEXT NOT NULL DEFAULT '';
+INSERT INTO offers (id, source_id, source_key, title, price_cents, first_seen_ns, last_seen_ns, min_price_cents)
+VALUES ('timed-1', 'shopify:old', 't1', 'A timed drive', 4000, 1740000000000000000, 1750000000000000000, 3500);
+`
+
+func TestMigrationBackfillsPriceChangedAt(t *testing.T) {
+	dsn := pgtest.DSN(t, "pgoffer_migrate_timing")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	raw, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(ctx, preResolutionSchema+preTimingRows); err != nil {
+		t.Fatalf("build pre-timing table: %v", err)
+	}
+
+	s, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("New on a pre-timing table: %v", err)
+	}
+	defer s.Close()
+	first := time.Unix(0, 1740000000000000000).UTC()
+	got, ok, err := s.Get(ctx, "timed-1")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if !got.PriceChangedAt.Equal(first) || got.PreviousPriceCents != 0 || !got.EndsAt.IsZero() {
+		t.Fatalf("migrated offer timing: %+v", got)
+	}
+	// The backfill wrote the column itself, not only the read fallback.
+	var stored int64
+	if err := raw.QueryRow(ctx, `SELECT price_changed_at_ns FROM offers WHERE id = 'timed-1'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != first.UnixNano() {
+		t.Fatalf("price_changed_at_ns = %d, want %d (backfilled)", stored, first.UnixNano())
+	}
+	// A row with no first_seen is left alone and reads as zero.
+	legacy, _, _ := s.Get(ctx, "legacy-1")
+	if !legacy.PriceChangedAt.IsZero() {
+		t.Fatalf("legacy row without first_seen: price_changed_at = %v", legacy.PriceChangedAt)
+	}
+}

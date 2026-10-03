@@ -77,7 +77,10 @@ CREATE TABLE IF NOT EXISTS offers (
 	resolution_state      TEXT NOT NULL DEFAULT 'unattempted',
 	product_id            TEXT NOT NULL DEFAULT '',
 	resolution_generation BIGINT NOT NULL DEFAULT 0,
-	resolved_at_ns        BIGINT NOT NULL DEFAULT 0
+	resolved_at_ns        BIGINT NOT NULL DEFAULT 0,
+	price_changed_at_ns   BIGINT NOT NULL DEFAULT 0,
+	previous_price_cents  BIGINT NOT NULL DEFAULT 0,
+	ends_at_ns            BIGINT NOT NULL DEFAULT 0
 );
 
 -- quark resolution columns, added after the table first shipped. ADD COLUMN IF
@@ -92,6 +95,12 @@ ALTER TABLE offers ADD COLUMN IF NOT EXISTS hint_text TEXT NOT NULL DEFAULT '';
 -- QUARK-04 wine vintage mode, from quark's resolution specs: additive; ''
 -- (quark said nothing) is exactly true of every existing row.
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS vintage_mode TEXT NOT NULL DEFAULT '';
+-- Offer timing (nagus-417, docs/design/2026-10-03-new-deals-offer-timing.md).
+-- A constant DEFAULT makes each ADD COLUMN catalog-only (PostgreSQL 11+): no
+-- table rewrite, whatever the row count.
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS price_changed_at_ns BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS previous_price_cents BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS ends_at_ns BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
@@ -102,6 +111,17 @@ CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_stat
 CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
 `
 
+// backfill gives every offer stored before price_changed_at_ns existed the
+// value a first insert gets: its first_seen. Idempotent: every upsert writes a
+// non-zero value, so after the first run nothing matches and a startup pays
+// one sequential scan that updates nothing. The first run rewrites each
+// existing row once. Reads do not depend on it (scanOffers falls back to
+// first_seen), so a row an older binary inserts during a rollout still reads
+// correctly. Measured cost: docs/design/2026-10-03-new-deals-offer-timing.md.
+const backfill = `
+UPDATE offers SET price_changed_at_ns = first_seen_ns
+ WHERE price_changed_at_ns = 0 AND first_seen_ns <> 0`
+
 // New opens a pgxpool against dsn and ensures the offer schema exists.
 func New(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
@@ -111,6 +131,10 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pgoffer: schema: %w", err)
+	}
+	if _, err := pool.Exec(ctx, backfill); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pgoffer: backfill price_changed_at: %w", err)
 	}
 	return &Store{pool: pool}, nil
 }
@@ -155,9 +179,21 @@ INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
-  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
+  price_changed_at_ns, ends_at_ns
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
 ON CONFLICT (id) DO UPDATE SET
+  -- Price change (offer.Store.Put): a different non-zero price stamps the
+  -- observation time (never earlier than the stored stamp) and records the
+  -- stored price as the previous one. Read before price_cents is overwritten
+  -- below, like the hint CASEs. A stored 0 stamp predates the column: it
+  -- means first_seen.
+  price_changed_at_ns = CASE WHEN `+priceChanged+`
+    THEN GREATEST(`+storedPriceChangedAt+`, EXCLUDED.last_seen_ns)
+    ELSE `+storedPriceChangedAt+` END,
+  previous_price_cents = CASE WHEN `+priceChanged+` THEN offers.price_cents ELSE offers.previous_price_cents END,
+  -- what the source states now; 0 when it states no end
+  ends_at_ns = EXCLUDED.ends_at_ns,
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions read the row as it was before this update, so these
   -- compare the stored hint with the incoming one even though the hint columns
@@ -201,6 +237,7 @@ ON CONFLICT (id) DO UPDATE SET
 		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
+		o.FirstSeen.UnixNano(), nsOrZero(o.EndsAt),
 	)
 	if err != nil {
 		return fmt.Errorf("pgoffer: upsert: %w", err)
@@ -306,7 +343,15 @@ const selectCols = `SELECT
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
-  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode`
+  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode,
+  price_changed_at_ns, previous_price_cents, ends_at_ns`
+
+// priceChanged is true when the incoming price is known and differs from the
+// stored one (offer.Store.Put's price-change rule).
+const priceChanged = `(EXCLUDED.price_cents > 0 AND EXCLUDED.price_cents <> offers.price_cents)`
+
+// storedPriceChangedAt is the stored stamp, a pre-column 0 read as first_seen.
+const storedPriceChangedAt = `(CASE WHEN offers.price_changed_at_ns = 0 THEN offers.first_seen_ns ELSE offers.price_changed_at_ns END)`
 
 // sameHint is true when the stored hint equals the incoming one, column by
 // column. Used inside the upsert's CASE expressions.
@@ -351,13 +396,14 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 	for rows.Next() {
 		var o offer.Offer
 		var aspects, status, outcome, resState string
-		var firstNS, lastNS, expiredNS, resolvedNS int64
+		var firstNS, lastNS, expiredNS, resolvedNS, changedNS, endsNS int64
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
 			&o.PriceCents, &o.Currency, &o.Condition, &o.Seller, &aspects,
 			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS, &o.Resolution.VintageMode,
+			&changedNS, &o.PreviousPriceCents, &endsNS,
 		); err != nil {
 			return nil, fmt.Errorf("pgoffer: scan: %w", err)
 		}
@@ -369,6 +415,8 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 		o.FirstSeen = timeOrZero(firstNS)
 		o.LastSeen = timeOrZero(lastNS)
 		o.ExpiredAt = timeOrZero(expiredNS)
+		o.PriceChangedAt = changedAtOrFirstSeen(changedNS, firstNS)
+		o.EndsAt = timeOrZero(endsNS)
 		o.Status = offer.Status(status)
 		o.Resolution.State = offer.ResolutionState(resState)
 		if o.Resolution.State == "" {
@@ -382,6 +430,59 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 		return nil, fmt.Errorf("pgoffer: rows: %w", err)
 	}
 	return out, nil
+}
+
+// Summaries returns the summaries of the stored offers among ids, expired ones
+// included, in ONE query (WHERE id = ANY): the surface checks a whole
+// candidate set (up to pipeline.DefaultMaxCandidates) at once.
+func (s *Store) Summaries(ctx context.Context, ids []string) (map[string]offer.Summary, error) {
+	out := make(map[string]offer.Summary, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT
+  id, source_id, status, price_cents, min_price_cents, previous_price_cents,
+  first_seen_ns, last_seen_ns, price_changed_at_ns, expired_at_ns, ends_at_ns,
+  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode
+FROM offers WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("pgoffer: summaries: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sm offer.Summary
+		var status, resState string
+		var firstNS, lastNS, changedNS, expiredNS, endsNS, resolvedNS int64
+		if err := rows.Scan(&sm.ID, &sm.SourceID, &status, &sm.PriceCents, &sm.MinPriceSeen, &sm.PreviousPriceCents,
+			&firstNS, &lastNS, &changedNS, &expiredNS, &endsNS,
+			&resState, &sm.Resolution.ProductID, &sm.Resolution.Generation, &resolvedNS, &sm.Resolution.VintageMode,
+		); err != nil {
+			return nil, fmt.Errorf("pgoffer: summaries scan: %w", err)
+		}
+		sm.Status = offer.Status(status)
+		sm.FirstSeen, sm.LastSeen = timeOrZero(firstNS), timeOrZero(lastNS)
+		sm.PriceChangedAt = changedAtOrFirstSeen(changedNS, firstNS)
+		sm.ExpiredAt, sm.EndsAt = timeOrZero(expiredNS), timeOrZero(endsNS)
+		sm.Resolution.State = offer.ResolutionState(resState)
+		if sm.Resolution.State == "" {
+			sm.Resolution.State = offer.ResolutionUnattempted
+		}
+		sm.Resolution.At = timeOrZero(resolvedNS)
+		out[sm.ID] = sm
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pgoffer: summaries rows: %w", err)
+	}
+	return out, nil
+}
+
+// changedAtOrFirstSeen reads a stored price_changed_at, where 0 (a row older
+// than the column, not yet backfilled) means first_seen.
+func changedAtOrFirstSeen(changedNS, firstNS int64) time.Time {
+	if changedNS == 0 {
+		return timeOrZero(firstNS)
+	}
+	return timeOrZero(changedNS)
 }
 
 func timeOrZero(ns int64) time.Time {
