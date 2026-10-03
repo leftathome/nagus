@@ -111,16 +111,6 @@ CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_stat
 CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
 `
 
-// backfill gives every offer stored before price_changed_at_ns existed the
-// value a first insert gets: its first_seen. Idempotent: every upsert writes a
-// non-zero value, so after the first run nothing matches and a startup pays
-// one sequential scan that updates nothing. The first run rewrites each
-// existing row once. Reads do not depend on it (scanOffers falls back to
-// first_seen), so a row an older binary inserts during a rollout still reads
-// correctly. Measured cost: docs/design/2026-10-03-new-deals-offer-timing.md.
-const backfill = `
-UPDATE offers SET price_changed_at_ns = first_seen_ns
- WHERE price_changed_at_ns = 0 AND first_seen_ns <> 0`
 
 // New opens a pgxpool against dsn and ensures the offer schema exists.
 func New(ctx context.Context, dsn string) (*Store, error) {
@@ -131,10 +121,6 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pgoffer: schema: %w", err)
-	}
-	if _, err := pool.Exec(ctx, backfill); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("pgoffer: backfill price_changed_at: %w", err)
 	}
 	return &Store{pool: pool}, nil
 }
@@ -474,6 +460,56 @@ FROM offers WHERE id = ANY($1)`, ids)
 		return nil, fmt.Errorf("pgoffer: summaries rows: %w", err)
 	}
 	return out, nil
+}
+
+// BackfillPriceChangedAt gives every offer stored before price_changed_at_ns
+// existed the value a first insert gets, its first_seen, and returns how many
+// rows it changed. See offer.Backfiller for why it is batched and run in the
+// background rather than in New.
+//
+// Batches walk the primary key (id > last ORDER BY id LIMIT batch), so each is
+// an index range, not a table scan, and holds its row locks only for its own
+// short transaction: an ingest upsert of a row in a running batch waits for
+// that batch, never for the whole backfill. A database with nothing to fill
+// (every later startup) answers from one EXISTS probe.
+func (s *Store) BackfillPriceChangedAt(ctx context.Context, batch int) (int, error) {
+	if batch <= 0 {
+		batch = offer.DefaultBackfillBatch
+	}
+	var pending bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM offers WHERE price_changed_at_ns = 0 AND first_seen_ns <> 0)`).Scan(&pending); err != nil {
+		return 0, fmt.Errorf("pgoffer: backfill probe: %w", err)
+	}
+	if !pending {
+		return 0, nil
+	}
+	total, last := 0, ""
+	for {
+		var upper string
+		err := s.pool.QueryRow(ctx,
+			`SELECT id FROM offers WHERE id > $1 ORDER BY id OFFSET $2 LIMIT 1`, last, batch-1).Scan(&upper)
+		done := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !done {
+			return total, fmt.Errorf("pgoffer: backfill bound: %w", err)
+		}
+		q := `UPDATE offers SET price_changed_at_ns = first_seen_ns
+ WHERE id > $1 AND price_changed_at_ns = 0 AND first_seen_ns <> 0`
+		args := []any{last}
+		if !done {
+			q += ` AND id <= $2`
+			args = append(args, upper)
+		}
+		tag, err := s.pool.Exec(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("pgoffer: backfill: %w", err)
+		}
+		total += int(tag.RowsAffected())
+		if done {
+			return total, nil
+		}
+		last = upper
+	}
 }
 
 // changedAtOrFirstSeen reads a stored price_changed_at, where 0 (a row older

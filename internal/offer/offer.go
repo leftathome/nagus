@@ -251,6 +251,24 @@ type Offer struct {
 	EndsAt time.Time
 }
 
+// Backfiller is implemented by persistent adapters whose tables predate the
+// price_changed_at column (nagus-417). BackfillPriceChangedAt stamps every such
+// row with its first_seen -- what a first insert writes -- and reports how
+// many it changed; it is idempotent and safe to run while ingest writes.
+//
+// It is deliberately NOT part of opening the store. Reads never depend on it
+// (a stored 0 reads as FirstSeen), and on a large table the one-statement
+// form is slow: measured on Postgres 16, 1,000,000 offers took 39.5 s and
+// doubled the heap until vacuum, longer than the pod's liveness budget. So
+// cmd/nagus runs it in the background after startup, in primary-key batches
+// of short transactions.
+type Backfiller interface {
+	BackfillPriceChangedAt(ctx context.Context, batch int) (int, error)
+}
+
+// DefaultBackfillBatch is the rows per backfill transaction.
+const DefaultBackfillBatch = 5000
+
 // Summary is the lifecycle and identity of one offer without its free text:
 // what a read path needs to hide expired listings and to time a row. It is
 // what Store.Summaries returns, so a surface can fetch thousands of them in

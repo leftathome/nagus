@@ -97,9 +97,6 @@ var resolutionColumns = []struct{ name, ddl string }{
 	{"ends_at_ns", `INTEGER NOT NULL DEFAULT 0`},
 }
 
-// backfill stamps every pre-column offer's price_changed_at with its
-// first_seen, as a first insert would. Idempotent (see pgoffer's backfill).
-const backfill = `UPDATE offers SET price_changed_at_ns = first_seen_ns WHERE price_changed_at_ns = 0 AND first_seen_ns <> 0`
 
 // resolutionIndexes run AFTER migrateResolution, because on an existing
 // database the columns they index do not exist until it has run.
@@ -138,13 +135,8 @@ func migrateResolution(db *sql.DB) error {
 			return fmt.Errorf("add column %s: %w", c.name, err)
 		}
 	}
-	if _, err := db.Exec(resolutionIndexes); err != nil {
-		return err
-	}
-	if _, err := db.Exec(backfill); err != nil {
-		return fmt.Errorf("backfill price_changed_at: %w", err)
-	}
-	return nil
+	_, err = db.Exec(resolutionIndexes)
+	return err
 }
 
 // New opens (or creates) an offer database at dsn and applies the schema.
@@ -536,6 +528,41 @@ FROM offers WHERE id IN (?`+strings.Repeat(",?", len(chunk)-1)+`)`, args...)
 		}
 	}
 	return out, nil
+}
+
+// BackfillPriceChangedAt gives every offer stored before price_changed_at_ns
+// existed its first_seen, in primary-key batches (see offer.Backfiller and
+// pgoffer's), returning how many rows it changed.
+func (s *Store) BackfillPriceChangedAt(ctx context.Context, batch int) (int, error) {
+	if batch <= 0 {
+		batch = offer.DefaultBackfillBatch
+	}
+	total, last := 0, ""
+	for {
+		var upper string
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM offers WHERE id > ? ORDER BY id LIMIT 1 OFFSET ?`, last, batch-1).Scan(&upper)
+		done := err == sql.ErrNoRows
+		if err != nil && !done {
+			return total, fmt.Errorf("sqliteoffer: backfill bound: %w", err)
+		}
+		q := `UPDATE offers SET price_changed_at_ns = first_seen_ns WHERE id > ? AND price_changed_at_ns = 0 AND first_seen_ns <> 0`
+		args := []any{last}
+		if !done {
+			q += ` AND id <= ?`
+			args = append(args, upper)
+		}
+		res, err := s.db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("sqliteoffer: backfill: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+		if done {
+			return total, nil
+		}
+		last = upper
+	}
 }
 
 // changedAtOrFirstSeen reads a stored price_changed_at, where 0 (a row older

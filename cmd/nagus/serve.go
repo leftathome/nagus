@@ -452,6 +452,24 @@ func runServe(args []string) error {
 	// or the HTTP surface). Cancelled by the same ctx as the HTTP shutdown.
 	srv.startIngest(ctx, intervals)
 
+	// One-time backfill of offers.price_changed_at_ns (nagus-417), in the
+	// background and in short batches: reads already treat an unfilled row
+	// as first_seen, and on a large table a startup-blocking UPDATE would
+	// outlast the liveness probe. Every later startup answers from one probe.
+	if b, ok := offerStore.(offer.Backfiller); ok {
+		go func() {
+			start := time.Now()
+			n, err := b.BackfillPriceChangedAt(ctx, 0)
+			if err != nil {
+				logf("offer price_changed_at backfill stopped after %d rows: %v (reads fall back to first_seen; retried next start)", n, err)
+				return
+			}
+			if n > 0 {
+				logf("offer price_changed_at backfill: %d rows in %s", n, time.Since(start).Round(time.Millisecond))
+			}
+		}()
+	}
+
 	// quark resolution (nagus-6r6): a separate goroutine on its own interval.
 	// Never part of ingest -- quark down or slow leaves offers unattempted.
 	if e, why := buildEnricher(offerStore, cfg, ingesters, logf); e != nil {
