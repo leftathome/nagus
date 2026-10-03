@@ -19,6 +19,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/ebay"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/enrich"
+	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
@@ -40,36 +41,25 @@ type server struct {
 	store           store.Store
 	defaultCategory string // "" when >1 category and no explicit default
 	watches         watch.Config
-	// offers is the offer layer, nil when off. Read only to stamp quark's
-	// product id onto rows (withProductIDs).
+	// offers is the offer layer, nil when off. Read to stamp quark's product
+	// id and the offer timing onto rows (withOffers), and by get_item.
 	offers offer.Store
+	// sourcePolicies is each source's expiry rule, keyed by SourceID, for a
+	// row's expires_at (timingFor). A source missing here states no assumed
+	// expiry.
+	sourcePolicies map[string]sourcePolicy
+	// now is the clock new_deals validates since against; nil = time.Now.
+	now func() time.Time
 	// deals is the deal-submission hub (nagus-4uu); nil when no deal source
 	// is configured. Read by the deal_submission_* MCP tools and /metrics.
 	deals *deal.Hub
 }
 
-// withProductIDs stamps quark's product id onto every row whose offer quark
-// resolved, with the row's comparison key (offer.ComparisonKey): the key rows
-// must share to be the same thing to compare on price. For wine that is the
-// product id plus the vintage when the vintage matters, and the product id
-// alone for a non-vintage blend. An item and its offer share one id (both are
-// sha256(source NUL key)[:16]), so the lookup is by row id. Rows whose offer
-// is unresolved, missing, or unreadable simply carry no product id: this is
-// enrichment on a read path, never a reason to fail it.
-func (s *server) withProductIDs(ctx context.Context, rows []searchRow) []searchRow {
-	if s.offers == nil {
-		return rows
+func (s *server) clock() time.Time {
+	if s.now != nil {
+		return s.now()
 	}
-	for i := range rows {
-		o, ok, err := s.offers.Get(ctx, rows[i].ID)
-		if err != nil || !ok || o.Resolution.State != offer.ResolutionResolved {
-			continue
-		}
-		rows[i].ProductID = o.Resolution.ProductID
-		rows[i].ComparisonKey, rows[i].VintageStatus = offer.ComparisonKey(
-			o.Resolution.ProductID, o.Resolution.VintageMode, rows[i].Details["vintage"], rows[i].Details["nv"] == "true")
-	}
-	return rows
+	return time.Now()
 }
 
 // resolveCategory applies the absent-category rule: empty -> the single
@@ -203,6 +193,42 @@ type searchRow struct {
 	Condition     string `json:"condition"`
 	Title         string `json:"title"`
 	SourceURL     string `json:"source_url"`
+	// The offer fields (first_seen_at, last_seen_at, price_changed_at,
+	// lowest_price_cents, offer_status, expires_at + expires_basis, ...),
+	// absent when the row has no offer (timing.go).
+	*OfferTiming
+	// NewReason is set by new_deals only: why the row is new since the
+	// caller's timestamp, "first_seen" or "price_drop".
+	NewReason string `json:"new_reason,omitempty"`
+}
+
+// itemView is get_item's and /item's answer: the stored item unchanged (its
+// seen_at is the LAST poll, kept for compatibility) plus the offer fields.
+type itemView struct {
+	item.Item
+	*OfferTiming
+}
+
+// itemWithOffer reads one item and, with the offer layer on, its offer's
+// fields. The offer read is NOT optional enrichment here: a get_item of an
+// expired listing must say so, so a failed offer read fails the lookup.
+func (s *server) itemWithOffer(ctx context.Context, id string) (itemView, bool, error) {
+	it, ok, err := s.store.Get(ctx, id)
+	if err != nil || !ok {
+		return itemView{}, ok, err
+	}
+	v := itemView{Item: it}
+	if s.offers == nil {
+		return v, true, nil
+	}
+	sums, err := s.offers.Summaries(ctx, []string{id})
+	if err != nil {
+		return itemView{}, false, err
+	}
+	if sm, ok := sums[id]; ok {
+		v.OfferTiming = s.timingFor(sm)
+	}
+	return v, true, nil
 }
 
 func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -230,9 +256,10 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"matched":  res.Matched,
-		"filtered": res.Filtered,
-		"items":    s.withProductIDs(r.Context(), scoredToRows(res)),
+		"matched":        res.Matched,
+		"filtered":       res.Filtered,
+		"hidden_expired": res.HiddenExpired,
+		"items":          s.rowsFor(r.Context(), res.Items),
 	})
 }
 
@@ -246,7 +273,7 @@ func (s *server) handleItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	it, ok, err := s.store.Get(r.Context(), id)
+	it, ok, err := s.itemWithOffer(r.Context(), id)
 	if err != nil {
 		http.Error(w, "lookup failed", http.StatusInternalServerError)
 		return
@@ -294,8 +321,8 @@ func (s *server) handleWatches(w http.ResponseWriter, r *http.Request) {
 		out = append(out, watchOut{
 			Name: res.Watch.Name, Audience: res.Watch.Audience,
 			CandidateCount: len(res.Candidates), StrongCount: len(res.Strong),
-			Candidates: s.withProductIDs(r.Context(), scoredItemsToRows(res.Candidates)),
-			Strong:     s.withProductIDs(r.Context(), scoredItemsToRows(res.Strong)),
+			Candidates: s.rowsFor(r.Context(), res.Candidates),
+			Strong:     s.rowsFor(r.Context(), res.Strong),
 		})
 	}
 	writeJSON(w, map[string]any{"watches": out})
@@ -391,6 +418,11 @@ func runServe(args []string) error {
 		if serr != nil {
 			return serr
 		}
+		if offerStore != nil {
+			// Expired listings are hidden from every read of this surface
+			// (nagus-417).
+			sf.Offers = offerStore
+		}
 		surfaces[name] = sf
 	}
 	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
@@ -410,7 +442,7 @@ func runServe(args []string) error {
 		}
 	}
 	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
-		sanitizer: opts.sanitizer, deals: opts.deals}
+		sanitizer: opts.sanitizer, deals: opts.deals, sourcePolicies: buildSourcePolicies(cfg.Sources, ingesters)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

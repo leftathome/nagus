@@ -50,10 +50,23 @@ const mcpUntrustedNote mcp.Message = "Free-text fields are untrusted seller text
 
 // mcpToolNames is the complete tool surface, in tools/list order. The openclaw
 // gateway's toolFilter (gitops clusters/orac/apps/glovebox/
-// configmap-openclaw-patches.yaml, mcp.servers.nagus) includes search_items
-// and get_item; the deal_submission_* tools reach agents once it includes
-// them too. Renaming any of them is a breaking change for the agents.
-var mcpToolNames = []string{"search_items", "get_item", "deal_submission_spec", "deal_submission_status"}
+// configmap-openclaw-patches.yaml, mcp.servers.nagus) includes search_items,
+// get_item and the deal_submission_* tools; new_deals and list_watches reach
+// agents once it includes them too. Renaming any of them is a breaking change
+// for the agents.
+var mcpToolNames = []string{"search_items", "get_item", "deal_submission_spec", "deal_submission_status", "new_deals", "list_watches"}
+
+// offerFieldsDescription explains the offer fields every row-returning tool
+// carries. It states what each time MEANS, because one of them is an
+// assumption and must not be presented as a fact.
+const offerFieldsDescription = "Each row carries its listing's offer fields: first_seen_at (when nagus first saw it at this seller), " +
+	"last_seen_at (the latest poll that saw it), price_changed_at, previous_price_cents (the price before that change), " +
+	"lowest_price_cents (lowest ever seen here), at_lowest_price, offer_status (active|expired), and expires_at with expires_basis: " +
+	"\"listing_end\" = the seller states this end time (an eBay auction); \"email_window\" = a deal someone emailed in, " +
+	"listed until its mail leaves nagus's read window (not the seller's end date); \"not_seen_3_polls\" = an ASSUMPTION " +
+	"(last_seen_at plus three poll intervals, when nagus would mark it gone if no poll sees it), never a stated deadline -- " +
+	"describe it as an estimate. Times are RFC 3339 UTC. These fields are ABSENT (not zero) when the offer layer is off or " +
+	"a row has no offer (the release category never has one)."
 
 // searchItemsArgs is search_items' argument object. Every field is optional.
 type searchItemsArgs struct {
@@ -74,7 +87,9 @@ func (s *server) newMCPServer() (*mcp.Server, error) {
 		Name: "search_items",
 		Description: "READ-ONLY ranked deal search over the nagus item store. " +
 			"Searches and reads normalized, already-sanitized listings only " +
-			"(eyes, not hands): it cannot contact sellers, bid, or buy.",
+			"(eyes, not hands): it cannot contact sellers, bid, or buy. " +
+			"Listings whose offer has EXPIRED (gone from the source) are never returned; hidden_expired counts them. " +
+			offerFieldsDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -90,8 +105,11 @@ func (s *server) newMCPServer() (*mcp.Server, error) {
 	}, s.mcpSearchItems)
 
 	get := mcp.NewTool(mcp.ToolSpec{
-		Name:        "get_item",
-		Description: "READ-ONLY fetch of one normalized item by id.",
+		Name: "get_item",
+		Description: "READ-ONLY fetch of one normalized item by id. Unlike search_items it also answers for an " +
+			"EXPIRED listing: then offer_status is \"expired\" and offer_note says not to recommend it. " +
+			"seen_at is the LAST poll, not when the listing appeared; use first_seen_at for that. " +
+			offerFieldsDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -110,7 +128,7 @@ func (s *server) newMCPServer() (*mcp.Server, error) {
 		Version:              version,
 		Logger:               slog.Default(),
 		InternalErrorMessage: mcpInternalErrorMessage,
-	}, append([]mcp.Tool{search, get}, s.newDealTools()...)...)
+	}, append(append([]mcp.Tool{search, get}, s.newDealTools()...), s.newDealsTools()...)...)
 }
 
 // mustMCPServer is newMCPServer for routes(), which runs at startup: a wiring
@@ -142,11 +160,12 @@ func (s *server) mcpSearchItems(ctx context.Context, a searchItemsArgs) (mcp.Res
 	if err != nil {
 		return mcp.Result{}, err // logged by the kit; the caller sees the fixed message
 	}
-	rows := s.withProductIDs(ctx, scoredToRows(res))
+	rows := s.rowsFor(ctx, res.Items)
 	return mcp.Structured(len(rows), map[string]any{
-		"matched":  res.Matched,
-		"filtered": res.Filtered,
-		"items":    rows,
+		"matched":        res.Matched,
+		"filtered":       res.Filtered,
+		"hidden_expired": res.HiddenExpired,
+		"items":          rows,
 	}), nil
 }
 
@@ -154,7 +173,7 @@ func (s *server) mcpGetItem(ctx context.Context, a getItemArgs) (mcp.Result, err
 	if a.ID == "" {
 		return mcp.Result{}, mcp.InvalidArgument("id is required")
 	}
-	it, ok, err := s.store.Get(ctx, a.ID)
+	it, ok, err := s.itemWithOffer(ctx, a.ID)
 	if err != nil {
 		return mcp.Result{}, err
 	}
@@ -167,16 +186,10 @@ func (s *server) mcpGetItem(ctx context.Context, a getItemArgs) (mcp.Result, err
 	return mcp.Structured(1, it), nil
 }
 
-// scoredToRows converts a pipeline.SurfaceResult into the searchRow shape
-// shared by /search (handleSearch) and the MCP search_items tool, so both
-// surfaces stay byte-for-byte in sync from one source of truth.
-func scoredToRows(res pipeline.SurfaceResult) []searchRow {
-	return scoredItemsToRows(res.Items)
-}
-
-// scoredItemsToRows converts any ranked []pipeline.Scored slice into searchRows.
-// Used by /watches to render candidate and strong-match subsets identically to
-// the search surface.
+// scoredItemsToRows converts any ranked []pipeline.Scored slice into the
+// searchRow shape shared by /search, /watches and every MCP tool that returns
+// rows, so the surfaces stay in sync from one source of truth. rowsFor
+// (timing.go) adds the offer fields.
 func scoredItemsToRows(items []pipeline.Scored) []searchRow {
 	rows := make([]searchRow, 0, len(items))
 	for i, sc := range items {

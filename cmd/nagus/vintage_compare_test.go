@@ -69,7 +69,7 @@ func TestWineRowsCompareOnVintageAwareKeys(t *testing.T) {
 		}
 		rows = append(rows, searchRow{ID: it.ID, Title: it.Title, Details: rowDetails(it.Attributes)})
 	}
-	rows = srv.withProductIDs(ctx, rows)
+	rows = srv.withOffers(ctx, rows, nil)
 	key := map[string]searchRow{}
 	for i, c := range cases {
 		key[c.key] = rows[i]

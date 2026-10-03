@@ -117,12 +117,22 @@ func LoadConfig(path string) (Config, error) {
 	return c, nil
 }
 
+// EffectiveStrongVerdicts is the verdict list isStrong actually applies:
+// StrongVerdicts, or ["great"] when no strong criterion at all is configured.
+// Reported by list_watches so an agent sees the threshold that really pings.
+func (w Watch) EffectiveStrongVerdicts() []string {
+	if len(w.StrongVerdicts) == 0 && w.MinScore <= 0 && w.MinDiscountPct <= 0 && w.NewWithinDays <= 0 {
+		return []string{"great"} // default threshold
+	}
+	return w.StrongVerdicts
+}
+
+// IsStrong reports whether a scored item clears the watch's ping threshold.
+func (w Watch) IsStrong(sc pipeline.Scored) bool { return w.isStrong(sc) }
+
 // isStrong reports whether a scored item clears the watch's ping threshold.
 func (w Watch) isStrong(sc pipeline.Scored) bool {
-	verdicts := w.StrongVerdicts
-	if len(verdicts) == 0 && w.MinScore <= 0 && w.MinDiscountPct <= 0 && w.NewWithinDays <= 0 {
-		verdicts = []string{"great"} // default threshold
-	}
+	verdicts := w.EffectiveStrongVerdicts()
 	for _, v := range verdicts {
 		if sc.Signal.Verdict == v {
 			return true
