@@ -111,7 +111,6 @@ CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_stat
 CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
 `
 
-
 // New opens a pgxpool against dsn and ensures the offer schema exists.
 func New(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)

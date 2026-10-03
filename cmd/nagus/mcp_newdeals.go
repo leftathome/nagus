@@ -203,10 +203,16 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 	var picked []pipeline.Scored
 	reasons := map[string]string{}
 	hidden, truncated := 0, false
+	failed := []string{}
+	var lastErr error
 	for _, cat := range cats {
 		res, err := s.surfaces[cat].Surface(ctx, store.Query{Category: cat, Text: text})
 		if err != nil {
-			return mcp.Result{}, err
+			// One category failing must not hide the others' news (as
+			// /watches isolates a failing watch). Its rows are simply not
+			// in the answer: nothing unchecked is ever surfaced.
+			failed, lastErr = append(failed, cat), err
+			continue
 		}
 		hidden += res.HiddenExpired
 		truncated = truncated || res.CapReached
@@ -225,6 +231,9 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 			picked = append(picked, sc)
 			reasons[sc.Item.ID] = reason
 		}
+	}
+	if len(failed) == len(cats) {
+		return mcp.Result{}, lastErr // logged by the kit; the caller sees the fixed message
 	}
 	// One ranking across categories: score, then id, as Surface ranks.
 	sort.SliceStable(picked, func(i, j int) bool {
@@ -250,6 +259,7 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 		"new_count":            total,
 		"hidden_expired":       hidden,
 		"candidates_truncated": truncated,
+		"failed_categories":    failed,
 		"items":                rows,
 	}), nil
 }

@@ -3,13 +3,19 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leftathome/go-service-kit/mcp"
+
+	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/pipeline"
+	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
 )
 
@@ -204,6 +210,31 @@ func TestNewDealsNeverReturnsExpired(t *testing.T) {
 	_, _, nd := newDeals(t, f.srv, `{"since":"`+ts(f.now.Add(-3*time.Hour))+`","min_verdict":"any"}`)
 	if len(nd.Items) != 0 || nd.HiddenExpired != 3 {
 		t.Fatalf("after expiry: rows %v hidden %d, want none and 3", nd.Items, nd.HiddenExpired)
+	}
+}
+
+type searchFailStore struct{ store.Store }
+
+func (searchFailStore) Search(context.Context, store.Query) ([]item.Item, error) {
+	return nil, errors.New("dial postgres://nagus:hunter2@db.internal: timeout")
+}
+
+// One failing category is reported and the others still answer; when every
+// category fails it is the fixed internal error.
+func TestNewDealsIsolatesAFailingCategory(t *testing.T) {
+	f := offerTestServer(t)
+	f.srv.surfaces["broken"] = &pipeline.Surface{Store: searchFailStore{}}
+	since := ts(f.now.Add(-3 * time.Hour))
+	env, res, nd := newDeals(t, f.srv, `{"since":"`+since+`","min_verdict":"any"}`)
+	if env.Error != nil || len(nd.Items) != 2 {
+		t.Fatalf("with one broken category: %+v, %d rows", env.Error, len(nd.Items))
+	}
+	if !strings.Contains(string(res.StructuredContent), `"failed_categories":["broken"]`) {
+		t.Fatalf("failed category not reported: %s", res.StructuredContent)
+	}
+	env, _, _ = newDeals(t, f.srv, `{"since":"`+since+`","category":"broken"}`)
+	if env.Error == nil || env.Error.Code != mcp.CodeInternalError || strings.Contains(env.Error.Message, "hunter2") {
+		t.Fatalf("all categories failing -> %+v", env.Error)
 	}
 }
 

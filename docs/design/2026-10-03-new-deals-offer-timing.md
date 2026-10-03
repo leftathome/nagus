@@ -220,7 +220,10 @@ year of churn is mostly expired ids).
   (`price_cents < previous_price_cents`).
 - `limit`: 1..100, default 25.
 
-Only ACTIVE listings with an offer row are considered. Each row is a search
+A category whose surface fails is listed in `failed_categories` and the
+others still answer (as `/watches` isolates a failing watch); when every
+asked category fails, the call is the fixed internal error. Only ACTIVE
+listings with an offer row are considered. Each row is a search
 row with the A fields plus `new_reason` (`first_seen` | `price_drop`). Rows are
 per LISTING: the same product at two sellers is two rows; group on
 `comparison_key` (or `product_id`), which the description says.

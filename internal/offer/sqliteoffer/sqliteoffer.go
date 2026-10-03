@@ -97,7 +97,6 @@ var resolutionColumns = []struct{ name, ddl string }{
 	{"ends_at_ns", `INTEGER NOT NULL DEFAULT 0`},
 }
 
-
 // resolutionIndexes run AFTER migrateResolution, because on an existing
 // database the columns they index do not exist until it has run.
 const resolutionIndexes = `
