@@ -1,0 +1,58 @@
+{
+  "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?q=internal+hard+drive&limit=4",
+  "total": 4,
+  "limit": 4,
+  "offset": 0,
+  "itemSummaries": [
+    {
+      "itemId": "v1|110599999911|0",
+      "title": "WD Ultrastar HC550 18TB SATA Hard Drive WUH721818ALE6L4",
+      "condition": "Used",
+      "conditionId": "3000",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999911",
+      "price": {"value": "149.99", "currency": "USD"},
+      "seller": {"username": "example_seller_a", "feedbackPercentage": "99.1", "feedbackScore": 812},
+      "itemLocation": {"postalCode": "981**", "country": "US"},
+      "buyingOptions": ["AUCTION", "FIXED_PRICE"],
+      "itemCreationDate": "2026-09-30T18:00:00.000Z",
+      "itemEndDate": "2026-10-07T18:00:00.000Z"
+    },
+    {
+      "itemId": "v1|110599999912|0",
+      "title": "Seagate Exos X20 20TB SATA Hard Drive ST20000NM007D",
+      "condition": "New",
+      "conditionId": "1000",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999912",
+      "price": {"value": "279.00", "currency": "USD"},
+      "seller": {"username": "example_seller_b", "feedbackPercentage": "100.0", "feedbackScore": 15234},
+      "itemLocation": {"postalCode": "606**", "country": "US"},
+      "buyingOptions": ["FIXED_PRICE", "BEST_OFFER"],
+      "itemCreationDate": "2026-09-01T08:30:00.000Z"
+    },
+    {
+      "itemId": "v1|110599999913|0",
+      "title": "Toshiba MG09 18TB SATA Hard Drive MG09ACA18TE",
+      "condition": "Seller refurbished",
+      "conditionId": "2500",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999913",
+      "price": {"value": "189.50", "currency": "USD"},
+      "seller": {"username": "example_seller_c", "feedbackPercentage": "98.7", "feedbackScore": 402},
+      "itemLocation": {"postalCode": "750**", "country": "US"},
+      "buyingOptions": ["FIXED_PRICE"],
+      "itemCreationDate": "2026-08-15T12:00:00.000Z",
+      "itemEndDate": "2026-10-15T12:00:00.000Z"
+    },
+    {
+      "itemId": "v1|110599999914|0",
+      "title": "HGST Ultrastar He10 10TB SATA Hard Drive HUH721010ALE604",
+      "condition": "Used",
+      "conditionId": "3000",
+      "itemWebUrl": "https://www.ebay.com/itm/110599999914",
+      "price": {"value": "64.00", "currency": "USD"},
+      "seller": {"username": "example_seller_d", "feedbackPercentage": "99.9", "feedbackScore": 2210},
+      "itemLocation": {"postalCode": "100**", "country": "US"},
+      "buyingOptions": ["AUCTION"],
+      "itemEndDate": "next tuesday"
+    }
+  ]
+}
