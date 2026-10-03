@@ -16,7 +16,7 @@ All on the Service, port 8080:
 
 | path | purpose |
 |---|---|
-| `/mcp` | MCP server (JSON-RPC 2.0), tools `search_items` + `get_item` -- the agent-facing surface openclaw registers |
+| `/mcp` | MCP server (JSON-RPC 2.0), tools `search_items`, `get_item`, `new_deals`, `list_watches`, `deal_submission_spec`, `deal_submission_status` -- the agent-facing surface openclaw registers (its `toolFilter` decides which an agent sees) |
 | `/search`, `/item` | plain-HTTP read-only pull (debug / non-MCP callers) |
 | `/watches` | per-watch candidates + strong matches for the delivery cron |
 | `/healthz`, `/readyz` | probes |

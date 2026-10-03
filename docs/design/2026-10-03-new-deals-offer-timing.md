@@ -99,29 +99,28 @@ too.
 ### Migration and its cost
 
 Postgres (the production backend): `ALTER TABLE offers ADD COLUMN IF NOT
-EXISTS ... NOT NULL DEFAULT 0` for each column. Since PostgreSQL 11 adding a
-column with a constant default is a catalog-only change: no table rewrite, an
-ACCESS EXCLUSIVE lock held for milliseconds, cost independent of row count.
-Then the backfill:
+EXISTS ... NOT NULL DEFAULT 0` for each column, in the schema `New` runs on
+every startup. Since PostgreSQL 11 adding a column with a constant default is
+a catalog-only change: no table rewrite, an ACCESS EXCLUSIVE lock held for
+milliseconds, cost independent of row count.
 
-    UPDATE offers SET price_changed_at_ns = first_seen_ns
-     WHERE price_changed_at_ns = 0 AND first_seen_ns <> 0;
-
-It runs on every startup like the rest of the schema and is idempotent: after
-the first run no row matches (every upsert writes a non-zero value), so later
-runs are one sequential scan that updates nothing. The first run rewrites
-every existing row once (MVCC: one new tuple per row, reclaimed by
-autovacuum). Measured on Postgres 16 (podman, this desktop): see "Measured"
-below. Production holds on the order of 10^4 offers.
+The backfill (`price_changed_at_ns = first_seen_ns` where it is 0) is NOT run
+by `New`. The first version did, as one statement, and measuring it on
+1,000,000 rows (below) showed 39.5 s with the heap doubled until vacuum --
+longer than the pod's liveness budget (5 s + 3 x 10 s), so a large table
+would crash-loop the Recreate deployment. It is `offer.Backfiller`, which
+`nagus serve` runs in a goroutine after startup: primary-key batches of 5,000
+(`id > last ORDER BY id`), each its own short transaction, so an ingest upsert
+of a row in a running batch waits for that batch only. A later startup finds
+nothing to do from one EXISTS probe.
 
 The read path does not depend on the backfill: a row whose
 `price_changed_at_ns` is still 0 reads as its `first_seen`, so a backfill that
-has not run (or a row written by an older binary during a rolling deploy)
-still reads correctly.
+has not finished (or a row written by an older binary) still reads correctly.
 
 SQLite: the existing `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` path
-(SQLite ADD COLUMN with a constant default is also metadata-only), then the
-same backfill UPDATE.
+(SQLite ADD COLUMN with a constant default is also metadata-only), and the
+same batched backfill.
 
 Rollback: an older binary ignores the new columns (it names its columns
 explicitly) and its upsert leaves them as they are; on the way forward again
@@ -172,7 +171,7 @@ path shares (`search_items`, `/search`, `/watches`, `new_deals`,
    to the agent).
 4. If the store returned a full cap AND some candidates were dropped, the cap
    cut off active listings: re-read with the cap raised by the number dropped,
-   up to 3 times (logged when it still falls short). The store orders by
+   at most 3 reads in all (logged when it still falls short). The store orders by
    `seen_at DESC` (last poll), and an expired listing by definition has not
    been polled for 3 intervals, so expired rows sort last and in practice the
    first read already holds every active candidate; the top-up makes the
@@ -180,6 +179,11 @@ path shares (`search_items`, `/search`, `/watches`, `new_deals`,
 5. Filter, valuate, score and rank only the survivors. Summaries ride along on
    each scored row, so the projection does not read the offer store again
    (this also replaces `withProductIDs`' one `Get` per row).
+
+An offer-store read failure FAILS the request: without the status nagus
+cannot tell a live listing from a gone one, and the safe direction is to show
+nothing. (In production items and offers share one Postgres database, so an
+offer outage is an item outage anyway.) `get_item` fails the same way.
 
 `SurfaceResult` gains `HiddenExpired` (reported as `hidden_expired` in
 `search_items`, `/search`, `new_deals`). `matched` now counts surfaceable
@@ -200,8 +204,9 @@ year of churn is mostly expired ids).
   future (clock skew), and must not be older than 30 days (a forgotten cursor
   should not dump the whole corpus; ask search_items for that). The response
   carries `as_of` (server time, RFC 3339) to pass as the next `since`.
-- `category`: one configured category; absent = every category with the
-  offer layer (rows merged by score).
+- `category`: one configured category; absent = every configured category
+  (rows merged by score; a category without offers, like `release`,
+  contributes nothing because nothing there has a first sighting).
 - `watch`: a watch name (see list_watches): restricts to that watch's
   category and text, and a row must clear the watch's STRONG criteria (what
   would ping). The watch's `limit` does not apply (it caps the watch's own
@@ -259,8 +264,46 @@ openclaw's toolFilter must add the two names (gitops, after this merges):
 
 ## Measured
 
-Filled in by the build (see the MR): migration cost on a synthetic 1M-offer
-table, and rows hidden on production-like data.
+Postgres 16-alpine (the CI digest) in podman on the operator's desktop,
+1,000,000 offers in today's production shape (every column through
+`vintage_mode`, its five indexes, 400-byte bodies, 25% expired): 882 MB.
+
+| step | cost |
+|---|---|
+| `New` (schema + the three ADD COLUMNs) | 15 ms |
+| one-statement backfill (first design, rejected) | 39.5 s; heap 781 MB -> 1563 MB until vacuum |
+| batched background backfill, 5,000 per batch | 45.9 s; heap 781 MB -> 876 MB |
+| upserts running concurrently with it (874) | p50 15 ms, p99 433 ms, max 1.4 s |
+| backfill on a later startup (nothing to do) | 2.9 s, in the background |
+| `Summaries` of 5,000 ids (one surface request) | 28-57 ms |
+
+Production holds on the order of 10^4 offers, so there the backfill is well
+under a second.
+
+Rows hidden on production data (2026-10-03, read-only evidence only: the
+per-category store match counts from `GET /search` and each source's latest
+ingest pass from the pod log). Store matches that no source re-stored in its
+latest pass are listings the source no longer shows -- expired, or about to
+be. This is an UPPER bound: a source whose fetch was incomplete skips expiry,
+and its unseen listings stay active (and visible).
+
+| category | store matches | re-stored by latest passes | would be hidden |
+|---|---|---|---|
+| hdd | 749 | 477 | ~272 |
+| wine | 1380 | 1348 | ~32 |
+| release | 2 | 2 | 0 (no offer layer) |
+
+The exact figure needs the database:
+
+    SELECT i.category, count(*) FROM items i JOIN offers o ON o.id = i.id
+     WHERE o.status = 'expired' GROUP BY 1;
+
+The container test (built image, Postgres 16, a two-phase eBay fixture:
+phase 2 drops one listing, lowers one price and adds one) showed the dropped
+listing hidden from `search_items`, `/search`, `/watches` and `new_deals`
+(`hidden_expired: 1`), `get_item` answering it with `offer_status: expired`,
+and `new_deals` returning exactly the new listing (`first_seen`) and the
+cheaper one (`price_drop`, `previous_price_cents` 27900 -> 23900).
 
 ## Deferred
 
