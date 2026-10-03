@@ -433,6 +433,7 @@ func TestMCPToolSchemasUnchangedForOpenclaw(t *testing.T) {
 			`"watch":{"description":"A watch name from list_watches: only that watch's category and text, and only rows that clear its strong (ping) criteria.","type":"string"}` +
 			`},"required":["since"],"type":"object"}`,
 		"list_watches": `{"additionalProperties":false,"properties":{` +
+			`"limit":{"description":"With name: at most this many strong matches (best first); default 25. strong_count is the total.","maximum":100,"minimum":1,"type":"integer"},` +
 			`"name":{"description":"One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only.","type":"string"}` +
 			`},"type":"object"}`,
 	}

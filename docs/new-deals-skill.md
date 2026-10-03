@@ -19,27 +19,32 @@ for), plus the row ids you showed then.
    (`candidate_count`, `strong_count`). A watch with an `error` cannot be
    evaluated; say so rather than guess.
 2. **What is new?** Call `new_deals` with `since` = your stored `as_of` minus
-   one hour (a poll that started before `as_of` can store its listings after
-   it; the overlap catches them). First time, or nothing stored: use 24 hours
-   ago. `since` must be RFC 3339 (`2026-10-03T12:00:00Z`), not in the future,
-   and at most 30 days back.
+   one hour. A poll stamps a listing's first sighting when the poll STARTS and
+   may store it after `as_of`; the hour is a conservative margin, not a
+   measured bound (it is well above a pass of any configured source, which
+   is minutes at most). First time, or nothing stored: use 24 hours ago.
+   `since` must be RFC 3339 (`2026-10-03T12:00:00Z`), not in the future, and
+   at most 30 days back.
    - For "things I care about", call it once per watch:
      `{"since": ..., "watch": "<name>"}` -- only that watch's category and
      text, and only listings that clear its strong criteria.
    - For "anything good", call it without `watch`; `min_verdict` defaults to
      `good` (`great` > `good` > `market` > `poor`).
-   - Store the answer's `as_of` for next time. Drop rows whose `id` you
-     already showed.
+   - Store the answer's `as_of` for next time. Remember what you showed as
+     the pair (`id`, `price_changed_at`) and drop a row only when BOTH match:
+     a listing you showed as new can drop in price later, and that drop
+     comes back with the same `id` and a new `price_changed_at`.
 3. **Group before you present.** Rows are per LISTING: the same product at two
    sellers is two rows. Group rows that share `comparison_key` (or, when it
    is empty, `product_id`); show the group once with its cheapest seller
    first. A row with neither stands alone. Never group wine on `product_id`
    alone: that ignores the vintage.
-4. **Say why it is new.** `new_reason` is `first_seen` (nagus first saw it at
-   `first_seen_at`) or `price_drop` (the price fell from
-   `previous_price_cents` at `price_changed_at`). `at_lowest_price` true means
-   this is the lowest price nagus has seen for that listing
-   (`lowest_price_cents`).
+4. **Say why it is new.** `new_reasons` lists `first_seen` (nagus first saw
+   it at `first_seen_at`) and/or `price_drop` (the price fell from
+   `previous_price_cents` at `price_changed_at`); `new_reason` is the latest.
+   `at_lowest_price` true means this is the lowest price nagus has seen for
+   that listing (`lowest_price_cents`); a drop with `at_lowest_price` false
+   is a drop after a rise -- say "down from X", not "lowest price".
 5. **Be honest about how long it lasts.** Read `expires_basis` before you
    mention `expires_at`:
    - `listing_end`: the seller states it (an eBay auction): "ends <time>".

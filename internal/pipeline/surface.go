@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/leftathome/nagus/internal/item"
 	"github.com/leftathome/nagus/internal/offer"
@@ -45,6 +46,23 @@ type Surface struct {
 	// to attach each row's offer summary (Scored.Offer). nil keeps the
 	// pre-offer behaviour exactly: nothing hidden, no summaries.
 	Offers OfferSummaries
+	// Now is the clock an offer's source-stated end (EndsAt) is compared
+	// with; nil = time.Now.
+	Now func() time.Time
+}
+
+func (s *Surface) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// gone reports whether an offer summary must not be surfaced: its offer is
+// EXPIRED, or the source's own stated end (an auction's end, a deal email's
+// read window) has passed even though no poll has expired it yet.
+func gone(sm offer.Summary, now time.Time) bool {
+	return sm.Status == offer.StatusExpired || (!sm.EndsAt.IsZero() && !sm.EndsAt.After(now))
 }
 
 // OfferSummaries is the one read the surface makes of the offer layer;
@@ -154,8 +172,9 @@ func (s *Surface) candidates(ctx context.Context, q store.Query, limit int) (ite
 		}
 		live := make([]item.Item, 0, len(got))
 		hidden = 0
+		now := s.now()
 		for _, it := range got {
-			if sm, ok := sums[it.ID]; ok && sm.Status == offer.StatusExpired {
+			if sm, ok := sums[it.ID]; ok && gone(sm, now) {
 				hidden++
 				continue
 			}

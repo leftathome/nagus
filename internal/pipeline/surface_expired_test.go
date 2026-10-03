@@ -225,6 +225,31 @@ func TestSurfaceLimitAppliesAfterHiding(t *testing.T) {
 	}
 }
 
+// An auction whose stated end has passed is gone even before a poll expires
+// its offer (~3 intervals later); one that has not ended stays.
+func TestSurfaceHidesListingsPastTheirStatedEnd(t *testing.T) {
+	st, offers := expFixture(t, []expRow{
+		{"ended", expT0, offer.StatusActive, 0},
+		{"running", expT0, offer.StatusActive, 0},
+	})
+	ctx := context.Background()
+	for id, end := range map[string]time.Time{"ended": expT0.Add(-time.Minute), "running": expT0.Add(time.Hour)} {
+		if err := offers.Put(ctx, offer.Offer{ID: id, SourceID: "shopify:s", SourceKey: id, PriceCents: 10000,
+			LastSeen: expT0, Status: offer.StatusActive, EndsAt: end}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &Surface{Store: st, Offers: offers, Now: func() time.Time { return expT0 }}
+	res, err := s.Surface(ctx, store.Query{Category: "hdd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := surfIDs(res)
+	if _, ok := got["ended"]; ok || len(got) != 1 || res.HiddenExpired != 1 {
+		t.Fatalf("items=%v hidden=%d, want only the running auction", got, res.HiddenExpired)
+	}
+}
+
 type failingSummaries struct{}
 
 func (failingSummaries) Summaries(context.Context, []string) (map[string]offer.Summary, error) {

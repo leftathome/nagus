@@ -37,6 +37,12 @@ const (
 const expiredNote = "EXPIRED: nagus has not seen this listing at its source since last_seen_at. " +
 	"It is kept as price history only; do not recommend it for purchase."
 
+// endedNote is the fixed sentence an active row carries once its source-stated
+// end (expires_at) has passed but no poll has expired it yet. Search and
+// watches already hide such rows; get_item still answers.
+const endedNote = "ENDED: the end time stated for this listing (expires_at) has passed. " +
+	"Do not recommend it for purchase."
+
 // sourcePolicy is what the read path needs to know about a source to state an
 // expiry: how long an unseen offer lasts, and what kind of source it is.
 type sourcePolicy struct {
@@ -135,9 +141,15 @@ func (s *server) timingFor(sm offer.Summary) *OfferTiming {
 		}
 		if !end.IsZero() {
 			t.ExpiresAt, t.ExpiresBasis = rfc3339(end), basisEmailWindow
+			if !sm.EndsAt.IsZero() && !end.After(s.clock()) {
+				t.OfferNote = endedNote
+			}
 		}
 	case !sm.EndsAt.IsZero():
 		t.ExpiresAt, t.ExpiresBasis = rfc3339(sm.EndsAt), basisListingEnd
+		if !sm.EndsAt.After(s.clock()) {
+			t.OfferNote = endedNote
+		}
 	case known && pol.expireAfter > 0 && !sm.LastSeen.IsZero():
 		t.ExpiresAt, t.ExpiresBasis = rfc3339(sm.LastSeen.Add(pol.expireAfter)), basisNotSeen3Polls
 	}

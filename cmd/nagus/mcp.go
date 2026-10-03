@@ -65,7 +65,8 @@ const offerFieldsDescription = "Each row carries its listing's offer fields: fir
 	"\"listing_end\" = the seller states this end time (an eBay auction); \"email_window\" = a deal someone emailed in, " +
 	"listed until its mail leaves nagus's read window (not the seller's end date); \"not_seen_3_polls\" = an ASSUMPTION " +
 	"(last_seen_at plus three poll intervals, when nagus would mark it gone if no poll sees it), never a stated deadline -- " +
-	"describe it as an estimate. Times are RFC 3339 UTC. These fields are ABSENT (not zero) when the offer layer is off or " +
+	"describe it as an estimate. A listing whose stated end has passed is hidden like an expired one (get_item marks it with " +
+	"offer_note). Times are RFC 3339 UTC. These fields are ABSENT (not zero) when the offer layer is off or " +
 	"a row has no offer (the release category never has one)."
 
 // searchItemsArgs is search_items' argument object. Every field is optional.

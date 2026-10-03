@@ -365,7 +365,7 @@ func TestTimingForBasis(t *testing.T) {
 		"shopify:s":  {expireAfter: 3 * time.Hour},
 		"ebay:e":     {expireAfter: 90 * time.Minute},
 		"imap:deals": {expireAfter: 45 * time.Minute, dealLookback: 14 * 24 * time.Hour},
-	}}
+	}, now: func() time.Time { return now }}
 	base := offer.Summary{Status: offer.StatusActive, FirstSeen: now.Add(-48 * time.Hour), LastSeen: now, PriceCents: 100, MinPriceSeen: 90}
 	cases := []struct {
 		name      string
@@ -393,6 +393,17 @@ func TestTimingForBasis(t *testing.T) {
 	}
 	if got := srv.timingFor(offer.Summary{Status: offer.StatusExpired, SourceID: "shopify:s", ExpiredAt: now}); got.OfferNote != expiredNote || got.ExpiredAt != ts(now) {
 		t.Errorf("expired note: %+v", got)
+	}
+	// A stated end in the past: the row says it ENDED; one in the future says nothing.
+	ended := base
+	ended.SourceID, ended.EndsAt = "ebay:e", now.Add(-time.Minute)
+	if got := srv.timingFor(ended); got.OfferNote != endedNote || got.ExpiresBasis != basisListingEnd {
+		t.Errorf("ended auction: %+v", got)
+	}
+	running := base
+	running.SourceID, running.EndsAt = "ebay:e", now.Add(time.Minute)
+	if got := srv.timingFor(running); got.OfferNote != "" {
+		t.Errorf("running auction carries a note: %+v", got)
 	}
 	// Unknown prices: no at_lowest_price at all.
 	if got := srv.timingFor(offer.Summary{Status: offer.StatusActive, SourceID: "shopify:s"}); got.AtLowestPrice != nil || got.LowestPriceCents != 0 {

@@ -197,9 +197,11 @@ type searchRow struct {
 	// lowest_price_cents, offer_status, expires_at + expires_basis, ...),
 	// absent when the row has no offer (timing.go).
 	*OfferTiming
-	// NewReason is set by new_deals only: why the row is new since the
-	// caller's timestamp, "first_seen" or "price_drop".
-	NewReason string `json:"new_reason,omitempty"`
+	// NewReason and NewReasons are set by new_deals only: why the row is new
+	// since the caller's timestamp. NewReasons lists every reason in event
+	// order ("first_seen", "price_drop"); NewReason is the latest of them.
+	NewReason  string   `json:"new_reason,omitempty"`
+	NewReasons []string `json:"new_reasons,omitempty"`
 }
 
 // itemView is get_item's and /item's answer: the stored item unchanged (its

@@ -86,11 +86,16 @@ reads the stored price; memory: the same fold):
 | (first insert) | any | first_seen | 0 |
 | P | P (same) | unchanged | unchanged |
 | P | Q > 0, Q != P | the incoming observation time (never moves backwards) | P |
-| P | 0 (unknown) | unchanged | unchanged |
-| 0 | Q > 0 | the incoming observation time | 0 (a known price after an unknown one is a change, but not a drop) |
+| P | 0 (unknown) | unchanged; `price_cents` KEEPS P | unchanged |
+| 0 (never known) | Q > 0 | unchanged (the first known price is not a change) | 0 |
 
-`price_cents` itself keeps its existing behaviour (overwritten by every
-poll, including with 0).
+The offer's stored `price_cents` is the last KNOWN price: a poll reporting 0
+(unknown) no longer erases it (review of !37, L1), so 1000 -> 0 -> 900 is a
+drop from 1000 and 1000 -> 0 -> 1000 is no change. Rows show the ITEM's
+price as before; the offer price feeds only the comparisons.
+
+A drop after a rise (800 -> 1000 -> 900) is a `price_drop` (lower than the
+previous price); `at_lowest_price` false says it is not a new low.
 
 `ends_at_ns` is overwritten by every poll with what the source states now
 (0 when it states nothing), so a listing that loses its end time loses it here
@@ -166,7 +171,11 @@ path shares (`search_items`, `/search`, `/watches`, `new_deals`,
 2. ONE batched read of those ids' offer summaries
    (`offer.Store.Summaries`, `WHERE id = ANY($1)` -- not N queries; the
    summary omits title/body/aspects).
-3. Drop every item whose offer is EXPIRED. An item with NO offer row is kept
+3. Drop every item whose offer is EXPIRED, or whose SOURCE-STATED end
+   (`ends_at`: an auction's end, a deal email's read window) has passed: an
+   ended auction would otherwise stay visible until the next polls expire it
+   (about 90 minutes at a 30-minute eBay interval). `get_item` still answers
+   such a row, with `offer_note` saying it ENDED. An item with NO offer row is kept
    (nothing says it is gone; its timing fields are absent, which is visible
    to the agent).
 4. If the store returned a full cap AND some candidates were dropped, the cap
@@ -215,15 +224,22 @@ year of churn is mostly expired ids).
   ladder is great > good > market > poor; `any` also admits unscored rows
   (`unknown-no-reference`, `unknown-no-price`, release verdicts). With
   `watch`, min_verdict applies only when given explicitly.
-- `include_price_drops` (default true): a listing first seen before `since`
-  also counts when `price_changed_at >= since` AND its price went DOWN
-  (`price_cents < previous_price_cents`).
+- `include_price_drops` (default true): a listing also counts when
+  `price_changed_at >= since`, the change came after its first sighting, and
+  its price went DOWN (`price_cents < previous_price_cents`). A row carries
+  `new_reasons` in event order (`first_seen`, `price_drop`, or both) and
+  `new_reason`, the latest. Both matter: a listing shown as new on one call
+  can drop before the next, and the caller -- which overlaps windows --
+  must see that drop, so the skill dedupes on (id, price_changed_at), never
+  id alone (review of !37, M1).
 - `limit`: 1..100, default 25.
 
 A category whose surface fails is listed in `failed_categories` and the
 others still answer (as `/watches` isolates a failing watch); when every
 asked category fails, the call is the fixed internal error. Only ACTIVE
-listings with an offer row are considered. Each row is a search
+listings with an offer row are considered. The answer reports what it
+APPLIED: `watch` (the name, or "") and `min_verdict` (null when a watch's
+strong criteria stood in for it). Each row is a search
 row with the A fields plus `new_reason` (`first_seen` | `price_drop`). Rows are
 per LISTING: the same product at two sellers is two rows; group on
 `comparison_key` (or `product_id`), which the description says.
@@ -236,6 +252,11 @@ by row id.
 ### `list_watches`
 
     name (optional)
+
+With `name`, the strong matches are capped at `limit` (1..100, default 25;
+`strong_count` is the total, `strong_returned` the number sent): a watch
+with no limit of its own (production's `cheap-big-hdd`) could otherwise send
+every match, up to the candidate cap, into the agent's context.
 
 Without `name`: every ACTIVE watch (not past `expires_at`) with name,
 category, text, strong criteria (`strong_verdicts` -- defaulted to `["great"]`
@@ -287,7 +308,8 @@ Rows hidden on production data (2026-10-03, read-only evidence only: the
 per-category store match counts from `GET /search` and each source's latest
 ingest pass from the pod log). Store matches that no source re-stored in its
 latest pass are listings the source no longer shows -- expired, or about to
-be. This is an UPPER bound: a source whose fetch was incomplete skips expiry,
+be. It counts ITEMS not re-stored, NOT offers with status expired, so it is
+approximate. It is also an UPPER bound: a source whose fetch was incomplete skips expiry,
 and its unseen listings stay active (and visible).
 
 | category | store matches | re-stored by latest passes | would be hidden |
@@ -311,5 +333,8 @@ cheaper one (`price_drop`, `previous_price_cents` 27900 -> 23900).
 ## Deferred
 
 - Restock as "new" (an expired offer seen again keeps its first_seen):
-  nagus-m8f.
+  nagus-m8f. The opposite happens on eBay: an offer unseen for 6h is PURGED
+  (License 8.1(b)), so a listing that reappears after that is a new row with
+  a new first_seen and is reported by `new_deals` as `first_seen` -- relist
+  semantics, and correct for eBay, where a relisted item is a new listing.
 - Server-side price/verdict filters on search_items: nagus-1xy.

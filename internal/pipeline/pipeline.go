@@ -67,7 +67,8 @@ type SurfaceResult struct {
 	Filtered int // survivors of the hard-filter (== len(Items) before the caller's limit)
 	Items    []Scored
 	// HiddenExpired counts store matches dropped because their offer is
-	// EXPIRED (nagus-417): a listing gone from its source is never surfaced.
+	// EXPIRED, or its source-stated end has passed (nagus-417): a listing
+	// gone from its source is never surfaced.
 	HiddenExpired int
 	// CapReached reports that the store read hit the candidate cap, so the
 	// ranking may not cover the whole category.

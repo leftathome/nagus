@@ -191,7 +191,9 @@ ON CONFLICT (id) DO UPDATE SET
   source_url = EXCLUDED.source_url,
   title = EXCLUDED.title,
   body = EXCLUDED.body,
-  price_cents = EXCLUDED.price_cents,
+  -- an unknown-price (0) poll keeps the last known price, so a later poll
+  -- still compares against it (offer.Store.Put)
+  price_cents = CASE WHEN EXCLUDED.price_cents = 0 THEN offers.price_cents ELSE EXCLUDED.price_cents END,
   currency = EXCLUDED.currency,
   condition = EXCLUDED.condition,
   seller = EXCLUDED.seller,
@@ -331,9 +333,9 @@ const selectCols = `SELECT
   resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode,
   price_changed_at_ns, previous_price_cents, ends_at_ns`
 
-// priceChanged is true when the incoming price is known and differs from the
-// stored one (offer.Store.Put's price-change rule).
-const priceChanged = `(EXCLUDED.price_cents > 0 AND EXCLUDED.price_cents <> offers.price_cents)`
+// priceChanged is true when the incoming price and the stored (last known)
+// price are both known and differ (offer.Store.Put's price-change rule).
+const priceChanged = `(EXCLUDED.price_cents > 0 AND offers.price_cents > 0 AND EXCLUDED.price_cents <> offers.price_cents)`
 
 // storedPriceChangedAt is the stored stamp, a pre-column 0 read as first_seen.
 const storedPriceChangedAt = `(CASE WHEN offers.price_changed_at_ns = 0 THEN offers.first_seen_ns ELSE offers.price_changed_at_ns END)`

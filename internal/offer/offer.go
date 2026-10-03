@@ -195,7 +195,9 @@ type Offer struct {
 	Title string
 	Body  string
 
-	// Trusted scalars, derived by the connector.
+	// Trusted scalars, derived by the connector. As STORED, PriceCents is the
+	// last KNOWN price: a poll that reports 0 (unknown) does not erase it
+	// (see Store.Put). 0 means no poll has ever stated a price.
 	PriceCents int64
 	Currency   string
 	Condition  string
@@ -447,10 +449,14 @@ type Store interface {
 	// Put also derives PriceChangedAt and PreviousPriceCents (any value the
 	// caller supplies is ignored), identically in every adapter:
 	//   - first insert: PriceChangedAt = FirstSeen, PreviousPriceCents = 0
-	//   - incoming price equal to the stored one, or 0 (unknown): both unchanged
-	//   - incoming price non-zero and different from the stored one (a stored
-	//     0 included): PriceChangedAt = the incoming LastSeen, never earlier
-	//     than the stored value; PreviousPriceCents = the stored price
+	//   - incoming price 0 (unknown): PriceCents keeps the LAST KNOWN price
+	//     (an unknown-price poll never erases it), both fields unchanged
+	//   - incoming price equal to the stored one: both unchanged
+	//   - stored price 0 (never known) and incoming non-zero: the first known
+	//     price, not a change; both unchanged
+	//   - both known and different: PriceChangedAt = the incoming LastSeen,
+	//     never earlier than the stored value; PreviousPriceCents = the stored
+	//     price
 	// A stored PriceChangedAt of zero (a row older than the column, not yet
 	// backfilled) reads as FirstSeen. EndsAt is taken from the caller as is.
 	Put(ctx context.Context, o Offer) error
@@ -458,8 +464,10 @@ type Store interface {
 	Get(ctx context.Context, id string) (Offer, bool, error)
 	// Summaries returns the Summary of every offer among ids that exists,
 	// keyed by id, EXPIRED ONES INCLUDED (the caller is deciding what to hide).
-	// It is one round trip however many ids are given, so a read path can
-	// check a whole candidate set at once. Unknown ids are simply absent.
+	// It is batched, never one query per id: one query on Postgres (WHERE
+	// id = ANY), and one query per 500 ids on SQLite (its parameter limit),
+	// so a read path can check a whole candidate set at once. Unknown ids
+	// are simply absent.
 	Summaries(ctx context.Context, ids []string) (map[string]Summary, error)
 	// Query returns offers matching q.
 	Query(ctx context.Context, q Query) ([]Offer, error)

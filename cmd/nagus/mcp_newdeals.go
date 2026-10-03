@@ -63,7 +63,8 @@ type newDealsArgs struct {
 
 // listWatchesArgs is list_watches' argument object.
 type listWatchesArgs struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Limit *int   `json:"limit"`
 }
 
 // newDealsSchema and listWatchesSchema are pinned by
@@ -95,6 +96,8 @@ func listWatchesSchema() map[string]any {
 		"properties": map[string]any{
 			"name": map[string]any{"type": "string",
 				"description": "One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only."},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": newDealsMaxLimit,
+				"description": "With name: at most this many strong matches (best first); default 25. strong_count is the total."},
 		},
 		"additionalProperties": false,
 	}
@@ -106,10 +109,14 @@ func (s *server) newDealsTools() []mcp.Tool {
 		Description: "READ-ONLY. Active listings that are NEW since a time you give: first seen by nagus at or after since, " +
 			"or (include_price_drops, default true) whose price DROPPED at or after since. Ranked like search_items, best first; " +
 			"expired listings are never returned. nagus keeps no memory of what you have seen: pass since = the as_of of your " +
-			"previous call (minus an hour, because a poll that started before as_of can land after it) and drop row ids you already showed. " +
-			"Each row has new_reason (first_seen or price_drop) and the offer fields below. Rows are per LISTING: the same product at " +
+			"previous call (minus an hour: a conservative margin, because a poll that started before as_of can store its listings after it) " +
+			"and drop rows you already showed, keyed on (id, price_changed_at) -- NOT on id alone, or a later price drop on a listing you " +
+			"showed as new is lost. Each row has new_reasons (first_seen and/or price_drop) and new_reason (price_drop when the price " +
+			"dropped at or after since, else first_seen). price_drop means lower than previous_price_cents; at_lowest_price says whether " +
+			"it is also the lowest price nagus has seen for the listing (a drop after a rise may not be). Rows are per LISTING: the same product at " +
 			"two sellers is two rows -- group them on comparison_key (or product_id when comparison_key is empty) before presenting. " +
-			"min_verdict defaults to good. watch restricts to one watch from list_watches and its strong criteria. " +
+			"min_verdict defaults to good. watch restricts to one watch from list_watches: its category, text and strong criteria " +
+			"(min_verdict then applies only if you give it; the watch's own limit is not used). " +
 			"Needs nagus's offer layer; otherwise it answers invalid argument. " + offerFieldsDescription,
 		InputSchema: newDealsSchema(),
 		Noun:        "item(s)",
@@ -122,7 +129,8 @@ func (s *server) newDealsTools() []mcp.Tool {
 		Description: "READ-ONLY. The household's standing watches (\"things I care about\"): name, category, text, the strong " +
 			"criteria that make a match ping (strong_verdicts, min_score, min_discount_pct, new_within_days), audience and " +
 			"expires_at, with candidate_count and strong_count over ACTIVE listings right now. Expired watches are not listed. " +
-			"Give name to also get that watch's strong matches as rows (with the offer fields of search_items). " +
+			"Give name to also get that watch's strong matches as rows (with the offer fields of search_items), at most limit " +
+			"(default 25) of them; strong_count is the total. " +
 			"Use a watch name with new_deals to ask what is new for that watch.",
 		InputSchema: listWatchesSchema(),
 		Noun:        "watch(es)",
@@ -201,7 +209,7 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 	}
 
 	var picked []pipeline.Scored
-	reasons := map[string]string{}
+	reasons := map[string][]string{}
 	hidden, truncated := 0, false
 	failed := []string{}
 	var lastErr error
@@ -217,8 +225,8 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 		hidden += res.HiddenExpired
 		truncated = truncated || res.CapReached
 		for _, sc := range res.Items {
-			reason := newReason(sc.Offer, since, drops)
-			if reason == "" {
+			why := newReasons(sc.Offer, since, drops)
+			if len(why) == 0 {
 				continue
 			}
 			if w != nil {
@@ -229,7 +237,7 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 				continue
 			}
 			picked = append(picked, sc)
-			reasons[sc.Item.ID] = reason
+			reasons[sc.Item.ID] = why
 		}
 	}
 	if len(failed) == len(cats) {
@@ -248,13 +256,27 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 	}
 	rows := s.rowsFor(ctx, picked)
 	for i := range rows {
-		rows[i].NewReason = reasons[rows[i].ID]
+		why := reasons[rows[i].ID]
+		rows[i].NewReasons = why
+		// The most recent event leads: a drop after the first sighting.
+		rows[i].NewReason = why[len(why)-1]
+	}
+	// Report what was APPLIED: with a watch and no explicit min_verdict, the
+	// watch's strong criteria decide and no verdict floor is applied.
+	var applied any = minVerdict
+	watchName := ""
+	if w != nil {
+		watchName = w.Name
+		if a.MinVerdict == "" {
+			applied = nil
+		}
 	}
 	return mcp.Structured(len(rows), map[string]any{
 		"as_of":                rfc3339(now),
 		"since":                rfc3339(since),
 		"categories":           cats,
-		"min_verdict":          minVerdict,
+		"watch":                watchName,
+		"min_verdict":          applied,
 		"include_price_drops":  drops,
 		"new_count":            total,
 		"hidden_expired":       hidden,
@@ -264,20 +286,25 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 	}), nil
 }
 
-// newReason says why a surfaced row is new since the caller's time, or "" when
-// it is not. Only ACTIVE listings with an offer qualify: without an offer
-// nagus does not know when it first saw the listing.
-func newReason(sm *offer.Summary, since time.Time, drops bool) string {
+// newReasons says why a surfaced row is new since the caller's time, in
+// event order: first_seen (first sighting at or after since) and/or
+// price_drop (a drop at or after since, AFTER the first sighting). Both can
+// hold: a listing shown as new can drop later, and a caller that already
+// showed it must still learn of the drop (it dedupes on id plus
+// price_changed_at). nil when the row is not new. Only ACTIVE listings with
+// an offer qualify: without one nagus does not know when it first saw it.
+func newReasons(sm *offer.Summary, since time.Time, drops bool) []string {
 	if sm == nil || sm.Status != offer.StatusActive {
-		return ""
+		return nil
 	}
+	var out []string
 	if !sm.FirstSeen.IsZero() && !sm.FirstSeen.Before(since) {
-		return reasonFirstSeen
+		out = append(out, reasonFirstSeen)
 	}
-	if drops && !sm.PriceChangedAt.Before(since) && sm.PriceDropped() {
-		return reasonPriceDrop
+	if drops && !sm.PriceChangedAt.Before(since) && sm.PriceChangedAt.After(sm.FirstSeen) && sm.PriceDropped() {
+		out = append(out, reasonPriceDrop)
 	}
-	return ""
+	return out
 }
 
 func verdictAtLeast(verdict, min string) bool {
@@ -335,6 +362,13 @@ func (s *server) mcpListWatches(ctx context.Context, a listWatchesArgs) (mcp.Res
 		if !ok {
 			return mcp.NotFound(), nil
 		}
+		limit := newDealsDefaultLimit
+		if a.Limit != nil {
+			if *a.Limit < 1 || *a.Limit > newDealsMaxLimit {
+				return mcp.Result{}, mcp.InvalidArgument("limit must be between 1 and 100")
+			}
+			limit = *a.Limit
+		}
 		info := describeWatch(w)
 		strong := []searchRow{}
 		if sf, ok := s.surfaces[w.Category]; !ok {
@@ -346,9 +380,15 @@ func (s *server) mcpListWatches(ctx context.Context, a listWatchesArgs) (mcp.Res
 			}
 			c, n := len(res.Candidates), len(res.Strong)
 			info.CandidateCount, info.StrongCount = &c, &n
-			strong = s.rowsFor(ctx, res.Strong)
+			// A watch with no limit of its own can match thousands of rows;
+			// the agent gets the best few, and strong_count says how many.
+			top := res.Strong
+			if len(top) > limit {
+				top = top[:limit]
+			}
+			strong = s.rowsFor(ctx, top)
 		}
-		return mcp.Structured(len(strong), map[string]any{"watch": info, "strong": strong}), nil
+		return mcp.Structured(len(strong), map[string]any{"watch": info, "strong": strong, "strong_returned": len(strong)}), nil
 	}
 	out := []watchInfo{}
 	for _, w := range s.watches.Watches {

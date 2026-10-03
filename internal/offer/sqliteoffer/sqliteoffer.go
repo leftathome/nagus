@@ -215,7 +215,10 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 			changed = prevFirst
 		}
 		o.PreviousPriceCents = prevPrevious
-		if o.PriceCents > 0 && o.PriceCents != prevPrice {
+		if o.PriceCents == 0 {
+			// An unknown-price poll keeps the last known price.
+			o.PriceCents = prevPrice
+		} else if prevPrice > 0 && o.PriceCents != prevPrice {
 			o.PreviousPriceCents = prevPrice
 			if obs := o.LastSeen.UnixNano(); obs > changed {
 				changed = obs

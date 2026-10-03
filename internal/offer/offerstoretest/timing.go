@@ -19,7 +19,8 @@ func runTiming(t *testing.T, newStore NewStore) {
 	t.Run("PriceChangeSamePriceKeepsStamp", func(t *testing.T) { priceChangeSamePrice(t, newStore(t)) })
 	t.Run("PriceChangeLowerStampsAndRecordsPrevious", func(t *testing.T) { priceChangeLower(t, newStore(t)) })
 	t.Run("PriceChangeHigherStampsAndIsNotADrop", func(t *testing.T) { priceChangeHigher(t, newStore(t)) })
-	t.Run("PriceChangeZeroIsNotAChange", func(t *testing.T) { priceChangeZero(t, newStore(t)) })
+	t.Run("PriceChangeZeroKeepsLastKnownPrice", func(t *testing.T) { priceChangeZero(t, newStore(t)) })
+	t.Run("PriceChangeZeroRoundTripIsNoChange", func(t *testing.T) { priceChangeZeroRoundTrip(t, newStore(t)) })
 	t.Run("PriceChangeCannotBeSetByCaller", func(t *testing.T) { priceChangeCallerIgnored(t, newStore(t)) })
 	t.Run("PriceChangeNeverRewinds", func(t *testing.T) { priceChangeNeverRewinds(t, newStore(t)) })
 	t.Run("EndsAtRoundTripsAndClears", func(t *testing.T) { endsAtRoundTrips(t, newStore(t)) })
@@ -101,15 +102,32 @@ func priceChangeZero(t *testing.T, s offer.Store) {
 	put(t, s, Offer("shopify:a", "k", 1000, T0))
 	put(t, s, Offer("shopify:a", "k", 0, T1))
 	got := getByID(t, s, id)
-	if !got.PriceChangedAt.Equal(T0) || got.PreviousPriceCents != 0 {
-		t.Fatalf("unknown price must not be a change: price_changed_at=%v previous=%d", got.PriceChangedAt, got.PreviousPriceCents)
+	if !got.PriceChangedAt.Equal(T0) || got.PreviousPriceCents != 0 || got.PriceCents != 1000 {
+		t.Fatalf("unknown price must not be a change nor erase the last known price: %+v", got)
 	}
-	// Known again after unknown: a change (the stored price is 0), but its
-	// previous price is unknown, so it is not a drop.
+	// Known again after unknown, lower: a drop FROM THE LAST KNOWN price.
 	put(t, s, Offer("shopify:a", "k", 900, T2))
 	got = getByID(t, s, id)
-	if !got.PriceChangedAt.Equal(T2) || got.PreviousPriceCents != 0 || got.Summarize().PriceDropped() {
-		t.Fatalf("known after unknown: %+v", got)
+	if !got.PriceChangedAt.Equal(T2) || got.PreviousPriceCents != 1000 || got.PriceCents != 900 || !got.Summarize().PriceDropped() {
+		t.Fatalf("1000 -> 0 -> 900 must be a drop from 1000: %+v", got)
+	}
+}
+
+// 1000 -> 0 -> 1000 is no change at all, and a price that first becomes
+// known after unknown polls is not a change either.
+func priceChangeZeroRoundTrip(t *testing.T, s offer.Store) {
+	id := offer.DeterministicID("shopify:a", "k")
+	put(t, s, Offer("shopify:a", "k", 1000, T0))
+	put(t, s, Offer("shopify:a", "k", 0, T1))
+	put(t, s, Offer("shopify:a", "k", 1000, T2))
+	if got := getByID(t, s, id); !got.PriceChangedAt.Equal(T0) || got.PreviousPriceCents != 0 {
+		t.Fatalf("1000 -> 0 -> 1000 stamped a change: %+v", got)
+	}
+	unk := offer.DeterministicID("shopify:a", "u")
+	put(t, s, Offer("shopify:a", "u", 0, T0))
+	put(t, s, Offer("shopify:a", "u", 900, T1))
+	if got := getByID(t, s, unk); !got.PriceChangedAt.Equal(T0) || got.PreviousPriceCents != 0 || got.PriceCents != 900 {
+		t.Fatalf("first known price after unknown: %+v", got)
 	}
 }
 

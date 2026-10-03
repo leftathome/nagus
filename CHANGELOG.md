@@ -22,6 +22,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   backfilled to `first_seen` in the BACKGROUND after startup, in batches of
   5,000 (1,000,000 rows: 45.9 s, heap +12%; reads never wait for it -- an
   unfilled row reads as first_seen). An older binary ignores the columns.
+- **An unknown-price (0) poll no longer erases an offer's stored price**: the
+  offer keeps its last known price, so a later poll compares against it
+  (rows still show the item's price).
 - **openclaw's nagus `toolFilter` must add `new_deals` and `list_watches`**
   for agents to see them (gitops `configmap-openclaw-patches.yaml`).
 
@@ -377,10 +380,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `since` -- or, by default, whose price dropped at or after it -- ranked like
   `search_items`, each with `new_reason` (`first_seen` | `price_drop`), plus
   `as_of` to pass next time: "new since" is stateless, nagus keeps no cursor.
+  `new_reasons` can hold both reasons (a listing shown as new that later
+  drops is reported again; callers dedupe on id plus `price_changed_at`).
   `since` must be RFC 3339, at most 5 minutes ahead and 30 days back.
-  `list_watches(name)` lists active watches with their strong criteria and
-  live candidate/strong counts (never `principal`), or one watch's strong
-  matches. Both input schemas are pinned in tests next to the unchanged
+  `list_watches(name, limit)` lists active watches with their strong
+  criteria and live candidate/strong counts (never `principal`), or one
+  watch's strong matches, capped at `limit` (default 25).
+- **Listings whose source-stated end has passed are hidden** from search,
+  watches and new_deals like expired ones (an ended eBay auction no longer
+  waits ~90 minutes for expiry); get_item marks them ENDED. Both input schemas are pinned in tests next to the unchanged
   `search_items` and `get_item` schemas.
 - **Offer timing on every row** (search_items, /search, /watches, get_item,
   /item, new_deals, list_watches): `first_seen_at`, `last_seen_at`,

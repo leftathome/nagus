@@ -64,7 +64,10 @@ func (m *MemoryStore) Put(ctx context.Context, o Offer) error {
 		if o.PriceChangedAt.IsZero() {
 			o.PriceChangedAt = prev.FirstSeen
 		}
-		if o.PriceCents > 0 && o.PriceCents != prev.PriceCents {
+		if o.PriceCents == 0 {
+			// An unknown-price poll keeps the last known price.
+			o.PriceCents = prev.PriceCents
+		} else if prev.PriceCents > 0 && o.PriceCents != prev.PriceCents {
 			o.PreviousPriceCents = prev.PriceCents
 			if o.LastSeen.After(o.PriceChangedAt) {
 				o.PriceChangedAt = o.LastSeen
