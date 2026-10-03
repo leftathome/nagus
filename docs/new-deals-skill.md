@@ -9,9 +9,9 @@ gateway's `mcp.servers.nagus.toolFilter.include` lists `list_watches` and
 
 ## New good deals on things the household cares about (nagus)
 
-nagus keeps no memory of what you have already been shown. YOU keep one
-value: the `as_of` from your last `new_deals` answer (per person you answer
-for), plus the row ids you showed then.
+nagus keeps no memory of what you have already been shown. YOU keep, per
+person you answer for: the `as_of` from your last `new_deals` answer, and the
+SHOWN KEYS of the rows you presented (see step 2).
 
 1. **What do they care about?** Call `list_watches` (no arguments). Each watch
    is a standing want: `name`, `category`, `text`, the `strong_criteria` that
@@ -30,10 +30,14 @@ for), plus the row ids you showed then.
      text, and only listings that clear its strong criteria.
    - For "anything good", call it without `watch`; `min_verdict` defaults to
      `good` (`great` > `good` > `market` > `poor`).
-   - Store the answer's `as_of` for next time. Remember what you showed as
-     the pair (`id`, `price_changed_at`) and drop a row only when BOTH match:
-     a listing you showed as new can drop in price later, and that drop
-     comes back with the same `id` and a new `price_changed_at`.
+   - Store the answer's `as_of` for next time.
+   - De-duplicate on a SHOWN KEY: when `new_reasons` contains `price_drop`
+     the key is `id` + `price_changed_at`; otherwise (`first_seen` only) it is
+     `id` alone. Skip a row whose key you already showed; remember the key of
+     every row you show. So a listing you showed as new comes back once more
+     only when its price DROPS (new `price_changed_at`), never because its
+     price rose (a rise changes `price_changed_at` but is not a drop, so the
+     row is `first_seen` only and its key is the `id` you already have).
 3. **Group before you present.** Rows are per LISTING: the same product at two
    sellers is two rows. Group rows that share `comparison_key` (or, when it
    is empty, `product_id`); show the group once with its cheapest seller

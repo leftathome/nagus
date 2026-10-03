@@ -110,8 +110,8 @@ func (s *server) newDealsTools() []mcp.Tool {
 			"or (include_price_drops, default true) whose price DROPPED at or after since. Ranked like search_items, best first; " +
 			"expired listings are never returned. nagus keeps no memory of what you have seen: pass since = the as_of of your " +
 			"previous call (minus an hour: a conservative margin, because a poll that started before as_of can store its listings after it) " +
-			"and drop rows you already showed, keyed on (id, price_changed_at) -- NOT on id alone, or a later price drop on a listing you " +
-			"showed as new is lost. Each row has new_reasons (first_seen and/or price_drop) and new_reason (price_drop when the price " +
+			"and drop rows you already showed: key a row on id + price_changed_at when new_reasons contains price_drop, else on id " +
+			"alone -- so a listing shown as new returns once more only when its price drops, never when it rises. Each row has new_reasons (first_seen and/or price_drop) and new_reason (price_drop when the price " +
 			"dropped at or after since, else first_seen). price_drop means lower than previous_price_cents; at_lowest_price says whether " +
 			"it is also the lowest price nagus has seen for the listing (a drop after a rise may not be). Rows are per LISTING: the same product at " +
 			"two sellers is two rows -- group them on comparison_key (or product_id when comparison_key is empty) before presenting. " +
@@ -264,7 +264,7 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 	// Report what was APPLIED: with a watch and no explicit min_verdict, the
 	// watch's strong criteria decide and no verdict floor is applied.
 	var applied any = minVerdict
-	watchName := ""
+	var watchName any // null without a watch, like min_verdict's null
 	if w != nil {
 		watchName = w.Name
 		if a.MinVerdict == "" {
@@ -288,10 +288,10 @@ func (s *server) mcpNewDeals(ctx context.Context, a newDealsArgs) (mcp.Result, e
 
 // newReasons says why a surfaced row is new since the caller's time, in
 // event order: first_seen (first sighting at or after since) and/or
-// price_drop (a drop at or after since, AFTER the first sighting). Both can
-// hold: a listing shown as new can drop later, and a caller that already
-// showed it must still learn of the drop (it dedupes on id plus
-// price_changed_at). nil when the row is not new. Only ACTIVE listings with
+// price_drop (a drop at or after since). Both can hold: a listing shown as
+// new can drop later, and a caller that already showed it must still learn of
+// the drop (it keys a price_drop row on id plus price_changed_at, any other
+// row on id alone). nil when the row is not new. Only ACTIVE listings with
 // an offer qualify: without one nagus does not know when it first saw it.
 func newReasons(sm *offer.Summary, since time.Time, drops bool) []string {
 	if sm == nil || sm.Status != offer.StatusActive {
@@ -301,7 +301,9 @@ func newReasons(sm *offer.Summary, since time.Time, drops bool) []string {
 	if !sm.FirstSeen.IsZero() && !sm.FirstSeen.Before(since) {
 		out = append(out, reasonFirstSeen)
 	}
-	if drops && !sm.PriceChangedAt.Before(since) && sm.PriceChangedAt.After(sm.FirstSeen) && sm.PriceDropped() {
+	// PriceDropped needs a previous price, which only a change after the
+	// first insert records, so no separate "after first_seen" check.
+	if drops && !sm.PriceChangedAt.Before(since) && sm.PriceDropped() {
 		out = append(out, reasonPriceDrop)
 	}
 	return out
@@ -357,6 +359,9 @@ func describeWatch(w watch.Watch) watchInfo {
 
 func (s *server) mcpListWatches(ctx context.Context, a listWatchesArgs) (mcp.Result, error) {
 	now := s.clock()
+	if a.Name == "" && a.Limit != nil {
+		return mcp.Result{}, mcp.InvalidArgument("limit applies only with name (the list form returns no matches)")
+	}
 	if a.Name != "" {
 		w, ok := s.activeWatch(a.Name, now)
 		if !ok {

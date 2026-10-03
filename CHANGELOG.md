@@ -381,7 +381,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `search_items`, each with `new_reason` (`first_seen` | `price_drop`), plus
   `as_of` to pass next time: "new since" is stateless, nagus keeps no cursor.
   `new_reasons` can hold both reasons (a listing shown as new that later
-  drops is reported again; callers dedupe on id plus `price_changed_at`).
+  drops is reported again; callers key a shown row on id plus
+  `price_changed_at` when it is a price_drop, on id alone otherwise, so a
+  price rise never re-shows it). `list_watches` rejects `limit` without
+  `name`; `new_deals` reports `watch` and `min_verdict` as applied (null
+  when not).
   `since` must be RFC 3339, at most 5 minutes ahead and 30 days back.
   `list_watches(name, limit)` lists active watches with their strong
   criteria and live candidate/strong counts (never `principal`), or one

@@ -114,8 +114,46 @@ func TestNewDealsReportsWhatWasApplied(t *testing.T) {
 	}
 	_, res, _ = newDeals(t, f.srv, `{"since":"`+since+`"}`)
 	_ = json.Unmarshal(res.StructuredContent, &sc)
-	if sc["min_verdict"] != "good" || sc["watch"] != "" {
-		t.Fatalf("default min_verdict not reported: %v / %v", sc["min_verdict"], sc["watch"])
+	if w, ok := sc["watch"]; sc["min_verdict"] != "good" || !ok || w != nil {
+		t.Fatalf("without a watch: min_verdict %v, watch %v (present %v); want good and null", sc["min_verdict"], w, ok)
+	}
+}
+
+// The skill's dedupe key: id + price_changed_at only when new_reasons holds
+// price_drop, else id. A listing shown as new whose price then RISES comes
+// back first_seen-only (same key: not shown again); one whose price DROPS
+// comes back with price_drop (new key: shown again).
+func TestNewDealsDedupeKeySurvivesARise(t *testing.T) {
+	f := offerTestServer(t)
+	ctx := context.Background()
+	key := func(r searchRow) string {
+		if slices.Contains(r.NewReasons, reasonPriceDrop) {
+			return r.ID + "@" + r.PriceChangedAt
+		}
+		return r.ID
+	}
+	_, _, nd := newDeals(t, f.srv, `{"since":"`+ts(f.now.Add(-3*time.Hour))+`","min_verdict":"any"}`)
+	shown := key(rowByID(nd.Items)[f.hgst])
+
+	// The price rises 5 minutes later.
+	if err := f.offers.Put(ctx, offer.Offer{SourceID: "ebay", SourceKey: hgstKey, PriceCents: 9900, LastSeen: f.now.Add(5 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	f.srv.now = func() time.Time { return f.now.Add(10 * time.Minute) }
+	_, _, nd = newDeals(t, f.srv, `{"since":"`+ts(f.now.Add(-time.Hour))+`","min_verdict":"any"}`)
+	r := rowByID(nd.Items)[f.hgst]
+	if !slices.Equal(r.NewReasons, []string{reasonFirstSeen}) || key(r) != shown {
+		t.Fatalf("after a rise: reasons %v key %q, want first_seen only and the shown key %q", r.NewReasons, key(r), shown)
+	}
+
+	// Then it drops below the risen price: a new key.
+	if err := f.offers.Put(ctx, offer.Offer{SourceID: "ebay", SourceKey: hgstKey, PriceCents: 7900, LastSeen: f.now.Add(15 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	f.srv.now = func() time.Time { return f.now.Add(20 * time.Minute) }
+	_, _, nd = newDeals(t, f.srv, `{"since":"`+ts(f.now.Add(-time.Hour))+`","min_verdict":"any"}`)
+	if r = rowByID(nd.Items)[f.hgst]; !slices.Contains(r.NewReasons, reasonPriceDrop) || key(r) == shown {
+		t.Fatalf("after a drop: reasons %v key %q", r.NewReasons, key(r))
 	}
 }
 
@@ -160,6 +198,11 @@ func TestListWatchesNameIsCapped(t *testing.T) {
 		if env.Error == nil || !strings.Contains(env.Error.Message, "limit must be between 1 and 100") {
 			t.Fatalf("%s -> %+v", bad, env.Error)
 		}
+	}
+	// limit means nothing without name: rejected, not silently ignored.
+	env, _ := callTool(t, f.srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_watches","arguments":{"limit":5}}}`)
+	if env.Error == nil || !strings.Contains(env.Error.Message, "limit applies only with name") {
+		t.Fatalf("limit without name -> %+v", env.Error)
 	}
 }
 

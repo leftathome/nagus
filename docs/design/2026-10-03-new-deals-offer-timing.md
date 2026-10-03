@@ -92,7 +92,9 @@ reads the stored price; memory: the same fold):
 The offer's stored `price_cents` is the last KNOWN price: a poll reporting 0
 (unknown) no longer erases it (review of !37, L1), so 1000 -> 0 -> 900 is a
 drop from 1000 and 1000 -> 0 -> 1000 is no change. Rows show the ITEM's
-price as before; the offer price feeds only the comparisons.
+price as before; the offer price feeds only the comparisons. By design, a
+seller going to "no price" therefore leaves the offer at its last known
+price, and `at_lowest_price` compares THAT price with the lowest seen.
 
 A drop after a rise (800 -> 1000 -> 900) is a `price_drop` (lower than the
 previous price); `at_lowest_price` false says it is not a new low.
@@ -230,16 +232,18 @@ year of churn is mostly expired ids).
   `new_reasons` in event order (`first_seen`, `price_drop`, or both) and
   `new_reason`, the latest. Both matter: a listing shown as new on one call
   can drop before the next, and the caller -- which overlaps windows --
-  must see that drop, so the skill dedupes on (id, price_changed_at), never
-  id alone (review of !37, M1).
+  must see that drop. The skill keys a shown row on `id` + `price_changed_at`
+  when `new_reasons` contains `price_drop`, and on `id` alone otherwise: a
+  drop brings a listing back once, a rise (which also moves
+  `price_changed_at`) does not (reviews of !37).
 - `limit`: 1..100, default 25.
 
 A category whose surface fails is listed in `failed_categories` and the
 others still answer (as `/watches` isolates a failing watch); when every
 asked category fails, the call is the fixed internal error. Only ACTIVE
 listings with an offer row are considered. The answer reports what it
-APPLIED: `watch` (the name, or "") and `min_verdict` (null when a watch's
-strong criteria stood in for it). Each row is a search
+APPLIED: `watch` (the name, or null without one) and `min_verdict` (null
+when a watch's strong criteria stood in for it). Each row is a search
 row with the A fields plus `new_reason` (`first_seen` | `price_drop`). Rows are
 per LISTING: the same product at two sellers is two rows; group on
 `comparison_key` (or `product_id`), which the description says.
@@ -254,7 +258,8 @@ by row id.
     name (optional)
 
 With `name`, the strong matches are capped at `limit` (1..100, default 25;
-`strong_count` is the total, `strong_returned` the number sent): a watch
+`strong_count` is the total, `strong_returned` the number sent; `limit`
+without `name` is rejected, since the list form returns no matches): a watch
 with no limit of its own (production's `cheap-big-hdd`) could otherwise send
 every match, up to the candidate cap, into the agent's context.
 
