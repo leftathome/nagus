@@ -97,6 +97,8 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("ConcurrentWritesFromManySources", func(t *testing.T) { concurrentWrites(t, newStore(t)) })
 	// offer timing (nagus-417) -- see timing.go.
 	runTiming(t, newStore)
+	// price history (nagus-0ta) -- see history.go.
+	runHistory(t, newStore)
 }
 
 // offer.Store documents that implementations MUST be safe for concurrent use,

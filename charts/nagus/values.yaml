@@ -134,6 +134,14 @@ offers:
   enabled: false
   # Ignored when storage.backend is postgres.
   sqlitePath: /data/nagus-offers.db
+  # How long OFFER PRICE HISTORY (offer_price_history: one row per price change,
+  # nagus-0ta) is kept for sources whose offers are retained in full, as a Go
+  # duration -> NAGUS_PRICE_HISTORY_RETENTION. Empty = the binary default,
+  # 8760h (365 days); "0" keeps it as long as the offer. Go durations have no
+  # day unit: write 8760h, not 365d (nagus refuses to start on an invalid value).
+  # eBay ignores this: its history is purged with its offers on the 6h content
+  # window (License 8.1(b)).
+  priceHistoryRetention: ""
 
 # quark: asynchronous product-identity resolution (nagus-6r6). nagus asks quark
 # what product each offer's hint names and stamps the answer on the offer. It

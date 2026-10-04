@@ -60,6 +60,13 @@ wiped its corpus). `cmd/nagus.retentionForSource` is the policy table.
 rather than silently downgraded — both plausible downgrades are wrong in ways
 nobody would notice.
 
+**Price history** (`offer_price_history`, nagus-0ta) follows the same rule:
+eBay rows are deleted with the offer and never outlive the 6h window; other
+sources keep them for `NAGUS_PRICE_HISTORY_RETENTION` (default 365 days). One
+row per price CHANGE (the nagus-417 rule), plus the first known price, written
+in `Put`'s transaction; `offer.HistoryRows` is that rule for every adapter.
+Design: `docs/design/2026-10-03-offer-price-history.md`.
+
 ## Sources
 
 Connectors live in `internal/connector/`. A connector returns `listing.Raw`;

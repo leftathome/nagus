@@ -51,6 +51,10 @@ type sourcePolicy struct {
 	// dealLookback, when > 0, marks a deal-submission source and is its
 	// mailbox lookback window.
 	dealLookback time.Duration
+	// historyMaxAge, when > 0, is the source's content-age bound (eBay's 6h,
+	// License 8.1(b)): price-history points older than it are never served,
+	// even before retention deletes them (nagus-0ta).
+	historyMaxAge time.Duration
 }
 
 // buildSourcePolicies derives each configured source's policy, keyed by the
@@ -62,8 +66,11 @@ func buildSourcePolicies(sources []SourceConfig, ingesters []*pipeline.Ingester)
 		if i >= len(ingesters) {
 			break
 		}
-		_, _, expireAfter := retentionForSource(src)
+		_, ret, expireAfter := retentionForSource(src)
 		p := sourcePolicy{expireAfter: expireAfter}
+		if ret.Policy == offer.Purge {
+			p.historyMaxAge = ret.Window
+		}
 		if isDealSource(src) {
 			days := src.IMAPLookbackDays
 			if days <= 0 {

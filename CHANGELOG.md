@@ -8,6 +8,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade notes
 
+- **New table `offer_price_history`** (nagus-0ta; Postgres, SQLite, memory).
+  `CREATE TABLE IF NOT EXISTS` on startup: catalog-only, no backfill and no
+  seeding, so the upgrade costs nothing at any table size. History starts at
+  deploy: an existing offer gets its first row when its price next changes
+  (an anchor for the price it leaves, then the change). Expected growth on
+  production-like change rates is a few hundred rows a day, tens of MB a
+  year at most (design doc). **Every Postgres `Put` is now an explicit
+  transaction**: `BEGIN`, `SELECT ... FOR UPDATE` on the offer row, (on a
+  real change, an `EXISTS` probe of the history), the upsert, (zero to two
+  history inserts), `COMMIT` -- four round trips for an unchanged poll where
+  there was one autocommit statement, up to seven for a change, with the
+  offer row locked across them. It retries a rolled-back attempt (a lost
+  first-insert race, `40P01`, `40001`) up to 4 times. An older binary ignores
+  the table.
+- **`NAGUS_PRICE_HISTORY_RETENTION`** (chart `offers.priceHistoryRetention`,
+  chart 0.14.0): how long a retain-full source keeps price history, a Go
+  duration; default `8760h` (365 days), `0` = as long as the offer. nagus
+  refuses to start on an invalid value (`365d` is invalid: Go durations have
+  no day unit). eBay history ignores it and goes with eBay's 6h content
+  window (License 8.1(b)).
+- **openclaw's nagus `toolFilter` must add `price_history`** for agents to
+  see it (gitops `configmap-openclaw-patches.yaml`).
+
 - **Expired listings stop surfacing** (nagus-417). With the offer layer on,
   `search_items`, `/search`, `/watches` and the new tools drop every listing
   whose offer is EXPIRED (not seen at its source for 3 polls). Store sources
@@ -373,6 +396,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Offer price history** (nagus-0ta; design
+  `docs/design/2026-10-03-offer-price-history.md`). An append-only
+  `offer_price_history` (offer_id, observed_at_ns, price_cents, currency)
+  gets one row per price CHANGE -- exactly the nagus-417 rule that stamps
+  `price_changed_at`, so an unknown (0) price is never a change -- plus the
+  first known price of every new offer, written in the offer upsert's
+  transaction. Retention follows the source: eBay rows are deleted with the
+  offer, never outlive the 6h content window, and are never SERVED past it
+  either; other sources keep them for `NAGUS_PRICE_HISTORY_RETENTION`, plus
+  each offer's carry-in point (the price in effect when the window opens).
+  `offer.Store` gains `PriceHistory`.
+- **MCP `price_history(product_id | item_id, days?)`**: one product's
+  history across sellers, grouped on `comparison_key` (per vintage for wine)
+  and currency -- current lowest ACTIVE price, all-time low with its date,
+  the lowest price `days` ago (default 30, max 365) and the change since,
+  and per-seller timelines. Bounded: 50 offers read, 10 groups, 20 sellers
+  per group, 30 points per seller, each with a `*_truncated` flag. Read-only;
+  values only in structuredContent, and NO offer free text (offers at rest
+  are ungated: no seller, title or aspect; currency only in ISO 4217 shape).
+  A price before the earliest recorded point is reported unknown, never
+  guessed from `previous_price_cents`. Its input schema is pinned in
+  `TestMCPToolSchemasUnchangedForOpenclaw`.
+- **`get_item` and `/item` carry `recent_prices`**: the listing's newest 5
+  recorded price points (absent when none).
 - **MCP `new_deals` and `list_watches`** (nagus-417; design
   `docs/design/2026-10-03-new-deals-offer-timing.md`, Caspar skill
   `docs/new-deals-skill.md`). `new_deals(since, category, watch, min_verdict,

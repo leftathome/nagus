@@ -139,6 +139,11 @@ spec:
             - name: NAGUS_OFFERS_DB
               value: {{ .Values.offers.sqlitePath | quote }}
             {{- end }}
+            {{- if .Values.offers.priceHistoryRetention }}
+            # Offer price history window for retain-full sources (nagus-0ta).
+            - name: NAGUS_PRICE_HISTORY_RETENTION
+              value: {{ .Values.offers.priceHistoryRetention | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.quark.url }}
             # quark resolution pass (nagus-6r6). Off unless all of URL, token
