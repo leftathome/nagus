@@ -436,6 +436,13 @@ func TestMCPToolSchemasUnchangedForOpenclaw(t *testing.T) {
 			`"limit":{"description":"With name: at most this many strong matches (best first); default 25. strong_count is the total.","maximum":100,"minimum":1,"type":"integer"},` +
 			`"name":{"description":"One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only.","type":"string"}` +
 			`},"type":"object"}`,
+		// nagus-0ta. Pinned like new_deals: openclaw's toolFilter and the
+		// Caspar skill call it with these arguments.
+		"price_history": `{"additionalProperties":false,"properties":{` +
+			`"days":{"description":"Timeline window in days, default 30; also the N of price_days_ago_cents.","maximum":365,"minimum":1,"type":"integer"},` +
+			`"item_id":{"description":"One listing's id: the history of its product across sellers when quark identified it, else of that listing alone.","type":"string"},` +
+			`"product_id":{"description":"A product_id or comparison_key from a row (search_items, new_deals, get_item, list_watches). Give this or item_id, not both.","type":"string"}` +
+			`},"type":"object"}`,
 	}
 	if len(got.Tools) != len(mcpToolNames) {
 		t.Fatalf("%d tools, want %d", len(got.Tools), len(mcpToolNames))

@@ -386,6 +386,13 @@ type Retention struct {
 	// is declared here so that the summary schema cannot be written without
 	// confronting it.
 	RetainSeller bool
+
+	// HistoryWindow is how long a RetainFull source's PRICE HISTORY rows
+	// (offer_price_history) are kept, by observed_at; 0 keeps them as long as
+	// the offer. It is ignored by Purge, whose history always follows the
+	// offer Window: a source whose terms bound content age bound its history
+	// too (see HistoryCutoff). Negative is invalid.
+	HistoryWindow time.Duration
 }
 
 // ErrUnsupportedPolicy is returned for a policy this build cannot honour.
@@ -398,6 +405,9 @@ var ErrUnsupportedPolicy = errors.New("offer: unsupported retention policy")
 // would notice -- one destroys signal the operator asked to keep, the other
 // keeps data the source's terms may forbid.
 func (r Retention) Validate() error {
+	if r.HistoryWindow < 0 {
+		return fmt.Errorf("offer: price history window must not be negative")
+	}
 	switch r.Policy {
 	case RetainFull:
 		return nil
@@ -459,7 +469,19 @@ type Store interface {
 	//     price
 	// A stored PriceChangedAt of zero (a row older than the column, not yet
 	// backfilled) reads as FirstSeen. EndsAt is taken from the caller as is.
+	//
+	// In the SAME transaction Put appends the offer's price history
+	// (nagus-0ta): the rows HistoryRows decides -- a first sighting with a
+	// known price, the first known price after unknown ones, and every change
+	// under the rule above (plus, once, an anchor for the price a change
+	// leaves when the offer has no history yet). Never a row per poll.
 	Put(ctx context.Context, o Offer) error
+	// PriceHistory returns the retained price history of each offer among
+	// ids, keyed by offer id, each OLDEST FIRST: rows observed at or after
+	// since (zero = all), and at most perOffer of the NEWEST such rows per
+	// offer (perOffer <= 0 = no cap). Offers with no rows are absent. Batched
+	// like Summaries: one query on Postgres, one per 500 ids on SQLite.
+	PriceHistory(ctx context.Context, ids []string, since time.Time, perOffer int) (map[string][]PricePoint, error)
 	// Get returns one offer by id.
 	Get(ctx context.Context, id string) (Offer, bool, error)
 	// Summaries returns the Summary of every offer among ids that exists,
@@ -477,7 +499,11 @@ type Store interface {
 	// whether any category currently evaluates the source.
 	MarkExpired(ctx context.Context, sourceID string, notSeenSince time.Time, now time.Time) (int, error)
 	// ApplyRetention enforces a source's retention policy, returning how many
-	// offers it removed. This is the ONLY operation that deletes.
+	// offers it removed. This is the ONLY operation that deletes. It also
+	// deletes the source's price history older than Retention.HistoryCutoff,
+	// in the same transaction as the offers: every history row of a purged
+	// offer is older than its last_seen and so goes with it, and no history
+	// row ever outlives its offer.
 	ApplyRetention(ctx context.Context, sourceID string, r Retention, now time.Time) (int, error)
 	// PendingResolution returns up to limit offers that need a quark call:
 	// every Unattempted offer, then Refused offers recorded under a catalog

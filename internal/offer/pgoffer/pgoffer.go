@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/leftathome/nagus/internal/offer"
@@ -109,6 +110,21 @@ CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
 DROP INDEX IF EXISTS idx_offers_provisional_key;
 CREATE INDEX IF NOT EXISTS idx_offers_resolution_state ON offers(resolution_state);
 CREATE INDEX IF NOT EXISTS idx_offers_product_id ON offers(product_id);
+
+-- Price history (nagus-0ta, docs/design/2026-10-03-offer-price-history.md):
+-- append-only, one row per price CHANGE (plus the first known price), written
+-- in Put's transaction. The primary key is the read path (one offer's points in
+-- time order) and the conflict target. A new table: creating it is
+-- catalog-only, whatever the size of offers, and nothing is backfilled. No
+-- foreign key, matching the SQLite adapter: ApplyRetention deletes an offer's
+-- rows explicitly, in the same transaction as the offer.
+CREATE TABLE IF NOT EXISTS offer_price_history (
+	offer_id       TEXT NOT NULL,
+	observed_at_ns BIGINT NOT NULL,
+	price_cents    BIGINT NOT NULL,
+	currency       TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (offer_id, observed_at_ns)
+);
 `
 
 // New opens a pgxpool against dsn and ensures the offer schema exists.
@@ -138,6 +154,12 @@ func (s *Store) Close() { s.pool.Close() }
 //     offer look stale and get expired by the next housekeeping pass)
 //   - min_price:  the LOWEST ever seen, ignoring 0 which means unknown, not free
 //     -- this is what keeps an ended discount visible
+//
+// Since price history (nagus-0ta) the upsert runs in a transaction that first
+// locks the stored row (SELECT ... FOR UPDATE): the history row needs the
+// price the upsert REPLACED, which RETURNING cannot give on PostgreSQL 16
+// (no OLD), and the lock keeps a concurrent Put from changing it in between.
+// The fold itself is still the single statement below.
 func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 	if err := o.Validate(); err != nil {
 		return err
@@ -158,8 +180,73 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 	if err != nil {
 		return fmt.Errorf("pgoffer: encode aspects: %w", err)
 	}
+	// A first insert that loses a race with a concurrent first insert of the
+	// same offer did not read the row it then updated, so it cannot tell what
+	// price it replaced. That attempt is rolled back and retried; the retry
+	// finds (and locks) the row. A deadlock or serialization failure reported
+	// by the server (40P01 / 40001) is retried the same way: the attempt was
+	// rolled back whole, so repeating it is safe.
+	for attempt := 1; ; attempt++ {
+		retry, err := s.put(ctx, o, string(aspects))
+		if err != nil && retryableTxError(err) {
+			retry, err = true, fmt.Errorf("pgoffer: put %s: %w", o.ID, err)
+		}
+		if !retry {
+			return err
+		}
+		if attempt >= putAttempts {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("pgoffer: put %s: lost the insert race repeatedly", o.ID)
+		}
+	}
+}
 
-	_, err = s.pool.Exec(ctx, `
+// putAttempts bounds Put's retries of a rolled-back attempt.
+const putAttempts = 4
+
+// retryableTxError reports a transaction the server rolled back on its own
+// and that may simply be repeated: deadlock_detected (40P01) and
+// serialization_failure (40001).
+func retryableTxError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001")
+}
+
+// put is one attempt of Put, in one transaction: lock the stored row (when
+// there is one) to know the price it held, upsert, then append the price
+// history HistoryRows decides. retry is true when the attempt was rolled back
+// because a concurrent insert created the row between the read and the upsert.
+func (s *Store) put(ctx context.Context, o offer.Offer, aspects string) (retry bool, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("pgoffer: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	prior := offer.PriorPrice{}
+	var prevPrice, prevChanged int64
+	var prevCurrency string
+	err = tx.QueryRow(ctx, `SELECT price_cents, currency, `+storedPriceChangedAtBare+` FROM offers WHERE id = $1 FOR UPDATE`, o.ID).
+		Scan(&prevPrice, &prevCurrency, &prevChanged)
+	switch {
+	case err == nil:
+		prior = offer.PriorPrice{Exists: true, PriceCents: prevPrice, Currency: prevCurrency, ChangedAt: timeOrZero(prevChanged)}
+		if offer.HistoryNeedsProbe(prior, o.PriceCents) {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM offer_price_history WHERE offer_id = $1)`, o.ID).
+				Scan(&prior.HasHistory); err != nil {
+				return false, fmt.Errorf("pgoffer: probe history: %w", err)
+			}
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
+		return false, fmt.Errorf("pgoffer: read previous: %w", err)
+	}
+
+	var changedNS int64
+	var inserted bool
+	err = tx.QueryRow(ctx, `
 INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
@@ -218,18 +305,42 @@ ON CONFLICT (id) DO UPDATE SET
     ELSE LEAST(offers.min_price_cents, EXCLUDED.min_price_cents) END,
   status = EXCLUDED.status,
   -- a re-observed offer is purchasable again, so the expiry stamp is cleared
-  expired_at_ns = CASE WHEN EXCLUDED.status = 'active' THEN 0 ELSE EXCLUDED.expired_at_ns END`,
+  expired_at_ns = CASE WHEN EXCLUDED.status = 'active' THEN 0 ELSE EXCLUDED.expired_at_ns END
+RETURNING price_changed_at_ns, (xmax = 0)`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
-		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
+		o.PriceCents, o.Currency, o.Condition, o.Seller, aspects,
 		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
 		o.FirstSeen.UnixNano(), nsOrZero(o.EndsAt),
-	)
+	).Scan(&changedNS, &inserted)
 	if err != nil {
-		return fmt.Errorf("pgoffer: upsert: %w", err)
+		return false, fmt.Errorf("pgoffer: upsert: %w", err)
 	}
-	return nil
+	// xmax = 0 is how an upsert tells an insert from an update. No row was
+	// read, yet this updated one: a concurrent first insert won the race.
+	if !prior.Exists && !inserted {
+		return true, nil
+	}
+	anchor, row := offer.HistoryRows(prior, o.PriceCents, o.Currency, o.LastSeen, timeOrZero(changedNS))
+	if anchor != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO offer_price_history (offer_id, observed_at_ns, price_cents, currency)
+VALUES ($1,$2,$3,$4) ON CONFLICT (offer_id, observed_at_ns) DO NOTHING`,
+			o.ID, anchor.ObservedAt.UnixNano(), anchor.PriceCents, anchor.Currency); err != nil {
+			return false, fmt.Errorf("pgoffer: history anchor: %w", err)
+		}
+	}
+	if row != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO offer_price_history (offer_id, observed_at_ns, price_cents, currency)
+VALUES ($1,$2,$3,$4) ON CONFLICT (offer_id, observed_at_ns) DO UPDATE SET price_cents = EXCLUDED.price_cents, currency = EXCLUDED.currency`,
+			o.ID, row.ObservedAt.UnixNano(), row.PriceCents, row.Currency); err != nil {
+			return false, fmt.Errorf("pgoffer: history: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("pgoffer: commit: %w", err)
+	}
+	return false, nil
 }
 
 // Get returns one offer by id.
@@ -310,17 +421,110 @@ func (s *Store) ApplyRetention(ctx context.Context, sourceID string, r offer.Ret
 	if err := r.Validate(); err != nil {
 		return 0, err
 	}
-	if r.Policy == offer.RetainFull {
+	hcut, purgeHistory := r.HistoryCutoff(now)
+	if r.Policy == offer.RetainFull && !purgeHistory {
 		return 0, nil
 	}
-	cutoff := now.Add(-r.Window)
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM offers WHERE last_seen_ns < $1 AND ($2 = '' OR source_id = $2)`,
-		cutoff.UnixNano(), sourceID)
-	if err != nil {
-		return 0, fmt.Errorf("pgoffer: apply retention: %w", err)
+	for attempt := 1; ; attempt++ {
+		n, err := s.applyRetention(ctx, sourceID, r, now, hcut, purgeHistory)
+		if err == nil || !retryableTxError(err) || attempt >= putAttempts {
+			return n, err
+		}
 	}
-	return int(tag.RowsAffected()), nil
+}
+
+// applyRetention is one attempt of ApplyRetention, in one transaction.
+//
+// LOCK ORDER: offers before offer_price_history, the order Put takes them
+// (SELECT ... FOR UPDATE on the offer, then the history insert). Deleting the
+// history first and the offers second was the opposite order, and a Put of a
+// purged offer running alongside deadlocked (40P01). So the purged offers are
+// deleted FIRST, then -- in a SEPARATE statement -- every history row of
+// those offers, whatever its observed_at; the window purge of the surviving
+// offers' history comes after and takes no offer lock.
+//
+// Why two statements and not one data-modifying CTE: a statement runs on ONE
+// snapshot. When the offers DELETE waits on a Put's row lock and that Put
+// commits a history row (with a last_seen still older than the cutoff, so the
+// offer is deleted anyway), a history DELETE in the same statement cannot see
+// the new row and leaves it orphaned. The next statement takes a new snapshot
+// (READ COMMITTED) and sees it; the offer rows stay locked by this
+// transaction, so no new history for them can commit in between.
+func (s *Store) applyRetention(ctx context.Context, sourceID string, r offer.Retention, now, hcut time.Time, purgeHistory bool) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pgoffer: retention begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	n := 0
+	if r.Policy != offer.RetainFull {
+		cutoff := now.Add(-r.Window).UnixNano()
+		rows, err := tx.Query(ctx, `DELETE FROM offers WHERE last_seen_ns < $1 AND ($2 = '' OR source_id = $2) RETURNING id`, cutoff, sourceID)
+		if err != nil {
+			return 0, fmt.Errorf("pgoffer: apply retention: %w", err)
+		}
+		gone, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return 0, fmt.Errorf("pgoffer: apply retention: %w", err)
+		}
+		n = len(gone)
+		if n > 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM offer_price_history WHERE offer_id = ANY($1)`, gone); err != nil {
+				return 0, fmt.Errorf("pgoffer: purge offer history: %w", err)
+			}
+		}
+	}
+	if purgeHistory {
+		// RetainFull keeps each offer's carry-in point (its newest row at or
+		// before the cutoff): a row goes only when a NEWER row at or before
+		// the cutoff supersedes it. Purge (eBay) keeps nothing older.
+		if _, err := tx.Exec(ctx, `DELETE FROM offer_price_history h WHERE h.observed_at_ns < $1
+AND h.offer_id IN (SELECT id FROM offers WHERE $2 = '' OR source_id = $2)
+AND (NOT $3 OR EXISTS (SELECT 1 FROM offer_price_history h2
+  WHERE h2.offer_id = h.offer_id AND h2.observed_at_ns > h.observed_at_ns AND h2.observed_at_ns <= $1))`,
+			hcut.UnixNano(), sourceID, r.KeepsCarryIn()); err != nil {
+			return 0, fmt.Errorf("pgoffer: purge price history: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("pgoffer: retention commit: %w", err)
+	}
+	return n, nil
+}
+
+// PriceHistory returns the retained history of each offer among ids, oldest
+// first, at most perOffer of the newest rows observed at or after since, in
+// ONE query (WHERE offer_id = ANY).
+func (s *Store) PriceHistory(ctx context.Context, ids []string, since time.Time, perOffer int) (map[string][]offer.PricePoint, error) {
+	out := make(map[string][]offer.PricePoint, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT offer_id, observed_at_ns, price_cents, currency FROM (
+  SELECT offer_id, observed_at_ns, price_cents, currency,
+         ROW_NUMBER() OVER (PARTITION BY offer_id ORDER BY observed_at_ns DESC) AS rn
+  FROM offer_price_history
+  WHERE offer_id = ANY($1) AND observed_at_ns >= $2
+) h WHERE $3 <= 0 OR rn <= $3
+ORDER BY offer_id, observed_at_ns`, ids, nsOrZero(since), perOffer)
+	if err != nil {
+		return nil, fmt.Errorf("pgoffer: price history: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var p offer.PricePoint
+		var at int64
+		if err := rows.Scan(&id, &at, &p.PriceCents, &p.Currency); err != nil {
+			return nil, fmt.Errorf("pgoffer: price history scan: %w", err)
+		}
+		p.ObservedAt = timeOrZero(at)
+		out[id] = append(out[id], p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pgoffer: price history rows: %w", err)
+	}
+	return out, nil
 }
 
 // --- scanning -----------------------------------------------------------------
@@ -339,6 +543,9 @@ const priceChanged = `(EXCLUDED.price_cents > 0 AND offers.price_cents > 0 AND E
 
 // storedPriceChangedAt is the stored stamp, a pre-column 0 read as first_seen.
 const storedPriceChangedAt = `(CASE WHEN offers.price_changed_at_ns = 0 THEN offers.first_seen_ns ELSE offers.price_changed_at_ns END)`
+
+// storedPriceChangedAtBare is storedPriceChangedAt for a plain SELECT.
+const storedPriceChangedAtBare = `(CASE WHEN price_changed_at_ns = 0 THEN first_seen_ns ELSE price_changed_at_ns END)`
 
 // sameHint is true when the stored hint equals the incoming one, column by
 // column. Used inside the upsert's CASE expressions.

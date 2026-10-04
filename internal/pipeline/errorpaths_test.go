@@ -59,6 +59,10 @@ func (s *errpathFailingOfferStore) Query(ctx context.Context, q offer.Query) ([]
 	return s.inner.Query(ctx, q)
 }
 
+func (s *errpathFailingOfferStore) PriceHistory(ctx context.Context, ids []string, since time.Time, perOffer int) (map[string][]offer.PricePoint, error) {
+	return s.inner.PriceHistory(ctx, ids, since, perOffer)
+}
+
 func (s *errpathFailingOfferStore) MarkExpired(ctx context.Context, sourceID string, notSeenSince, now time.Time) (int, error) {
 	s.markExpiredCalled = true
 	if s.markExpiredErr != nil {

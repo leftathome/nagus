@@ -75,6 +75,20 @@ CREATE INDEX IF NOT EXISTS idx_offers_last_seen ON offers(last_seen_ns);
 -- The provisional-key dedup index is gone with the key; product_id (below)
 -- is the dedup path now.
 DROP INDEX IF EXISTS idx_offers_provisional_key;
+
+-- Price history (nagus-0ta): append-only, one row per price CHANGE (plus the
+-- first known price), written in Put's transaction. The primary key is the
+-- read path (one offer's points in time order) and the conflict target: two
+-- points of one offer at one instant are one point. No foreign key: SQLite
+-- enforces none without PRAGMA foreign_keys, so ApplyRetention deletes an
+-- offer's rows explicitly, in the same transaction as the offer.
+CREATE TABLE IF NOT EXISTS offer_price_history (
+	offer_id       TEXT NOT NULL,
+	observed_at_ns INTEGER NOT NULL,
+	price_cents    INTEGER NOT NULL,
+	currency       TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (offer_id, observed_at_ns)
+) WITHOUT ROWID;
 `
 
 // resolutionColumns are the quark-resolution columns, added after the table
@@ -201,10 +215,13 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 	// Price-change fields are derived, never the caller's (offer.Store.Put).
 	// A first insert stamps FirstSeen.
 	o.PriceChangedAt, o.PreviousPriceCents = o.FirstSeen, 0
+	incomingPrice, observedAt := o.PriceCents, o.LastSeen
+	prior := offer.PriorPrice{}
 	var prevFirst, prevLast, prevMin, prevPrice, prevChanged, prevPrevious int64
+	var prevCurrency string
 	err = tx.QueryRowContext(ctx,
-		`SELECT first_seen_ns, last_seen_ns, min_price_cents, price_cents, price_changed_at_ns, previous_price_cents FROM offers WHERE id = ?`, o.ID,
-	).Scan(&prevFirst, &prevLast, &prevMin, &prevPrice, &prevChanged, &prevPrevious)
+		`SELECT first_seen_ns, last_seen_ns, min_price_cents, price_cents, price_changed_at_ns, previous_price_cents, currency FROM offers WHERE id = ?`, o.ID,
+	).Scan(&prevFirst, &prevLast, &prevMin, &prevPrice, &prevChanged, &prevPrevious, &prevCurrency)
 	switch {
 	case err == nil:
 		// Price change: a different non-zero price stamps the observation
@@ -213,6 +230,14 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 		changed := prevChanged
 		if changed == 0 {
 			changed = prevFirst
+		}
+		prior = offer.PriorPrice{Exists: true, PriceCents: prevPrice, Currency: prevCurrency, ChangedAt: timeOrZero(changed)}
+		if offer.HistoryNeedsProbe(prior, incomingPrice) {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT 1 FROM offer_price_history WHERE offer_id = ? LIMIT 1)`, o.ID).Scan(&n); err != nil {
+				return fmt.Errorf("sqliteoffer: probe history: %w", err)
+			}
+			prior.HasHistory = n > 0
 		}
 		o.PreviousPriceCents = prevPrevious
 		if o.PriceCents == 0 {
@@ -293,6 +318,21 @@ ON CONFLICT(id) DO UPDATE SET
 	)
 	if err != nil {
 		return fmt.Errorf("sqliteoffer: upsert: %w", err)
+	}
+	anchor, row := offer.HistoryRows(prior, incomingPrice, o.Currency, observedAt, o.PriceChangedAt)
+	if anchor != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO offer_price_history (offer_id, observed_at_ns, price_cents, currency)
+VALUES (?,?,?,?) ON CONFLICT(offer_id, observed_at_ns) DO NOTHING`,
+			o.ID, anchor.ObservedAt.UnixNano(), anchor.PriceCents, anchor.Currency); err != nil {
+			return fmt.Errorf("sqliteoffer: history anchor: %w", err)
+		}
+	}
+	if row != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO offer_price_history (offer_id, observed_at_ns, price_cents, currency)
+VALUES (?,?,?,?) ON CONFLICT(offer_id, observed_at_ns) DO UPDATE SET price_cents = excluded.price_cents, currency = excluded.currency`,
+			o.ID, row.ObservedAt.UnixNano(), row.PriceCents, row.Currency); err != nil {
+			return fmt.Errorf("sqliteoffer: history: %w", err)
+		}
 	}
 	return tx.Commit()
 }
@@ -376,18 +416,97 @@ func (s *Store) ApplyRetention(ctx context.Context, sourceID string, r offer.Ret
 	if err := r.Validate(); err != nil {
 		return 0, err
 	}
-	if r.Policy == offer.RetainFull {
+	hcut, purgeHistory := r.HistoryCutoff(now)
+	if r.Policy == offer.RetainFull && !purgeHistory {
 		return 0, nil
 	}
-	cutoff := now.Add(-r.Window)
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM offers WHERE last_seen_ns < ? AND (? = '' OR source_id = ?)`,
-		cutoff.UnixNano(), sourceID, sourceID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("sqliteoffer: apply retention: %w", err)
+		return 0, fmt.Errorf("sqliteoffer: retention begin: %w", err)
 	}
-	n, err := res.RowsAffected()
-	return int(n), err
+	defer func() { _ = tx.Rollback() }()
+	if purgeHistory {
+		// RetainFull keeps each offer's carry-in point (its newest row at or
+		// before the cutoff): a row goes only when a NEWER row at or before
+		// the cutoff supersedes it. Purge (eBay) keeps nothing older.
+		carry := 0
+		if r.KeepsCarryIn() {
+			carry = 1
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM offer_price_history WHERE observed_at_ns < ?
+AND offer_id IN (SELECT id FROM offers WHERE ? = '' OR source_id = ?)
+AND (? = 0 OR EXISTS (SELECT 1 FROM offer_price_history h2
+  WHERE h2.offer_id = offer_price_history.offer_id
+    AND h2.observed_at_ns > offer_price_history.observed_at_ns AND h2.observed_at_ns <= ?))`,
+			hcut.UnixNano(), sourceID, sourceID, carry, hcut.UnixNano()); err != nil {
+			return 0, fmt.Errorf("sqliteoffer: purge price history: %w", err)
+		}
+	}
+	n := int64(0)
+	if r.Policy != offer.RetainFull {
+		cutoff := now.Add(-r.Window).UnixNano()
+		// A purged offer's history goes with it, whatever its observed_at.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM offer_price_history
+WHERE offer_id IN (SELECT id FROM offers WHERE last_seen_ns < ? AND (? = '' OR source_id = ?))`,
+			cutoff, sourceID, sourceID); err != nil {
+			return 0, fmt.Errorf("sqliteoffer: purge offer history: %w", err)
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM offers WHERE last_seen_ns < ? AND (? = '' OR source_id = ?)`,
+			cutoff, sourceID, sourceID)
+		if err != nil {
+			return 0, fmt.Errorf("sqliteoffer: apply retention: %w", err)
+		}
+		if n, err = res.RowsAffected(); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("sqliteoffer: retention commit: %w", err)
+	}
+	return int(n), nil
+}
+
+// PriceHistory returns the retained history of each offer among ids, oldest
+// first, at most perOffer of the newest rows observed at or after since.
+// Chunked like Summaries.
+func (s *Store) PriceHistory(ctx context.Context, ids []string, since time.Time, perOffer int) (map[string][]offer.PricePoint, error) {
+	out := make(map[string][]offer.PricePoint, len(ids))
+	for start := 0; start < len(ids); start += summariesChunk {
+		chunk := ids[start:min(start+summariesChunk, len(ids))]
+		args := make([]any, 0, len(chunk)+2)
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		args = append(args, nsOrZero(since), perOffer)
+		rows, err := s.db.QueryContext(ctx, `SELECT offer_id, observed_at_ns, price_cents, currency FROM (
+  SELECT offer_id, observed_at_ns, price_cents, currency,
+         ROW_NUMBER() OVER (PARTITION BY offer_id ORDER BY observed_at_ns DESC) AS rn
+  FROM offer_price_history
+  WHERE offer_id IN (?`+strings.Repeat(",?", len(chunk)-1)+`) AND observed_at_ns >= ?
+) WHERE ? <= 0 OR rn <= ?
+ORDER BY offer_id, observed_at_ns`, append(args, perOffer)...)
+		if err != nil {
+			return nil, fmt.Errorf("sqliteoffer: price history: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			var p offer.PricePoint
+			var at int64
+			if err := rows.Scan(&id, &at, &p.PriceCents, &p.Currency); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("sqliteoffer: price history scan: %w", err)
+			}
+			p.ObservedAt = timeOrZero(at)
+			out[id] = append(out[id], p)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("sqliteoffer: price history rows: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // sameHint is true when the stored hint equals the incoming one, column by
@@ -509,7 +628,7 @@ FROM offers WHERE id IN (?`+strings.Repeat(",?", len(chunk)-1)+`)`, args...)
 				&firstNS, &lastNS, &changedNS, &expiredNS, &endsNS,
 				&resState, &sm.Resolution.ProductID, &sm.Resolution.Generation, &resolvedNS, &sm.Resolution.VintageMode,
 			); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, fmt.Errorf("sqliteoffer: summaries scan: %w", err)
 			}
 			sm.Status = offer.Status(status)
@@ -524,7 +643,7 @@ FROM offers WHERE id IN (?`+strings.Repeat(",?", len(chunk)-1)+`)`, args...)
 			out[sm.ID] = sm
 		}
 		err = rows.Err()
-		rows.Close()
+		_ = rows.Close()
 		if err != nil {
 			return nil, fmt.Errorf("sqliteoffer: summaries rows: %w", err)
 		}

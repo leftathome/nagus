@@ -43,6 +43,13 @@ SHOWN KEYS of the rows you presented (see step 2).
    is empty, `product_id`); show the group once with its cheapest seller
    first. A row with neither stands alone. Never group wine on `product_id`
    alone: that ignores the vintage.
+   **Is it really a good price?** `price_history` with the group's
+   `comparison_key` (or `product_id`; or a row's `id` as `item_id`) answers
+   across sellers: `current_lowest_price_cents`, `all_time_low_cents` and its
+   date, and `change_vs_days_ago_cents` over `days` (default 30; negative =
+   cheaper now). Say "lowest in N days" only when the history covers N days
+   (eBay keeps 6 hours; history starts when nagus first recorded a price).
+   Needs `price_history` in the toolFilter.
 4. **Say why it is new.** `new_reasons` lists `first_seen` (nagus first saw
    it at `first_seen_at`) and/or `price_drop` (the price fell from
    `previous_price_cents` at `price_changed_at`); `new_reason` is the latest.

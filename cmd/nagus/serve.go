@@ -209,6 +209,9 @@ type searchRow struct {
 type itemView struct {
 	item.Item
 	*OfferTiming
+	// RecentPrices is the listing's newest recorded price points (nagus-0ta),
+	// oldest first; absent when the offer layer is off or none are recorded.
+	RecentPrices []recentPriceView `json:"recent_prices,omitempty"`
 }
 
 // itemWithOffer reads one item and, with the offer layer on, its offer's
@@ -229,6 +232,7 @@ func (s *server) itemWithOffer(ctx context.Context, id string) (itemView, bool, 
 	}
 	if sm, ok := sums[id]; ok {
 		v.OfferTiming = s.timingFor(sm)
+		v.RecentPrices = s.recentPrices(ctx, sm)
 	}
 	return v, true, nil
 }
@@ -372,6 +376,11 @@ func runServe(args []string) error {
 	defer closeSt()
 
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
+	// Fail on a bad price-history window before anything starts (nagus-0ta):
+	// a typo must not silently keep history for some other length of time.
+	if _, err := priceHistoryWindowFromEnv(); err != nil {
+		return err
+	}
 	opts := categoryOptsFromEnv(*offline, http.DefaultClient, logf)
 	san, err := sanitizerFromEnv(nil, logf)
 	if err != nil {

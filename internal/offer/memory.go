@@ -12,11 +12,14 @@ import (
 type MemoryStore struct {
 	mu     sync.RWMutex
 	offers map[string]Offer
+	// history is each offer's price history, oldest first, at most one point
+	// per observed_at (offer_price_history's primary key).
+	history map[string][]PricePoint
 }
 
 // NewMemoryStore returns an empty MemoryStore.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{offers: map[string]Offer{}}
+	return &MemoryStore{offers: map[string]Offer{}, history: map[string][]PricePoint{}}
 }
 
 // Put inserts or updates an offer, folding lifecycle against any existing row.
@@ -59,10 +62,16 @@ func (m *MemoryStore) Put(ctx context.Context, o Offer) error {
 	// Price-change fields are derived, never taken from the caller (see
 	// Store.Put). A first insert stamps FirstSeen.
 	o.PriceChangedAt, o.PreviousPriceCents = o.FirstSeen, 0
+	incomingPrice, observedAt := o.PriceCents, o.LastSeen
+	prior := PriorPrice{}
 	if prev, ok := m.offers[o.ID]; ok {
 		o.PriceChangedAt, o.PreviousPriceCents = prev.PriceChangedAt, prev.PreviousPriceCents
 		if o.PriceChangedAt.IsZero() {
 			o.PriceChangedAt = prev.FirstSeen
+		}
+		prior = PriorPrice{
+			Exists: true, PriceCents: prev.PriceCents, Currency: prev.Currency,
+			ChangedAt: o.PriceChangedAt, HasHistory: len(m.history[o.ID]) > 0,
 		}
 		if o.PriceCents == 0 {
 			// An unknown-price poll keeps the last known price.
@@ -91,7 +100,58 @@ func (m *MemoryStore) Put(ctx context.Context, o Offer) error {
 		o.ExpiredAt = time.Time{}
 	}
 	m.offers[o.ID] = o
+	anchor, row := HistoryRows(prior, incomingPrice, o.Currency, observedAt, o.PriceChangedAt)
+	if anchor != nil {
+		m.addPoint(o.ID, *anchor, false)
+	}
+	if row != nil {
+		m.addPoint(o.ID, *row, true)
+	}
 	return nil
+}
+
+// addPoint inserts p into an offer's history, kept oldest first. A point at an
+// existing observed_at replaces it only when replace is set (the primary-key
+// conflict rule every adapter shares; see HistoryRows).
+func (m *MemoryStore) addPoint(id string, p PricePoint, replace bool) {
+	h := m.history[id]
+	i := sort.Search(len(h), func(i int) bool { return !h[i].ObservedAt.Before(p.ObservedAt) })
+	if i < len(h) && h[i].ObservedAt.Equal(p.ObservedAt) {
+		if replace {
+			h[i] = p
+		}
+		return
+	}
+	h = append(h, PricePoint{})
+	copy(h[i+1:], h[i:])
+	h[i] = p
+	m.history[id] = h
+}
+
+// PriceHistory returns the history of each offer among ids, oldest first:
+// points observed at or after since, at most perOffer of the newest.
+func (m *MemoryStore) PriceHistory(ctx context.Context, ids []string, since time.Time, perOffer int) (map[string][]PricePoint, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string][]PricePoint, len(ids))
+	for _, id := range ids {
+		var pts []PricePoint
+		for _, p := range m.history[id] {
+			if since.IsZero() || !p.ObservedAt.Before(since) {
+				pts = append(pts, p)
+			}
+		}
+		if perOffer > 0 && len(pts) > perOffer {
+			pts = pts[len(pts)-perOffer:]
+		}
+		if len(pts) > 0 {
+			out[id] = pts
+		}
+	}
+	return out, nil
 }
 
 // Get returns one offer by id.
@@ -203,10 +263,7 @@ func (m *MemoryStore) ApplyRetention(ctx context.Context, sourceID string, r Ret
 	if err := r.Validate(); err != nil {
 		return 0, err
 	}
-	if r.Policy == RetainFull {
-		return 0, nil
-	}
-	cutoff := now.Add(-r.Window)
+	hcut, purgeHistory := r.HistoryCutoff(now)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
@@ -214,9 +271,32 @@ func (m *MemoryStore) ApplyRetention(ctx context.Context, sourceID string, r Ret
 		if sourceID != "" && o.SourceID != sourceID {
 			continue
 		}
-		if o.LastSeen.Before(cutoff) {
+		if r.Policy != RetainFull && o.LastSeen.Before(now.Add(-r.Window)) {
+			// The offer goes, and every history row with it.
 			delete(m.offers, id)
+			delete(m.history, id)
 			n++
+			continue
+		}
+		if purgeHistory {
+			h := m.history[id]
+			// carry is the newest point at or before the cutoff: the price in
+			// effect when the window opens. RetainFull keeps it.
+			carry := -1
+			if r.KeepsCarryIn() {
+				carry = sort.Search(len(h), func(i int) bool { return h[i].ObservedAt.After(hcut) }) - 1
+			}
+			kept := h[:0]
+			for i, p := range h {
+				if !p.ObservedAt.Before(hcut) || i == carry {
+					kept = append(kept, p)
+				}
+			}
+			if len(kept) == 0 {
+				delete(m.history, id)
+			} else {
+				m.history[id] = kept
+			}
 		}
 	}
 	return n, nil

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/leftathome/nagus/internal/category"
@@ -63,6 +64,10 @@ type categoryOpts struct {
 	lwinStamp bool
 	// offers is the optional offer layer; nil disables it.
 	offers offer.Store
+	// priceHistoryWindow is how long a retain-full source's offer price
+	// history is kept (NAGUS_PRICE_HISTORY_RETENTION; nagus-0ta). 0 keeps it
+	// as long as the offer. eBay's follows its 6h content window regardless.
+	priceHistoryWindow time.Duration
 	// deals is the state every deal-submission source shares (nagus-4uu);
 	// nil when none is configured (a lone deal source then gets its own).
 	deals *deal.Hub
@@ -95,7 +100,39 @@ func categoryOptsFromEnv(hddOffline bool, client *http.Client, logf func(string,
 		wineShipTo:        envOr("NAGUS_WINE_SHIP_TO", ""),
 		wineShipRules:     envOr("NAGUS_WINE_SHIP_RULES", ""),
 		lwinStamp:         lwinStampFromEnv(logf),
+
+		priceHistoryWindow: priceHistoryWindowOrDefault(),
 	}
+}
+
+// envPriceHistoryRetention names how long a retain-full source's offer price
+// history is kept, as a Go duration (8760h = 365 days). Unset or empty: the
+// default, offer.DefaultPriceHistoryWindow. "0" keeps it as long as the offer.
+const envPriceHistoryRetention = "NAGUS_PRICE_HISTORY_RETENTION"
+
+// priceHistoryWindowFromEnv reads NAGUS_PRICE_HISTORY_RETENTION. A value that
+// does not parse, or is negative, is an error: runServe refuses to start on it
+// rather than silently keeping history for some other length of time.
+func priceHistoryWindowFromEnv() (time.Duration, error) {
+	v := strings.TrimSpace(os.Getenv(envPriceHistoryRetention))
+	if v == "" {
+		return offer.DefaultPriceHistoryWindow, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%s=%q: want a non-negative Go duration such as 8760h (0 keeps price history as long as the offer)", envPriceHistoryRetention, v)
+	}
+	return d, nil
+}
+
+// priceHistoryWindowOrDefault is priceHistoryWindowFromEnv for the paths
+// that already validated it (runServe) or never purge (one-shot commands).
+func priceHistoryWindowOrDefault() time.Duration {
+	d, err := priceHistoryWindowFromEnv()
+	if err != nil {
+		return offer.DefaultPriceHistoryWindow
+	}
+	return d
 }
 
 // lwinStampFromEnv reads NAGUS_LWIN_STAMP, and says so -- once, at startup --
@@ -376,6 +413,11 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		return nil, err
 	}
 	staleAfter, offerRetention, expireAfter := retentionForSource(s)
+	if offerRetention.Policy == offer.RetainFull {
+		// Price history of a source we may keep in full is still bounded
+		// (nagus-0ta). A purge source's history follows its offer window.
+		offerRetention.HistoryWindow = o.priceHistoryWindow
+	}
 
 	// OFFER-ONLY source: no category, therefore no evaluation machinery. It
 	// records offers and stops (gate-at-eval, nagus-7yq). Refuse to build one
