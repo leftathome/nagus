@@ -79,3 +79,88 @@ func TestMigrationAddsResolutionToExistingDatabase(t *testing.T) {
 		t.Fatalf("resolution lost across reopen: %+v", again.Resolution)
 	}
 }
+
+// preTimingRows is an offer written by a binary that predates the
+// offer-timing columns (nagus-417), with a first_seen to backfill from.
+const preTimingRows = `
+INSERT INTO offers (id, source_id, source_key, title, price_cents, first_seen_ns, last_seen_ns, min_price_cents)
+VALUES ('timed-1', 'shopify:old', 't1', 'A timed drive', 4000, 1740000000000000000, 1750000000000000000, 3500);
+`
+
+func TestMigrationBackfillsPriceChangedAt(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "pretiming.db")
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(preResolutionSchema + preTimingRows); err != nil {
+		t.Fatalf("build legacy schema: %v", err)
+	}
+	_ = raw.Close()
+
+	ctx := context.Background()
+	s, err := New(dsn)
+	if err != nil {
+		t.Fatalf("New on a pre-timing database: %v", err)
+	}
+	defer s.Close()
+	first := time.Unix(0, 1740000000000000000).UTC()
+	got, ok, err := s.Get(ctx, "timed-1")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if !got.PriceChangedAt.Equal(first) || got.PreviousPriceCents != 0 || !got.EndsAt.IsZero() {
+		t.Fatalf("migrated offer timing: %+v", got)
+	}
+	// Opening the store does not rewrite the table (the read above is the
+	// fallback); the background backfill does, once.
+	var stored int64
+	if err := s.db.QueryRowContext(ctx, `SELECT price_changed_at_ns FROM offers WHERE id = 'timed-1'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 0 {
+		t.Fatalf("New rewrote price_changed_at_ns (%d)", stored)
+	}
+	if n, err := s.BackfillPriceChangedAt(ctx, 1); err != nil || n != 1 {
+		t.Fatalf("backfill: n=%d err=%v, want 1", n, err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT price_changed_at_ns FROM offers WHERE id = 'timed-1'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != first.UnixNano() {
+		t.Fatalf("price_changed_at_ns = %d, want %d (backfilled)", stored, first.UnixNano())
+	}
+	if n, err := s.BackfillPriceChangedAt(ctx, 0); err != nil || n != 0 {
+		t.Fatalf("second backfill: n=%d err=%v, want 0", n, err)
+	}
+	// A row with no first_seen is left alone and reads as zero.
+	legacy, _, _ := s.Get(ctx, "legacy-1")
+	if !legacy.PriceChangedAt.IsZero() {
+		t.Fatalf("legacy row without first_seen: price_changed_at = %v", legacy.PriceChangedAt)
+	}
+}
+
+func TestBackfillCrossesBatches(t *testing.T) {
+	ctx := context.Background()
+	s, err := New(filepath.Join(t.TempDir(), "batches.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	base := time.Unix(1_750_000_000, 0).UTC()
+	for i := 0; i < 7; i++ {
+		if err := s.Put(ctx, offer.Offer{SourceID: "shopify:b", SourceKey: string(rune('a' + i)), PriceCents: 100, LastSeen: base.Add(time.Duration(i) * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE offers SET price_changed_at_ns = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.BackfillPriceChangedAt(ctx, 2); err != nil || n != 7 {
+		t.Fatalf("backfill in batches of 2: n=%d err=%v, want 7", n, err)
+	}
+	var wrong int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM offers WHERE price_changed_at_ns <> first_seen_ns`).Scan(&wrong); err != nil || wrong != 0 {
+		t.Fatalf("%d rows not backfilled (err %v)", wrong, err)
+	}
+}

@@ -56,7 +56,23 @@ func (m *MemoryStore) Put(ctx context.Context, o Offer) error {
 	// Resolution is never taken from the caller: only RecordResolution writes
 	// it. It survives a re-ingest of the SAME hint and resets on a changed one.
 	o.Resolution = Resolution{State: ResolutionUnattempted}
+	// Price-change fields are derived, never taken from the caller (see
+	// Store.Put). A first insert stamps FirstSeen.
+	o.PriceChangedAt, o.PreviousPriceCents = o.FirstSeen, 0
 	if prev, ok := m.offers[o.ID]; ok {
+		o.PriceChangedAt, o.PreviousPriceCents = prev.PriceChangedAt, prev.PreviousPriceCents
+		if o.PriceChangedAt.IsZero() {
+			o.PriceChangedAt = prev.FirstSeen
+		}
+		if o.PriceCents == 0 {
+			// An unknown-price poll keeps the last known price.
+			o.PriceCents = prev.PriceCents
+		} else if prev.PriceCents > 0 && o.PriceCents != prev.PriceCents {
+			o.PreviousPriceCents = prev.PriceCents
+			if o.LastSeen.After(o.PriceChangedAt) {
+				o.PriceChangedAt = o.LastSeen
+			}
+		}
 		if prev.ProductHint.Fingerprint() == o.ProductHint.Fingerprint() {
 			o.Resolution = prev.Resolution
 		}
@@ -87,6 +103,23 @@ func (m *MemoryStore) Get(ctx context.Context, id string) (Offer, bool, error) {
 	defer m.mu.RUnlock()
 	o, ok := m.offers[id]
 	return o, ok, nil
+}
+
+// Summaries returns the summary of every stored offer among ids, expired ones
+// included.
+func (m *MemoryStore) Summaries(ctx context.Context, ids []string) (map[string]Summary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]Summary, len(ids))
+	for _, id := range ids {
+		if o, ok := m.offers[id]; ok {
+			out[id] = o.Summarize()
+		}
+	}
+	return out, nil
 }
 
 // Query returns offers matching q, most-recently-seen first. Expired offers are

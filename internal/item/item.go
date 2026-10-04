@@ -42,7 +42,7 @@ type Item struct {
 	SourceID    string            `json:"source_id"`    // connector that produced it (e.g. "ebay")
 	SourceKey   string            `json:"source_key"`   // source-native id (listing id / APN)
 	SourceURL   string            `json:"source_url"`   // canonical link
-	SeenAt      time.Time         `json:"seen_at"`      // when nagus first ingested it
+	SeenAt      time.Time         `json:"seen_at"`      // the LAST poll that saw it (every ingest re-stamps it); NOT first seen -- that is the offer's first_seen_at
 	Attributes  map[string]string `json:"attributes"`   // extracted typed fields (acreage, capacity_tb, ...)
 	Tokens      []string          `json:"tokens"`       // FTS tokens over sanitized text
 }

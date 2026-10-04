@@ -8,6 +8,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade notes
 
+- **Expired listings stop surfacing** (nagus-417). With the offer layer on,
+  `search_items`, `/search`, `/watches` and the new tools drop every listing
+  whose offer is EXPIRED (not seen at its source for 3 polls). Store sources
+  keep their items forever, so this hides rows that surfaced before: on
+  2026-10-03 production evidence put it at roughly 272 of 749 hdd and 32 of
+  1380 wine rows (store matches not re-stored by any source's latest pass;
+  an upper bound). `matched` now counts surfaceable rows; `hidden_expired` is
+  new. Watches can therefore ping on less.
+- **offers gains `price_changed_at_ns`, `previous_price_cents` and
+  `ends_at_ns`** (Postgres, SQLite, memory). Adding them is catalog-only
+  (constant defaults; 15 ms on a 1,000,000-row table). Existing rows are
+  backfilled to `first_seen` in the BACKGROUND after startup, in batches of
+  5,000 (1,000,000 rows: 45.9 s, heap +12%; reads never wait for it -- an
+  unfilled row reads as first_seen). An older binary ignores the columns.
+- **An unknown-price (0) poll no longer erases an offer's stored price**: the
+  offer keeps its last known price, so a later poll compares against it
+  (rows still show the item's price).
+- **openclaw's nagus `toolFilter` must add `new_deals` and `list_watches`**
+  for agents to see them (gitops `configmap-openclaw-patches.yaml`).
+
 - **Deploy quark with its LWIN catalog first** (quark QUARK-04: chart 0.6.0,
   `catalogs.lwin.url` set, first load complete). This release stops resolving
   wine identity in nagus; until quark answers wine name hints, opted-in wine
@@ -39,6 +59,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once if those variables are still set.
 
 ### Changed
+
+- **The read path reads offers in one batched query** (nagus-417):
+  `offer.Store.Summaries(ids)` replaces one `Get` per surfaced row for the
+  product id, and checks the whole candidate set for expiry before the
+  5,000-row candidate cap applies (expired rows no longer use up the cap). An
+  offer-store failure now fails a search instead of surfacing listings whose
+  status is unknown; `get_item` likewise.
+- **`seen_at` on items is documented as what it is: the LAST poll** (every
+  ingest re-stamps it), not first seen. The field is unchanged for
+  compatibility; `first_seen_at` is the real first sighting.
 
 - **imap sources no longer trust Authentication-Results headers by default**
   (rv35 C1). The receiving MX for the deals mailbox writes no A-R header, so
@@ -342,6 +372,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   short of the catalogue the walk stopped.
 
 ### Added
+
+- **MCP `new_deals` and `list_watches`** (nagus-417; design
+  `docs/design/2026-10-03-new-deals-offer-timing.md`, Caspar skill
+  `docs/new-deals-skill.md`). `new_deals(since, category, watch, min_verdict,
+  include_price_drops, limit)` returns ACTIVE listings first seen at or after
+  `since` -- or, by default, whose price dropped at or after it -- ranked like
+  `search_items`, each with `new_reason` (`first_seen` | `price_drop`), plus
+  `as_of` to pass next time: "new since" is stateless, nagus keeps no cursor.
+  `new_reasons` can hold both reasons (a listing shown as new that later
+  drops is reported again; callers key a shown row on id plus
+  `price_changed_at` when it is a price_drop, on id alone otherwise, so a
+  price rise never re-shows it). `list_watches` rejects `limit` without
+  `name`; `new_deals` reports `watch` and `min_verdict` as applied (null
+  when not).
+  `since` must be RFC 3339, at most 5 minutes ahead and 30 days back.
+  `list_watches(name, limit)` lists active watches with their strong
+  criteria and live candidate/strong counts (never `principal`), or one
+  watch's strong matches, capped at `limit` (default 25).
+- **Listings whose source-stated end has passed are hidden** from search,
+  watches and new_deals like expired ones (an ended eBay auction no longer
+  waits ~90 minutes for expiry); get_item marks them ENDED. Both input schemas are pinned in tests next to the unchanged
+  `search_items` and `get_item` schemas.
+- **Offer timing on every row** (search_items, /search, /watches, get_item,
+  /item, new_deals, list_watches): `first_seen_at`, `last_seen_at`,
+  `price_changed_at`, `previous_price_cents`, `lowest_price_cents`,
+  `at_lowest_price`, `offer_status`, and `expires_at` with `expires_basis`:
+  `listing_end` (the source states it: an eBay auction), `email_window` (a
+  deal submission's read window) or `not_seen_3_polls` (an assumption,
+  described as one). Absent -- not zero -- with the offer layer off or no
+  offer row. `get_item` / `/item` still answer for an expired listing, with
+  `offer_status: "expired"` and a fixed `offer_note`.
+- **eBay `buyingOptions` and `itemEndDate`** are decoded from the existing
+  search call (no `fieldgroups` needed). An AUCTION's stated end becomes the
+  offer's `ends_at`; a fixed-price listing has no committed end and keeps the
+  assumed rule. `buying_options` is kept as an aspect.
 
 - **Deal submission by email: `nagus.deal/v1` JSONL** (nagus-4uu; design
   `docs/design/2026-09-26-deal-submission-jsonl.md`, humans

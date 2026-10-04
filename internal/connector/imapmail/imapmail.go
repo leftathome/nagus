@@ -491,6 +491,14 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 					raws[i].Aspects["mail_forwarded_from"] = msg.ForwardedFrom
 				}
 				raws[i].SeenAt = now
+				// The deal stays listed while its mail is inside the
+				// lookback window this connector reads: arrival (the
+				// server's INTERNALDATE, which the sender cannot set)
+				// plus that window. nagus's retention, not the seller's
+				// end date -- surfaced with basis "email_window".
+				if !at.IsZero() {
+					raws[i].EndsAt = at.AddDate(0, 0, c.cfg.LookbackDays).UTC()
+				}
 			}
 			out = append(out, raws...)
 		}

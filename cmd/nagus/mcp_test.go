@@ -421,6 +421,21 @@ func TestMCPToolSchemasUnchangedForOpenclaw(t *testing.T) {
 	want := map[string]string{
 		"search_items": `{"additionalProperties":false,"properties":{"category":{"type":"string"},"limit":{"minimum":0,"type":"integer"},"text":{"type":"string"}},"type":"object"}`,
 		"get_item":     `{"additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"],"type":"object"}`,
+		// nagus-417. Pinned so that a later change is deliberate: openclaw's
+		// toolFilter and the Caspar skill (docs/new-deals-skill.md) call them
+		// with these arguments.
+		"new_deals": `{"additionalProperties":false,"properties":{` +
+			`"category":{"description":"One configured category (hdd, wine, ...). Omit for every category.","type":"string"},` +
+			`"include_price_drops":{"description":"Default true: a listing seen before since also counts when its price DROPPED at or after since.","type":"boolean"},` +
+			`"limit":{"maximum":100,"minimum":1,"type":"integer"},` +
+			`"min_verdict":{"description":"Lowest deal verdict to return; default good. Ladder: great > good > market > poor. any also returns unscored rows.","enum":["great","good","market","poor","any"],"type":"string"},` +
+			`"since":{"description":"RFC 3339 time you last asked (pass the previous answer's as_of, minus an hour of overlap). At most 30 days ago; not in the future.","format":"date-time","type":"string"},` +
+			`"watch":{"description":"A watch name from list_watches: only that watch's category and text, and only rows that clear its strong (ping) criteria.","type":"string"}` +
+			`},"required":["since"],"type":"object"}`,
+		"list_watches": `{"additionalProperties":false,"properties":{` +
+			`"limit":{"description":"With name: at most this many strong matches (best first); default 25. strong_count is the total.","maximum":100,"minimum":1,"type":"integer"},` +
+			`"name":{"description":"One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only.","type":"string"}` +
+			`},"type":"object"}`,
 	}
 	if len(got.Tools) != len(mcpToolNames) {
 		t.Fatalf("%d tools, want %d", len(got.Tools), len(mcpToolNames))

@@ -136,10 +136,17 @@ func TestReceivedIsTheInternalDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Fetch(context.Background()); err != nil {
+	raws, err := c.Fetch(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.seen) != 1 || !rec.seen[0].Received.Equal(arrived) {
 		t.Fatalf("received %v, want the INTERNALDATE %v", rec.seen, arrived)
+	}
+	// The deal's stated end is the read window from that same INTERNALDATE
+	// (nagus-417, basis email_window), never from the sender's Date header.
+	want := arrived.AddDate(0, 0, DefaultLookbackDays).UTC()
+	if len(raws) != 1 || !raws[0].EndsAt.Equal(want) {
+		t.Fatalf("EndsAt = %v, want arrival + %d days = %v", raws, DefaultLookbackDays, want)
 	}
 }

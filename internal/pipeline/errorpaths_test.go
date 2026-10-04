@@ -448,3 +448,7 @@ func (s *errpathFailingItemStore) Delete(ctx context.Context, id string) error {
 }
 
 func (errpathSearchErrorStore) Delete(context.Context, string) error { return nil }
+
+func (s *errpathFailingOfferStore) Summaries(ctx context.Context, ids []string) (map[string]offer.Summary, error) {
+	return s.inner.Summaries(ctx, ids)
+}

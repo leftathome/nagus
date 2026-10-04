@@ -90,6 +90,11 @@ var resolutionColumns = []struct{ name, ddl string }{
 	// QUARK-04 wine vintage mode from quark's resolution specs; '' = quark
 	// said nothing, which is true of every existing row.
 	{"vintage_mode", `TEXT NOT NULL DEFAULT ''`},
+	// Offer timing (nagus-417): price change, previous price, source-stated
+	// end. A constant default keeps ADD COLUMN metadata-only.
+	{"price_changed_at_ns", `INTEGER NOT NULL DEFAULT 0`},
+	{"previous_price_cents", `INTEGER NOT NULL DEFAULT 0`},
+	{"ends_at_ns", `INTEGER NOT NULL DEFAULT 0`},
 }
 
 // resolutionIndexes run AFTER migrateResolution, because on an existing
@@ -193,12 +198,33 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var prevFirst, prevLast, prevMin int64
+	// Price-change fields are derived, never the caller's (offer.Store.Put).
+	// A first insert stamps FirstSeen.
+	o.PriceChangedAt, o.PreviousPriceCents = o.FirstSeen, 0
+	var prevFirst, prevLast, prevMin, prevPrice, prevChanged, prevPrevious int64
 	err = tx.QueryRowContext(ctx,
-		`SELECT first_seen_ns, last_seen_ns, min_price_cents FROM offers WHERE id = ?`, o.ID,
-	).Scan(&prevFirst, &prevLast, &prevMin)
+		`SELECT first_seen_ns, last_seen_ns, min_price_cents, price_cents, price_changed_at_ns, previous_price_cents FROM offers WHERE id = ?`, o.ID,
+	).Scan(&prevFirst, &prevLast, &prevMin, &prevPrice, &prevChanged, &prevPrevious)
 	switch {
 	case err == nil:
+		// Price change: a different non-zero price stamps the observation
+		// time (never earlier than the stored stamp, a pre-column 0 meaning
+		// first_seen) and keeps the stored price as the previous one.
+		changed := prevChanged
+		if changed == 0 {
+			changed = prevFirst
+		}
+		o.PreviousPriceCents = prevPrevious
+		if o.PriceCents == 0 {
+			// An unknown-price poll keeps the last known price.
+			o.PriceCents = prevPrice
+		} else if prevPrice > 0 && o.PriceCents != prevPrice {
+			o.PreviousPriceCents = prevPrice
+			if obs := o.LastSeen.UnixNano(); obs > changed {
+				changed = obs
+			}
+		}
+		o.PriceChangedAt = timeOrZero(changed)
 		// FirstSeen never moves forward on re-observation.
 		if prevFirst != 0 && (o.FirstSeen.IsZero() || prevFirst < o.FirstSeen.UnixNano()) {
 			o.FirstSeen = time.Unix(0, prevFirst).UTC()
@@ -231,8 +257,9 @@ INSERT INTO offers (
   id, source_id, source_key, source_url, title, body,
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
-  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
+  price_changed_at_ns, previous_price_cents, ends_at_ns
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions see the row as it was BEFORE this update, so these
@@ -253,12 +280,16 @@ ON CONFLICT(id) DO UPDATE SET
   hint_text=excluded.hint_text,
   first_seen_ns=excluded.first_seen_ns, last_seen_ns=excluded.last_seen_ns,
   min_price_cents=excluded.min_price_cents, status=excluded.status,
-  outcome=excluded.outcome, expired_at_ns=excluded.expired_at_ns`,
+  outcome=excluded.outcome, expired_at_ns=excluded.expired_at_ns,
+  price_changed_at_ns=excluded.price_changed_at_ns,
+  previous_price_cents=excluded.previous_price_cents,
+  ends_at_ns=excluded.ends_at_ns`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
 		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
 		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
+		nsOrZero(o.PriceChangedAt), o.PreviousPriceCents, nsOrZero(o.EndsAt),
 	)
 	if err != nil {
 		return fmt.Errorf("sqliteoffer: upsert: %w", err)
@@ -405,14 +436,15 @@ const selectCols = `SELECT
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
-  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode`
+  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode,
+  price_changed_at_ns, previous_price_cents, ends_at_ns`
 
 func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 	var out []offer.Offer
 	for rows.Next() {
 		var o offer.Offer
 		var aspects string
-		var firstNS, lastNS, expiredNS, resolvedNS int64
+		var firstNS, lastNS, expiredNS, resolvedNS, changedNS, endsNS int64
 		var status, outcome, resState string
 		if err := rows.Scan(
 			&o.ID, &o.SourceID, &o.SourceKey, &o.SourceURL, &o.Title, &o.Body,
@@ -420,6 +452,7 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS, &o.Resolution.VintageMode,
+			&changedNS, &o.PreviousPriceCents, &endsNS,
 		); err != nil {
 			return nil, fmt.Errorf("sqliteoffer: scan: %w", err)
 		}
@@ -431,6 +464,8 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 		o.FirstSeen = timeOrZero(firstNS)
 		o.LastSeen = timeOrZero(lastNS)
 		o.ExpiredAt = timeOrZero(expiredNS)
+		o.PriceChangedAt = changedAtOrFirstSeen(changedNS, firstNS)
+		o.EndsAt = timeOrZero(endsNS)
 		o.Status = offer.Status(status)
 		o.Outcome = offer.Outcome(outcome)
 		o.Resolution.State = offer.ResolutionState(resState)
@@ -441,6 +476,104 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+// summariesChunk bounds the ids bound into one IN (...) list: SQLite builds
+// before 3.32 cap a statement at 999 parameters. The single-connection pool
+// serialises the chunks, which is fine for a read of a few thousand ids.
+const summariesChunk = 500
+
+// Summaries returns the summaries of the stored offers among ids, expired ones
+// included.
+func (s *Store) Summaries(ctx context.Context, ids []string) (map[string]offer.Summary, error) {
+	out := make(map[string]offer.Summary, len(ids))
+	for start := 0; start < len(ids); start += summariesChunk {
+		chunk := ids[start:min(start+summariesChunk, len(ids))]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := s.db.QueryContext(ctx, `SELECT
+  id, source_id, status, price_cents, min_price_cents, previous_price_cents,
+  first_seen_ns, last_seen_ns, price_changed_at_ns, expired_at_ns, ends_at_ns,
+  resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode
+FROM offers WHERE id IN (?`+strings.Repeat(",?", len(chunk)-1)+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("sqliteoffer: summaries: %w", err)
+		}
+		for rows.Next() {
+			var sm offer.Summary
+			var status, resState string
+			var firstNS, lastNS, changedNS, expiredNS, endsNS, resolvedNS int64
+			if err := rows.Scan(&sm.ID, &sm.SourceID, &status, &sm.PriceCents, &sm.MinPriceSeen, &sm.PreviousPriceCents,
+				&firstNS, &lastNS, &changedNS, &expiredNS, &endsNS,
+				&resState, &sm.Resolution.ProductID, &sm.Resolution.Generation, &resolvedNS, &sm.Resolution.VintageMode,
+			); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("sqliteoffer: summaries scan: %w", err)
+			}
+			sm.Status = offer.Status(status)
+			sm.FirstSeen, sm.LastSeen = timeOrZero(firstNS), timeOrZero(lastNS)
+			sm.PriceChangedAt = changedAtOrFirstSeen(changedNS, firstNS)
+			sm.ExpiredAt, sm.EndsAt = timeOrZero(expiredNS), timeOrZero(endsNS)
+			sm.Resolution.State = offer.ResolutionState(resState)
+			if sm.Resolution.State == "" {
+				sm.Resolution.State = offer.ResolutionUnattempted
+			}
+			sm.Resolution.At = timeOrZero(resolvedNS)
+			out[sm.ID] = sm
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("sqliteoffer: summaries rows: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// BackfillPriceChangedAt gives every offer stored before price_changed_at_ns
+// existed its first_seen, in primary-key batches (see offer.Backfiller and
+// pgoffer's), returning how many rows it changed.
+func (s *Store) BackfillPriceChangedAt(ctx context.Context, batch int) (int, error) {
+	if batch <= 0 {
+		batch = offer.DefaultBackfillBatch
+	}
+	total, last := 0, ""
+	for {
+		var upper string
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM offers WHERE id > ? ORDER BY id LIMIT 1 OFFSET ?`, last, batch-1).Scan(&upper)
+		done := err == sql.ErrNoRows
+		if err != nil && !done {
+			return total, fmt.Errorf("sqliteoffer: backfill bound: %w", err)
+		}
+		q := `UPDATE offers SET price_changed_at_ns = first_seen_ns WHERE id > ? AND price_changed_at_ns = 0 AND first_seen_ns <> 0`
+		args := []any{last}
+		if !done {
+			q += ` AND id <= ?`
+			args = append(args, upper)
+		}
+		res, err := s.db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("sqliteoffer: backfill: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+		if done {
+			return total, nil
+		}
+		last = upper
+	}
+}
+
+// changedAtOrFirstSeen reads a stored price_changed_at, where 0 (a row older
+// than the column, not yet backfilled) means first_seen.
+func changedAtOrFirstSeen(changedNS, firstNS int64) time.Time {
+	if changedNS == 0 {
+		return timeOrZero(firstNS)
+	}
+	return timeOrZero(changedNS)
 }
 
 func timeOrZero(ns int64) time.Time {

@@ -53,6 +53,11 @@ type Raw struct {
 	ConditionRaw string            // source-native condition token/code (e.g. eBay conditionId "2500")
 	Aspects      map[string]string // source structured aspects; keys trusted, VALUES untrusted
 	SeenAt       time.Time         // when the connector observed it
+	// EndsAt is when the SOURCE states the listing stops being available (an
+	// eBay auction's end; a deal email's read window), a trusted scalar. Zero
+	// when the source states no end, which is the usual case: a connector
+	// sets it only from a structured field, never by guessing.
+	EndsAt time.Time
 }
 
 // Sanitized is a Raw that has crossed the glovebox gate. glovebox does not

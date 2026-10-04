@@ -42,6 +42,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -366,6 +367,14 @@ type itemSummary struct {
 	Price        *itemPrice    `json:"price"`
 	Seller       *itemSeller   `json:"seller"`
 	ItemLocation *itemLocation `json:"itemLocation"`
+	// BuyingOptions lists how the item can be bought: FIXED_PRICE, AUCTION,
+	// BEST_OFFER, CLASSIFIED_AD. A search with no buyingOptions filter returns
+	// only listings that include FIXED_PRICE.
+	BuyingOptions []string `json:"buyingOptions"`
+	// ItemEndDate (UTC, RFC 3339) is when an AUCTION ends -- or, for a
+	// fixed-price listing, when it already ended. Both are returned by the
+	// plain item_summary/search call; no fieldgroups value is needed.
+	ItemEndDate string `json:"itemEndDate"`
 }
 
 type itemPrice struct {
@@ -490,6 +499,9 @@ func mapItemSummary(is itemSummary, sourceID string, now time.Time) (listing.Raw
 	if is.ItemLocation != nil && is.ItemLocation.Country != "" {
 		aspects["item_location_country"] = is.ItemLocation.Country
 	}
+	if len(is.BuyingOptions) > 0 {
+		aspects["buying_options"] = strings.Join(is.BuyingOptions, ",")
+	}
 
 	return listing.Raw{
 		SourceID:     sourceID,
@@ -502,7 +514,23 @@ func mapItemSummary(is itemSummary, sourceID string, now time.Time) (listing.Raw
 		ConditionRaw: conditionRaw,
 		Aspects:      aspects,
 		SeenAt:       now,
+		EndsAt:       auctionEnd(is),
 	}, true
+}
+
+// auctionEnd is the end time eBay STATES for this listing, or zero. Only an
+// auction has one: an active fixed-price listing has no committed end (a
+// Good 'Til Cancelled listing renews monthly), so an itemEndDate on one is
+// not treated as a fact and the listing keeps nagus's assumed expiry.
+func auctionEnd(is itemSummary) time.Time {
+	if is.ItemEndDate == "" || !slices.Contains(is.BuyingOptions, "AUCTION") {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, is.ItemEndDate)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // parsePriceToCents converts an eBay Browse price.value decimal string in

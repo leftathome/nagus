@@ -45,7 +45,7 @@ func offerFor(t *testing.T, srv *server, offers offer.Store, itemID, mpn string)
 	}
 	o.ID = offer.DeterministicID(it.SourceID, it.SourceKey)
 	if o.ID != itemID {
-		t.Fatalf("offer id %s != item id %s: the lookup withProductIDs relies on is broken", o.ID, itemID)
+		t.Fatalf("offer id %s != item id %s: the lookup withOffers relies on is broken", o.ID, itemID)
 	}
 	return o
 }

@@ -302,6 +302,7 @@ func offerFromRaw(r listing.Raw, now time.Time) offer.Offer {
 		Aspects:     r.Aspects,
 		ProductHint: hint,
 		LastSeen:    seen,
+		EndsAt:      r.EndsAt,
 		Status:      offer.StatusActive,
 	}
 }

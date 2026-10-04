@@ -195,7 +195,9 @@ type Offer struct {
 	Title string
 	Body  string
 
-	// Trusted scalars, derived by the connector.
+	// Trusted scalars, derived by the connector. As STORED, PriceCents is the
+	// last KNOWN price: a poll that reports 0 (unknown) does not erase it
+	// (see Store.Put). 0 means no poll has ever stated a price.
 	PriceCents int64
 	Currency   string
 	Condition  string
@@ -235,6 +237,77 @@ type Offer struct {
 	Outcome Outcome
 	// ExpiredAt is when the offer was marked expired; zero while active.
 	ExpiredAt time.Time
+	// PriceChangedAt is when PriceCents last changed to a different non-zero
+	// value; FirstSeen until it does. DERIVED by Put (see Store.Put): adapters
+	// ignore any value supplied there.
+	PriceChangedAt time.Time
+	// PreviousPriceCents is the price before the change at PriceChangedAt; 0
+	// when the price never changed or the earlier price was unknown. Derived
+	// by Put alongside PriceChangedAt. It is what tells a price DROP from a
+	// rise without keeping a price series.
+	PreviousPriceCents int64
+	// EndsAt is when the SOURCE states the listing ends (an eBay auction's end
+	// time; a deal submission's email window). Zero when the source states
+	// none, which is the usual case. Put overwrites it with what the source
+	// states now, so a listing that stops stating an end loses it.
+	EndsAt time.Time
+}
+
+// Backfiller is implemented by persistent adapters whose tables predate the
+// price_changed_at column (nagus-417). BackfillPriceChangedAt stamps every such
+// row with its first_seen -- what a first insert writes -- and reports how
+// many it changed; it is idempotent and safe to run while ingest writes.
+//
+// It is deliberately NOT part of opening the store. Reads never depend on it
+// (a stored 0 reads as FirstSeen), and on a large table the one-statement
+// form is slow: measured on Postgres 16, 1,000,000 offers took 39.5 s and
+// doubled the heap until vacuum, longer than the pod's liveness budget. So
+// cmd/nagus runs it in the background after startup, in primary-key batches
+// of short transactions.
+type Backfiller interface {
+	BackfillPriceChangedAt(ctx context.Context, batch int) (int, error)
+}
+
+// DefaultBackfillBatch is the rows per backfill transaction.
+const DefaultBackfillBatch = 5000
+
+// Summary is the lifecycle and identity of one offer without its free text:
+// what a read path needs to hide expired listings and to time a row. It is
+// what Store.Summaries returns, so a surface can fetch thousands of them in
+// one query without moving titles, bodies and aspects.
+type Summary struct {
+	ID                 string
+	SourceID           string
+	Status             Status
+	PriceCents         int64
+	MinPriceSeen       int64
+	PreviousPriceCents int64
+	FirstSeen          time.Time
+	LastSeen           time.Time
+	PriceChangedAt     time.Time
+	ExpiredAt          time.Time
+	EndsAt             time.Time
+	Resolution         Resolution
+}
+
+// Summarize projects an offer onto its Summary.
+func (o Offer) Summarize() Summary {
+	pc := o.PriceChangedAt
+	if pc.IsZero() {
+		pc = o.FirstSeen
+	}
+	return Summary{
+		ID: o.ID, SourceID: o.SourceID, Status: o.Status,
+		PriceCents: o.PriceCents, MinPriceSeen: o.MinPriceSeen, PreviousPriceCents: o.PreviousPriceCents,
+		FirstSeen: o.FirstSeen, LastSeen: o.LastSeen, PriceChangedAt: pc,
+		ExpiredAt: o.ExpiredAt, EndsAt: o.EndsAt, Resolution: o.Resolution,
+	}
+}
+
+// PriceDropped reports whether the last price change was a DROP: both prices
+// known and the current one lower.
+func (s Summary) PriceDropped() bool {
+	return s.PreviousPriceCents > 0 && s.PriceCents > 0 && s.PriceCents < s.PreviousPriceCents
 }
 
 // Errors returned by this package.
@@ -372,9 +445,30 @@ type Store interface {
 	// Put inserts or updates an offer by ID, folding lifecycle: FirstSeen is
 	// preserved from any existing row, LastSeen advances, MinPriceSeen tracks
 	// the lowest price ever seen, and re-appearance revives an expired offer.
+	//
+	// Put also derives PriceChangedAt and PreviousPriceCents (any value the
+	// caller supplies is ignored), identically in every adapter:
+	//   - first insert: PriceChangedAt = FirstSeen, PreviousPriceCents = 0
+	//   - incoming price 0 (unknown): PriceCents keeps the LAST KNOWN price
+	//     (an unknown-price poll never erases it), both fields unchanged
+	//   - incoming price equal to the stored one: both unchanged
+	//   - stored price 0 (never known) and incoming non-zero: the first known
+	//     price, not a change; both unchanged
+	//   - both known and different: PriceChangedAt = the incoming LastSeen,
+	//     never earlier than the stored value; PreviousPriceCents = the stored
+	//     price
+	// A stored PriceChangedAt of zero (a row older than the column, not yet
+	// backfilled) reads as FirstSeen. EndsAt is taken from the caller as is.
 	Put(ctx context.Context, o Offer) error
 	// Get returns one offer by id.
 	Get(ctx context.Context, id string) (Offer, bool, error)
+	// Summaries returns the Summary of every offer among ids that exists,
+	// keyed by id, EXPIRED ONES INCLUDED (the caller is deciding what to hide).
+	// It is batched, never one query per id: one query on Postgres (WHERE
+	// id = ANY), and one query per 500 ids on SQLite (its parameter limit),
+	// so a read path can check a whole candidate set at once. Unknown ids
+	// are simply absent.
+	Summaries(ctx context.Context, ids []string) (map[string]Summary, error)
 	// Query returns offers matching q.
 	Query(ctx context.Context, q Query) ([]Offer, error)
 	// MarkExpired transitions every offer of a source not seen since the cutoff

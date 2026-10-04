@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"github.com/leftathome/nagus/internal/item"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/score"
 )
 
@@ -53,11 +54,23 @@ type Scored struct {
 	Item   item.Item
 	Signal score.DealSignal
 	Score  score.Score
+	// Offer is the listing's offer summary (lifecycle and quark identity),
+	// read in the surface's one batched offer lookup. nil when the surface
+	// has no offer layer or the item has no offer row (the release category
+	// never has one) -- consumers must treat nil as "unknown", not "zero".
+	Offer *offer.Summary
 }
 
 // SurfaceResult summarizes one Surface run alongside the ranked hits.
 type SurfaceResult struct {
-	Matched  int // items returned by the store query
-	Filtered int // survivors of the hard-filter (== len(Items))
+	Matched  int // surfaceable items returned by the store query (expired ones excluded)
+	Filtered int // survivors of the hard-filter (== len(Items) before the caller's limit)
 	Items    []Scored
+	// HiddenExpired counts store matches dropped because their offer is
+	// EXPIRED, or its source-stated end has passed (nagus-417): a listing
+	// gone from its source is never surfaced.
+	HiddenExpired int
+	// CapReached reports that the store read hit the candidate cap, so the
+	// ranking may not cover the whole category.
+	CapReached bool
 }

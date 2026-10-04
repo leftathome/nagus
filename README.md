@@ -52,6 +52,22 @@ recipient's abroad (fail closed throughout). See
 See [`docs/design/2026-07-01-nagus-design.md`](docs/design/2026-07-01-nagus-design.md)
 for the full architecture, source-access map, security model, and decision log.
 
+### Agent surface (MCP, `/mcp`)
+
+All read-only. `search_items` (ranked search), `get_item` (one listing),
+`new_deals` (listings first seen -- or whose price dropped -- since a time the
+agent passes; nagus keeps no cursor), `list_watches` (the household's
+standing watches and their live counts), and `deal_submission_spec` /
+`deal_submission_status`. With the offer layer on, listings whose offer has
+EXPIRED (not seen at the source for 3 polls) are never returned by search or
+watches, and every row carries `first_seen_at`, `last_seen_at`,
+`price_changed_at`, `lowest_price_cents`, `offer_status` and `expires_at` with
+an `expires_basis` that says whether the end time is the seller's
+(`listing_end`), a deal email's read window (`email_window`) or nagus's
+estimate (`not_seen_3_polls`). Design:
+[`docs/design/2026-10-03-new-deals-offer-timing.md`](docs/design/2026-10-03-new-deals-offer-timing.md);
+the Caspar skill snippet: [`docs/new-deals-skill.md`](docs/new-deals-skill.md).
+
 Household humans and agents can also email a deal nagus cannot see itself
 (in-store, image-only newsletters, tips) as one JSON object per line:
 [`docs/deal-submission.md`](docs/deal-submission.md).
