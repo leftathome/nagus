@@ -10,8 +10,10 @@
 # own -- each leg still pulls only its own ~312MB.
 #
 # Refresh these when intentionally bumping the base:
-#   crane digest --platform linux/amd64 docker.io/library/golang:1.26
-#   crane digest --platform linux/arm64 docker.io/library/golang:1.26
+#   crane digest --platform linux/amd64 docker.io/library/golang:1.26.9
+#   crane digest --platform linux/arm64 docker.io/library/golang:1.26.9
+# Current pins: golang 1.26.9 (config GOLANG_VERSION=1.26.9 checked for both,
+# 2026-10-16), the amd64 one identical to .gitlab-ci.yml GO_IMAGE.
 # TARGETARCH is the standard automatic platform ARG that the builder populates
 # (kaniko does so from --custom-platform, which the ci-templates legs pass as
 # linux/amd64 or linux/arm64; docker/buildkit set it from the target platform).
@@ -23,8 +25,8 @@
 # under an arm64 platform declaration -- an index that passes a platform check
 # while being wrong, which is far worse than a red pipeline.
 ARG TARGETARCH
-FROM docker.io/golang:1.26@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0 AS build-amd64
-FROM docker.io/golang:1.26@sha256:a0c0dd6888e2a1df54a00fcafe855e3035dcf9b5733cdf803d6ccf70a56df809 AS build-arm64
+FROM docker.io/golang:1.26@sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea AS build-amd64
+FROM docker.io/golang:1.26@sha256:0275e2ab63da9ae2f4f714b2c5a20544b2470d1867919633ebb8d4a8a3d8e6e0 AS build-arm64
 
 FROM build-${TARGETARCH} AS build
 WORKDIR /src
