@@ -77,6 +77,13 @@ type SourceConfig struct {
 	// as unable to prove in-subdivision standing.
 	WineChannel string `json:"wineChannel,omitempty"`
 	Origin      string `json:"origin,omitempty"`
+	// WineShipsTo is the OPERATOR's declaration, from the seller's own
+	// shipping policy, of where this seller ships: subdivision codes
+	// ("US-WA") or a bare country ("US" = every US subdivision). It
+	// OVERRIDES the default legal model (channel + origin) for this seller
+	// only. Optional: absent or null is no declaration; present but empty
+	// ([]) refuses startup.
+	WineShipsTo *[]string `json:"wineShipsTo,omitempty"`
 	// WineProducer names the producer when every listing on the source is
 	// one producer's (a winery's own store). Producer-storefront titles never
 	// name the producer, and LWIN resolution needs it (nagus-86s). Optional:
@@ -134,6 +141,18 @@ type SourceConfig struct {
 	IMAPSenders          []string          `json:"imapSenders,omitempty"`
 	IMAPSenderAliases    map[string]string `json:"imapSenderAliases,omitempty"`
 	DealSubmitTo         string            `json:"dealSubmitTo,omitempty"`
+	// Retailer promo mail read by a vision model (imapParser
+	// "promo-vision-v1", nagus-3ua; docs/design/2026-10-16-promo-vision.md):
+	// promoProfile names a built-in retailer profile (newegg, winecom,
+	// totalwine); imapSenders lists the retailer's newsletter addresses, each
+	// on one of the profile's sender domains. One source per retailer. The
+	// vision endpoint comes from NAGUS_VISION_*; without it the source reads
+	// nothing. promoMaxImages lowers the profile's per-message image cap;
+	// promoCallsPerPoll this source's per-poll vision call allowance
+	// (default NAGUS_VISION_MAX_CALLS_PER_POLL).
+	PromoProfile      string `json:"promoProfile,omitempty"`
+	PromoMaxImages    int    `json:"promoMaxImages,omitempty"`
+	PromoCallsPerPoll int    `json:"promoCallsPerPoll,omitempty"`
 	// QuarkTextHints sends a listing's title to quark as hint text when the
 	// source states no product identifiers (quark QUARK-02). For marketplaces
 	// whose part numbers live only in the title (eBay). Title attached only

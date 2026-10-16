@@ -327,6 +327,52 @@ func (r Rules) LegalDestinations(src Source) []string {
 	return out
 }
 
+// ExpandDeclared turns an operator's per-seller shipping declaration into
+// destination codes: a subdivision code ("US-WA") stands for itself and a
+// bare country code ("US") for every destination of that country the table
+// models (and the country itself when it is modeled). Every code must be
+// well-formed and modeled -- a typo would otherwise declare a destination
+// nothing can match -- and the list must not be empty. The result is sorted
+// and de-duplicated.
+func (r Rules) ExpandDeclared(codes []string) ([]string, error) {
+	if len(codes) == 0 {
+		return nil, fmt.Errorf("shipping: an empty ships-to declaration (omit it to use the default legal model)")
+	}
+	set := map[string]bool{}
+	for _, c := range codes {
+		j, err := ParseJurisdiction(c)
+		if err != nil {
+			return nil, err
+		}
+		if j.Subdivision != "" {
+			// The subdivision ITSELF must be a destination: "FR-75" would
+			// otherwise pass on France's entry and declare a token no watch
+			// destination ever names.
+			if _, ok := r.Destinations[j.Code()]; !ok {
+				return nil, fmt.Errorf("shipping: declared destination %q is not modeled by the rules table", c)
+			}
+			set[j.Code()] = true
+			continue
+		}
+		n := 0
+		for code := range r.Destinations {
+			if d, err := ParseJurisdiction(code); err == nil && d.Country == j.Country {
+				set[d.Code()] = true
+				n++
+			}
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("shipping: declared country %q has no destination in the rules table", c)
+		}
+	}
+	out := make([]string, 0, len(set))
+	for c := range set {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // Modeled reports whether dest has a policy (directly or via its country).
 // Config paths use this to reject a destination that would silently surface
 // nothing.

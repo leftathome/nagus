@@ -77,8 +77,30 @@ Connectors live in `internal/connector/`. A connector returns `listing.Raw`;
 | `ebay` | Browse API, OAuth client_credentials. Budgeted (~5k calls/day). |
 | `shopify` | ONE generic connector, N store configs. Public `/products.json`, no auth. |
 | `zillapi` | Land. Built and tested, **not deployed** — bills per RESULT returned. |
+| `imapmail` | The deals mailbox (DKIM verified by nagus). Parsers: `deal-jsonl-v1` (household submissions, `internal/deal`) and `promo-vision-v1` (image-only retailer mail read by a vision model, `internal/promo`). |
 
 **Craigslist is a PROHIBITED source** — see the hard rule in CLAUDE.md.
+
+### Promo mail read by a vision model (`internal/promo`)
+
+A Newegg / wine.com / Total Wine newsletter is pictures. `promo-vision-v1`
+picks product images by per-retailer PROFILE (data: `profiles.json`), fetches
+them https-only from the profile's image hosts (public addresses only, 2 MiB
+cap), reads each twice with two differently worded prompts and keeps a
+product only when the reads agree on the price (and roughly on the title).
+The URL is built from the Newegg item number in the alt text, or by following
+the tracked link by hand (<= 5 hops, every hop on the profile's hosts) and
+stopping at the first product URL WITHOUT requesting the page; only that
+canonical URL is stored. Each product then goes through `deal.Decode` and
+`deal.ToRaw` exactly like a household submission, then the gate and the
+category extractor. Load-bearing details: vision calls are budgeted (per
+poll, per UTC day, shared GPU); a deferred image makes the fetch INCOMPLETE
+so nothing expires; results are cached per message and readings per image hash, in memory (a
+restart starts a fresh daily budget and re-reads the window: nagus-p7x);
+the two reads must carry the same numbers, and a followed link's slug must
+match the title; an hdd promo product must also
+look like a drive (`categoryFit`) because the hdd extractor does not refuse
+laptops.
 
 A source may declare **no category**, making it offer-only: it feeds the offer
 store with no glovebox crossing, no extraction, no items. That is gate-at-eval's
