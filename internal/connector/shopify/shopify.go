@@ -506,10 +506,10 @@ func (c *Connector) fetchPageOnce(ctx context.Context, handle string, page int) 
 	if err != nil {
 		return nil, 0, fmt.Errorf("shopify: read response body: %w", err)
 	}
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return body, 0, nil
-	case resp.StatusCode == http.StatusTooManyRequests:
+	case http.StatusTooManyRequests:
 		return nil, retryAfter(resp), fmt.Errorf("%w (page %d): %s", ErrRateLimited, page, truncate(body, 80))
 	default:
 		return nil, 0, fmt.Errorf("shopify: products.json returned status %d: %s", resp.StatusCode, truncate(body, 160))
@@ -761,7 +761,7 @@ func (c *Connector) mpnOf(title string, v variant) string {
 func partNumberTokens(title string) []string {
 	var out []string
 	for _, f := range strings.FieldsFunc(strings.ToUpper(title), func(r rune) bool {
-		return !(r == '-' || r == '.' || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+		return r != '-' && r != '.' && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
 	}) {
 		f = strings.Trim(f, ".-")
 		if len(f) >= 5 && partNumberShaped(f) {

@@ -263,14 +263,14 @@ func (c *Connector) search(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("zillapi: read response body: %w", err)
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return body, nil
-	case resp.StatusCode == http.StatusAccepted:
+	case http.StatusAccepted:
 		// Async job. v1 keeps maxItems <= MaxSyncItems precisely to avoid this,
 		// so reaching here means an upstream behavior change worth surfacing.
 		return nil, fmt.Errorf("%w (status 202)", ErrAsyncUnsupported)
-	case resp.StatusCode == http.StatusTooManyRequests:
+	case http.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: %s", ErrRateLimited, describeError(body))
 	default:
 		return nil, fmt.Errorf("zillapi: search returned status %d: %s", resp.StatusCode, describeError(body))

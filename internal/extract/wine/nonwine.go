@@ -313,7 +313,7 @@ func objectHead(title string) bool {
 		}
 	}
 	found, head := nounHead(words, func(words []string, i int) int {
-		if objectNouns[words[i]] && !(words[i] == "jersey" && i > 0 && words[i-1] == "new") {
+		if objectNouns[words[i]] && (words[i] != "jersey" || i == 0 || words[i-1] != "new") {
 			return 1
 		}
 		return 0

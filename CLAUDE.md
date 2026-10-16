@@ -40,8 +40,9 @@ recognizer/archiver, and openclaw (agent runtime + delivery).
 
 ## Go / test discipline
 
-- Go 1.26, modules. `go vet ./...`, `go test ./... -count=1 -race`, staticcheck
-  (`.golangci.yml`) as the feedback loop. Write tests; run them; confirm behavior.
+- Go 1.26, modules. `go vet ./...`, `go test ./... -count=1 -race`, and
+  `scripts/lint.sh` (golangci-lint v2: staticcheck & co + gofumpt/goimports,
+  `.golangci.yml`) as the feedback loop; CI's `lint` job runs the same script. Write tests; run them; confirm behavior.
 - Every commit needs a real, automatable test plan (no "I'll verify manually", no
   money-in-the-loop). The MemoryStore is the reference contract new store adapters
   must satisfy -- add adapters against the same tests.

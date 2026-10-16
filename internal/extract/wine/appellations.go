@@ -115,7 +115,7 @@ func normalizeWords(s string) []string {
 	s = foldASCII(strings.ToLower(s))
 	s = strings.NewReplacer("&", " and ", "+", " and ").Replace(s)
 	words := strings.FieldsFunc(s, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 	for i, w := range words {
 		if l, ok := spelledOut[w]; ok {
@@ -234,7 +234,7 @@ var labelWords = setOfWords("edition", "editions", "label", "labels", "cuvee", "
 // is not a label's name.
 func lodgingAfter(words []string, from int) bool {
 	for i := min(from, len(words)); i < len(words); i++ {
-		if lodgingWords[words[i]] && !(i+1 < len(words) && labelWords[words[i+1]]) {
+		if lodgingWords[words[i]] && (i+1 >= len(words) || !labelWords[words[i+1]]) {
 			return true
 		}
 	}
@@ -347,7 +347,7 @@ func titleAppellations(title string) appellationEvidence {
 	classified := hasClassification(title)
 	estate := estateNamed(words)
 	for _, m := range matches {
-		if m.broad && !classified && !(estate && wineHeadAt(words, m)) && !colourBeside(words, m, colourNamedRegions[strings.Join(words[m.start:m.end], " ")]) {
+		if m.broad && !classified && (!estate || !wineHeadAt(words, m)) && !colourBeside(words, m, colourNamedRegions[strings.Join(words[m.start:m.end], " ")]) {
 			continue
 		}
 		if lodgingAfter(words, m.end) || nearCask(words, m.start, m.end) || spiritTitle(words, m.start) {

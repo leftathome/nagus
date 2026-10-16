@@ -282,7 +282,7 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 		// NEW-8) instead of reporting an empty or shorter message.
 		led.reject(ref, len(lines)+1, "", ReasonScanTruncated, 0)
 	}
-	if n == 0 && !(truncated && reachedEnd) {
+	if n == 0 && (!truncated || !reachedEnd) {
 		led.refuseMessage(ref, MsgEmpty)
 	}
 	return out, nil

@@ -233,7 +233,7 @@ var spelled = map[string]string{"st": "saint", "ste": "sainte", "mt": "mount"}
 func Normalize(s string) string {
 	s = fold.Replace(strings.ToLower(s))
 	words := strings.FieldsFunc(s, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 	for i, w := range words {
 		if l, ok := spelled[w]; ok {
