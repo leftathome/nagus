@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### CI
+
+- **New `lint` job** (nagus-cxj, test stage, MR + main + tags): golangci-lint
+  v2.12.2 pinned by single-platform linux/amd64 digest, type-checking against
+  Go 1.26.9 (`GOTOOLCHAIN`), via the new `scripts/lint.sh` (also the local
+  command). `.golangci.yml` migrated to the v2 format with the same five
+  linters, plus the gofumpt and goimports formatters (quark parity). Existing
+  findings fixed rather than waived: staticcheck QF1001 De Morgan rewrites
+  (wine appellations/nonwine, genappellations, deal parser, imapmail DKIM
+  check, shopify part numbers), QF1002 tagged switches (shopify, zillapi,
+  sqliteoffer), and unchecked errors in two tests. No behaviour change.
+
 ### Upgrade notes
 
 - **Retailer promo mail read by a vision model** (nagus-3ua,

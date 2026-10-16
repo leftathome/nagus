@@ -223,7 +223,9 @@ func TestRentcastProviderLookup(t *testing.T) {
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		}))
 		defer server.Close()
 
@@ -280,7 +282,9 @@ func TestRentcastProviderLookup(t *testing.T) {
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		}))
 		defer server.Close()
 
@@ -317,7 +321,9 @@ func TestRentcastProviderLookup(t *testing.T) {
 	t.Run("empty result", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]map[string]interface{}{})
+			if err := json.NewEncoder(w).Encode([]map[string]interface{}{}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		}))
 		defer server.Close()
 
@@ -337,7 +343,9 @@ func TestRentcastProviderLookup(t *testing.T) {
 	t.Run("non-200 response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("invalid api key"))
+			if _, err := w.Write([]byte("invalid api key")); err != nil {
+				t.Errorf("write response: %v", err)
+			}
 		}))
 		defer server.Close()
 
@@ -357,7 +365,9 @@ func TestRentcastProviderLookup(t *testing.T) {
 	t.Run("malformed JSON", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("not valid json"))
+			if _, err := w.Write([]byte("not valid json")); err != nil {
+				t.Errorf("write response: %v", err)
+			}
 		}))
 		defer server.Close()
 

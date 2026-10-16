@@ -222,8 +222,8 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 	err = tx.QueryRowContext(ctx,
 		`SELECT first_seen_ns, last_seen_ns, min_price_cents, price_cents, price_changed_at_ns, previous_price_cents, currency FROM offers WHERE id = ?`, o.ID,
 	).Scan(&prevFirst, &prevLast, &prevMin, &prevPrice, &prevChanged, &prevPrevious, &prevCurrency)
-	switch {
-	case err == nil:
+	switch err {
+	case nil:
 		// Price change: a different non-zero price stamps the observation
 		// time (never earlier than the stored stamp, a pre-column 0 meaning
 		// first_seen) and keeps the stored price as the previous one.
@@ -263,7 +263,7 @@ func (s *Store) Put(ctx context.Context, o offer.Offer) error {
 		if prevMin > 0 && (o.MinPriceSeen == 0 || prevMin < o.MinPriceSeen) {
 			o.MinPriceSeen = prevMin
 		}
-	case err == sql.ErrNoRows:
+	case sql.ErrNoRows:
 		// new offer
 	default:
 		return fmt.Errorf("sqliteoffer: read previous: %w", err)

@@ -101,7 +101,12 @@ mirror (`.github/workflows`) is a downstream public/release concern.
 ```
 go vet ./...
 go test ./... -count=1 -race
+scripts/lint.sh   # golangci-lint v2 (.golangci.yml); same command as the CI lint job
 ```
+
+CI runs all three (plus govulncheck) on every MR and on main, so there is no
+need to run the whole suite or the linter by hand before pushing; run the
+tests for the packages you changed and let the pipeline do the rest.
 
 Issue tracking is [beads](https://github.com/steveyegge/beads) (`bd ready`), not
 markdown TODOs.

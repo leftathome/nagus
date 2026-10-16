@@ -640,7 +640,7 @@ func (c *Connector) verifyWith(raw []byte, temporary *atomic.Bool) (Message, str
 			return Message{}, whyNotSender
 		}
 	}
-	if !(c.cfg.TrustAuthResults && c.dkimVerified(h.Values("Authentication-Results"), domain)) && !c.dkimSigned(raw, domain, temporary) {
+	if (!c.cfg.TrustAuthResults || !c.dkimVerified(h.Values("Authentication-Results"), domain)) && !c.dkimSigned(raw, domain, temporary) {
 		if c.cfg.Logf != nil {
 			c.cfg.Logf("imapmail %s: REJECTED a message claiming to be from %s without a verified DKIM pass for %s (possible spoof)",
 				c.cfg.Name, addr, domain)

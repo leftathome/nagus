@@ -173,7 +173,9 @@ func TestKeyIsOpaqueAndStable(t *testing.T) {
 		{"a@x", "m", "12"}, {"a@x", "m1", "2"}, {"b@x", "m", "1"},
 	} {
 		var n int
-		fmt.Sscan(c[2], &n)
+		if _, err := fmt.Sscan(c[2], &n); err != nil {
+			t.Fatalf("sscan %q: %v", c[2], err)
+		}
 		k := Key(c[0], c[1], n)
 		if prev, dup := seen[k]; dup {
 			t.Fatalf("collision: %v and %s", c, prev)

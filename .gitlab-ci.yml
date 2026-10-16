@@ -214,6 +214,55 @@ vulncheck:
     - if: '$CI_COMMIT_TAG'
 
 # ---------------------------------------------------------------------------
+# lint -- golangci-lint v2 (.golangci.yml: govet, staticcheck, errcheck,
+# ineffassign, unused; gofumpt + goimports formatters, quark parity). Added
+# 2026-10-16 (nagus-cxj) so agents stop running the linter by hand: the job
+# runs scripts/lint.sh, the same command as a local run.
+#
+# IMAGE PINNED BY SINGLE-PLATFORM DIGEST, never by tag -- same zot trap as
+# GO_IMAGE above (a fat index is a deterministic ~9m 404 that reads as
+# runner_system_failure). golangci/golangci-lint:v2.12.2 (quark's
+# GOLANGCI_LINT_VERSION) linux/amd64, resolved 2026-10-16 with
+#   crane digest --platform linux/amd64 docker.io/golangci/golangci-lint:v2.12.2
+# and checked with `crane manifest <ref>@<digest>` to be a single
+# application/vnd.oci.image.manifest.v1+json, not an index. Bump together with
+# GOLANGCI_LINT_VERSION in scripts/lint.sh.
+#
+# TOOLCHAIN. The image bundles Go 1.26.2 (its config GOLANG_VERSION); the gates
+# and the shipped binary use 1.26.9 (GO_IMAGE). GOTOOLCHAIN makes the image's go
+# switch to exactly 1.26.9, so the linter type-checks against the stdlib that
+# ships. Same minor as the linter's own build Go, so no version panic (a
+# v2.12.x linter panics against a newer MINOR such as go1.27). Bump with
+# GO_IMAGE. The toolchain download lands in GOMODCACHE, which is cached; the
+# fetch is retried in before_script because a download failure is not a finding
+# (same reasoning as vulncheck's install loop). Findings are script_failure and
+# are deliberately NOT retried (*infra_retry only).
+# ---------------------------------------------------------------------------
+lint:
+  stage: test
+  image: "docker.io/golangci/golangci-lint:v2.12.2@sha256:6ffe652d2215f590fcf6c6edcda8959c7a765a09378c200d31e098f7516f16c9"
+  retry: *infra_retry
+  variables:
+    GOTOOLCHAIN: "go1.26.9"
+  before_script:
+    - |
+      for i in 1 2 3 4 5; do
+        go version && break
+        [ "$i" = 5 ] && exit 1
+        echo "toolchain fetch failed (attempt $i), retrying in $((i * 10))s"
+        sleep $((i * 10))
+      done
+    - "golangci-lint version"
+  script:
+    - "sh scripts/lint.sh"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+
+# ---------------------------------------------------------------------------
 # test -- the MR/main unit gate (vet + race). Node selector / pod sizing come
 # from the included homelab/ci-templates global variables.
 #
@@ -268,6 +317,10 @@ test:
 # over those two. Sourcing the index from immutable per-commit tags is what stops
 # two concurrent pipelines stitching an index whose halves are different commits.
 #
+# Both legs need test AND lint (nagus-cxj): a red lint blocks the image build
+# exactly like a red test. vulncheck has no needs: and so already waits for
+# the whole test stage, lint included.
+#
 # Do NOT set MULTIARCH here; the legs assert it themselves. Setting it on one leg
 # only would make the other publish to the unsuffixed tags and quietly leave
 # :latest single-arch.
@@ -276,7 +329,7 @@ build-amd64:
   tags: [cluster]
   extends: .kaniko-build-amd64
   stage: build
-  needs: ["test"]
+  needs: ["test", "lint"]
   retry: *build_retry
   rules: *build_rules
   variables:
@@ -287,7 +340,7 @@ build-arm64:
   tags: [cluster]
   extends: .kaniko-build-arm64
   stage: build
-  needs: ["test"]
+  needs: ["test", "lint"]
   retry: *build_retry
   rules: *build_rules
   variables:
