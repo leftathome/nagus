@@ -29,8 +29,8 @@ stages:
 variables:
   # The Go toolchain for the GATES (test + vulncheck). Pinned to an explicit
   # patch version, and it MUST equal the version the Dockerfile's digest-pinned
-  # builder resolves to -- golang:1.26.6 amd64 is
-  # sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0,
+  # builder resolves to -- golang:1.26.9 amd64 is
+  # sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea,
   # which is exactly the Dockerfile's build-amd64 pin. Bump both together.
   #
   # WHY PINNED (nagus-ghb, 2026-08-30). This was the floating tag `golang:1.26`,
@@ -74,16 +74,16 @@ variables:
   # both pin `docker.io/golang:1.26@sha256:...` by digest and both are green;
   # only nagus used the tag, and only nagus was red.
   #
-  # The digest below IS golang 1.26.6 linux/amd64 -- verified by reading its
-  # config blob (GOLANG_VERSION=1.26.6) -- and is byte-identical to the
+  # The digest below IS golang 1.26.9 linux/amd64 -- verified by reading its
+  # config blob (GOLANG_VERSION=1.26.9, 2026-10-16; was 1.26.6) -- and is byte-identical to the
   # Dockerfile's build-amd64 pin. So this does not merely restore the gate, it
   # makes "the gate runs what ships" structural instead of a comment two humans
   # have to keep in sync. The gates run amd64 (ci-templates defaults
   # KUBERNETES_NODE_SELECTOR_ARCH to amd64), so the amd64 pin is the correct one.
   #
   # Refresh together with the Dockerfile when bumping the base:
-  #   crane digest --platform linux/amd64 docker.io/library/golang:1.26
-  GO_IMAGE: "docker.io/golang:1.26@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
+  #   crane digest --platform linux/amd64 docker.io/library/golang:1.26.9
+  GO_IMAGE: "docker.io/golang:1.26@sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea"
   GOPATH: "$CI_PROJECT_DIR/.cache/go"
   GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
   GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"

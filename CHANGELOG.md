@@ -256,6 +256,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Go 1.26.9 and golang.org/x/net v0.60.0** (security). The CI gate image
+  and the Dockerfile builders move from golang 1.26.6 to 1.26.9, pinned by
+  single-platform digest (amd64 `sha256:cf7e928c...`, arm64
+  `sha256:0275e2ab...`), for GO-2026-6617, -6613, -6612, -6611, -6610,
+  -6608, -6607 and -6605 (net/http, net/textproto, crypto/tls); x/net
+  v0.58.0 -> v0.60.0 for its advisories. govulncheck: no called
+  vulnerabilities.
+
 - **Wine extractor: colour and style words are evidence only where they name
   the wine** (nagus-dwq). Before, a colour or style word anywhere in the
   title made merchandise wine: "Chateau Ste Michelle Columbia Valley Red
