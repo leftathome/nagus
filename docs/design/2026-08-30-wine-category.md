@@ -99,6 +99,22 @@ ingested corpus serves watches for ANY destination, and a rules change
 converges on the next poll's re-stamp. A surface picks `wineShipTo` and the
 generic `score.Filter.HasToken` predicate enforces it.
 
+**Operator override, per seller (`wineShipsTo`, nagus-3ua, 2026-10-16).** The
+model knows only channel + origin, so a retailer that ships nationwide under
+its own licences (wine.com: origin US-CA, ships to WA) is computed as unable
+to reach most states. A source may declare `wineShipsTo` -- subdivision codes
+(`US-WA`) or a bare country (`US` = every US subdivision the rules table
+models) -- OPERATOR-DECLARED FROM THE SELLER'S OWN SHIPPING POLICY. It
+REPLACES the computed legal-destination set for that source only (still
+narrowed by a listing's own `ships_to`). Startup refuses an empty list, a
+malformed code, a destination the table does not model AS ITSELF (a
+subdivision must be its own entry: `FR-75` does not pass on France's), and
+the key on a non-wine source; `wineShipsTo: null` is the same as leaving it
+out. At startup the source logs the destinations its declaration adds
+beyond the default legal model, so the override is visible.
+It is a claim the operator makes about one seller, not a change to the law
+model; every other source is unaffected.
+
 ### 1.4 Currency: an international corpus needs FX or an honest "unknown"
 
 Going international introduces a trap this codebase has hit before in other

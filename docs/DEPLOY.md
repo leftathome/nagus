@@ -104,6 +104,20 @@ outbound source-API creds -- one secret, one property per source).
 | Rentcast (land) | `eso/nagus/sources` -> `rentcast_key` | `NAGUS_RENTCAST_KEY` | `land.rentcastExternalSecret` (or `land.rentcastSecret` override) |
 | eBay OAuth (hdd live ingest) | `eso/nagus/sources` -> `ebay_client_id`, `ebay_client_secret` | `NAGUS_EBAY_CLIENT_ID`, `NAGUS_EBAY_CLIENT_SECRET` | `externalSecret` (or `ebay.existingSecret` override) |
 | Zillapi (land live ingest) | `eso/nagus/sources` -> `zillapi_key` | `NAGUS_ZILLAPI_KEY` | `land.zillapiExternalSecret` (or `land.zillapiSecret` override) |
+| Vision endpoint key (promo-vision-v1) | `eso/nagus/vision` -> `api_key` (chart default; a LiteLLM virtual key for nagus) | `NAGUS_VISION_API_KEY` | `vision.apiKeyExternalSecret` (optional secretKeyRef: missing = promo reading off) |
+
+### Retailer promo mail (promo-vision-v1)
+
+Image-only retailer newsletters on the deals mailbox are read by a vision
+model (design: [`docs/design/2026-10-16-promo-vision.md`](design/2026-10-16-promo-vision.md)).
+One imap source per retailer, `imapParser: promo-vision-v1`, `promoProfile`
+one of `newegg`, `winecom`, `totalwine`, `imapSenders` the retailer's real
+newsletter addresses (gitops only), and for wine `wineChannel`/`origin`.
+Chart values `vision.baseURL`, `vision.model`, `vision.maxCallsPerPoll`,
+`vision.maxCallsPerDay`, `vision.timeout` and `vision.apiKeyExternalSecret`
+render `NAGUS_VISION_*`. nagus fetches images from the profiles' image CDNs
+and follows tracked links once (egress to those hosts and the retailers'
+redirectors); it never stores a tracked URL.
 
 The demo path (`demo.enabled=true`) needs no secrets at all.
 

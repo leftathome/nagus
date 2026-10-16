@@ -164,6 +164,34 @@ quark:
       key: eso/quark/consumers
       property: nagus_bearer_token
 
+# vision: retailer promo mail read by a vision model (imapParser
+# promo-vision-v1, nagus-3ua; nagus docs/design/2026-10-16-promo-vision.md).
+# OFF unless baseURL, model AND the API key are all present: promo sources
+# then poll IMAP but fetch and read nothing. The endpoint is OpenAI-compatible
+# (LiteLLM's /v1). The GPU host is shared, so calls are budgeted per source
+# poll and per UTC day.
+vision:
+  # e.g. http://litellm.litellm.svc.cluster.local:4000/v1
+  baseURL: ""
+  # e.g. qwen3.6-35b-vllm-nothink (any model declared to accept images)
+  model: ""
+  # Empty = binary defaults (60 per poll, 600 per day, 90s per call).
+  maxCallsPerPoll: ""
+  maxCallsPerDay: ""
+  timeout: ""
+  # The API key, as NAGUS_VISION_API_KEY, synced into its own Secret and
+  # referenced OPTIONALLY: a missing key turns the feature off, it never holds
+  # the pod in CreateContainerConfigError.
+  apiKeyExternalSecret:
+    enabled: false
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    remoteRef:
+      key: eso/nagus/vision
+      property: api_key
+
 # glovebox: the out-of-process sanitize gate every ingested listing crosses
 # (nagus-9ib). OFF while sanitizeURL is empty: nagus keeps its in-process
 # Passthrough. With sanitizeURL set and the token synced, every listing is

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -71,6 +72,9 @@ type categoryOpts struct {
 	// deals is the state every deal-submission source shares (nagus-4uu);
 	// nil when none is configured (a lone deal source then gets its own).
 	deals *deal.Hub
+	// promo is the state every promo-vision-v1 source shares (nagus-3ua);
+	// nil outside serve (a lone promo source then gets its own).
+	promo *promoRuntime
 	// sanitizer is the trust boundary every ingested listing crosses; nil is
 	// the in-process Passthrough. Set from NAGUS_GLOVEBOX_SANITIZE_URL and
 	// NAGUS_GLOVEBOX_TOKEN by sanitizerFromEnv (nagus-9ib).
@@ -280,6 +284,9 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if isDealSource(s) {
 			return buildDealConnector(s, o)
 		}
+		if isPromoSource(s) {
+			return buildPromoConnector(s, o)
+		}
 		p, err := imapmail.Lookup(s.IMAPParser)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
@@ -391,9 +398,10 @@ func retentionForSource(s SourceConfig) (staleAfter time.Duration, ret offer.Ret
 	}
 	// Three missed polls before an offer is considered gone.
 	expireAfter = 3 * interval
-	if isDealSource(s) {
-		// A submitted deal surfaces while its email is inside the lookback
-		// window: once no poll refreshes the item it goes (nagus-4uu).
+	if isMailDealSource(s) {
+		// A submitted deal (or a retailer promo product, nagus-3ua) surfaces
+		// while its email is inside the lookback window: once no poll
+		// refreshes the item it goes (nagus-4uu).
 		return max(expireAfter, 24*time.Hour), offer.Retention{Policy: offer.RetainFull}, expireAfter
 	}
 	switch s.Type {
@@ -411,6 +419,9 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 	conn, err := buildConnectorForSource(s, cc, o)
 	if err != nil {
 		return nil, err
+	}
+	if s.WineShipsTo != nil && s.Category != "wine" {
+		return nil, fmt.Errorf("source %q: wineShipsTo applies to wine sources only", s.Name)
 	}
 	staleAfter, offerRetention, expireAfter := retentionForSource(s)
 	if offerRetention.Policy == offer.RetainFull {
@@ -446,7 +457,7 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		ing.TextHints = s.QuarkTextHints
 		// A submitted drive's brand/mpn/gtin reach quark only after the gate
 		// passed the line (rv35 I3).
-		ing.HintsNeedGate = isDealSource(s)
+		ing.HintsNeedGate = isMailDealSource(s)
 		withDealLedger(ing, conn)
 		return ing, nil
 	case "land":
@@ -473,6 +484,12 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		}
 		deps.Producer = s.WineProducer
 		deps.ProducerFromBody = s.ProducerFromBody
+		if s.WineShipsTo != nil {
+			if len(*s.WineShipsTo) == 0 {
+				return nil, fmt.Errorf("source %q: wineShipsTo is empty; omit it to use the default legal model", s.Name)
+			}
+			deps.ShipsTo = *s.WineShipsTo
+		}
 		// Name hints to quark need BOTH the global switch and this source's
 		// opt-in: the same pair that used to gate LWIN stamping, so the same
 		// sources are identified.
@@ -480,7 +497,11 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		// A deal-submission source is opted in by its type: the sender named
 		// the producer on purpose (the deal's brand), which is the review the
 		// per-source switch exists for. The global switch still applies.
-		deps.LWINStamp = deps.LWINStamp && (s.LWINStamp || isDealSource(s))
+		//
+		// A promo source is opted in the same way: its producer is the brand
+		// both vision reads agreed on, and it reaches quark only after the
+		// gate passed the listing.
+		deps.LWINStamp = deps.LWINStamp && (s.LWINStamp || isMailDealSource(s))
 		ing, err := category.NewWineIngester(conn, src, deps)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
@@ -500,6 +521,11 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 func withDealLedger(ing *pipeline.Ingester, conn listing.Connector) {
 	if hub := dealHubOf(conn); hub != nil {
 		ing.AfterIngest = hub.Ledger.AfterIngest(ing.SourceID())
+	}
+	// A promo source counts its gate and category drops (nagus-3ua).
+	if m := promoMetricsOf(conn); m != nil {
+		src := ing.SourceID()
+		ing.AfterIngest = func(_ context.Context, res pipeline.IngestResult) { m.ObserveIngest(src, res) }
 	}
 }
 

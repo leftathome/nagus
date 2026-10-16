@@ -8,6 +8,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade notes
 
+- **Retailer promo mail read by a vision model** (nagus-3ua,
+  `promo-vision-v1`; design `docs/design/2026-10-16-promo-vision.md`). Inert
+  until configured: add one imap source per retailer (`imapParser:
+  promo-vision-v1`, `promoProfile`, `imapSenders` = the retailer's real
+  newsletter addresses, gitops only) and the chart's `vision.*` values
+  (chart 0.15.0): `NAGUS_VISION_BASE_URL`, `NAGUS_VISION_MODEL` and the key
+  `NAGUS_VISION_API_KEY` from `vision.apiKeyExternalSecret` (Vault
+  `eso/nagus/vision#api_key` by default, optional reference). Budgets:
+  `NAGUS_VISION_MAX_CALLS_PER_POLL` (60), `NAGUS_VISION_MAX_CALLS_PER_DAY`
+  (600), `NAGUS_VISION_TIMEOUT` (90s). No table changes.
+
 - **New table `offer_price_history`** (nagus-0ta; Postgres, SQLite, memory).
   `CREATE TABLE IF NOT EXISTS` on startup: catalog-only, no backfill and no
   seeding, so the upgrade costs nothing at any table size. History starts at
@@ -256,6 +267,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Wine sources no longer hide an incomplete fetch** (nagus-3ua). The wine
+  bundle's channel tagger wrapped every wine connector without forwarding
+  `FetchComplete`, so a truncated catalogue walk (or a rate-limited one)
+  read as complete and could expire offers nagus never reached. It now
+  forwards it, as `deal.Source` does. **Behaviour change**: a wine source
+  whose fetch is incomplete (a Shopify walk stopped at `maxPages`, a
+  rate-limited or failed catalogue page) now skips offer expiry AND offer
+  retention for that poll, on every poll it stays incomplete, so its stale
+  offers stay active until a complete fetch. Spot it by the ingester line
+  `ingest: <source> fetch was incomplete; skipping offer expiry` and the
+  connectors' truncation warnings ("TRUNCATED", "stopped at N pages", "raise
+  maxPages"); none appeared in production logs in the 72 h before this
+  change.
+
 - **Go 1.26.9 and golang.org/x/net v0.60.0** (security). The CI gate image
   and the Dockerfile builders move from golang 1.26.6 to 1.26.9, pinned by
   single-platform digest (amd64 `sha256:cf7e928c...`, arm64
@@ -403,6 +428,52 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   short of the catalogue the walk stopped.
 
 ### Added
+
+- **`promo-vision-v1`: image-only retailer promo mail becomes deals**
+  (nagus-3ua, supersedes nagus-xgc). New package `internal/promo`: retailer
+  profiles as data (`newegg`, `winecom`, `totalwine`: sender domains, image
+  hosts, link and product hosts, canonical-URL rule, default category);
+  image selection from the HTML (pixels, spacers, logos, navigation and
+  off-host images skipped; per-message cap); https-only image fetch from
+  the profile's hosts (public addresses only, 2 MiB cap, content type and
+  sniffed type checked, bounded retries); two vision reads per image with
+  independently worded prompts, strict JSON, kept only when both agree on
+  the price and roughly on the title (price sanity: positive, was-price
+  above price, USD); canonical product URL from the Newegg item number or
+  by following the tracked link once (<= 5 hops, https, allowlisted hosts,
+  no cookies, the product page itself never requested; query, fragment and
+  tracking stripped); an hdd product must also look like a drive. Each
+  product goes through `deal.Decode`/`deal.ToRaw` like a submission, with
+  principal `retailer:<profile>` and offer aspects `offer_origin`
+  (`email_image`), `promo_profile`, `vision_model`, `compare_at_cents`.
+  Agent-facing rows of these sources carry `offer_origin`, `submitted_by`
+  and `offer_origin_note`. Per-poll and per-day vision budgets; a deferred
+  image leaves the fetch incomplete so nothing expires. Metrics
+  `nagus_promo_*` (messages, image stages, drop reasons, vision calls,
+  budgets). `deal_submission_status` does not cover retailer principals.
+  The two reads must also carry the same numbers (capacity, vintage); for
+  wine.com/Total Wine the product URL's slug must match the agreed title
+  (`link_title_mismatch`); a promo offer's `mail_message_id` is a tag, never
+  the retailer's Message-ID; readings are cached across mails by image
+  hash and mail is read newest first. The vision budget is in memory: a
+  restart starts a fresh daily allowance (nagus-p7x). Stored titles must
+  have every number confirmed by the second read; the link-slug check
+  compares content tokens (a producer's other wine is refused); prebuilt
+  PCs and NAS boxes are refused on hdd sources; a 401/403 from the vision
+  endpoint stops the poll without spending budget or attempts.
+- **`wineShipsTo`, a per-source operator shipping declaration** (any wine
+  source). Subdivision codes or a bare country (`US` = every modeled US
+  subdivision), declared from the seller's own shipping policy; it REPLACES
+  the legal-destination set computed from `wineChannel` + `origin` for that
+  source only. Startup refuses an empty list, malformed or unmodeled codes,
+  and the key on a non-wine source. Absent (or null), nothing changes; the
+  destinations a declaration adds beyond the default model are logged at
+  startup. The promo link-slug check also compares sizes (magnum, 1.5 L,
+  375 ml, N-pack) and refuses variant markers (rose, riserva, extra brut,
+  ...); titles and slugs are accent-folded; PC lines and NAS boxes are read
+  on the full hdd title. Other numbers in a slug and title (a Bin number)
+  must agree when both carry them, and wine.com slugs (which carry the
+  vintage) must carry the title's year.
 
 - **Offer price history** (nagus-0ta; design
   `docs/design/2026-10-03-offer-price-history.md`). An append-only

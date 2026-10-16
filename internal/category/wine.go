@@ -52,6 +52,9 @@ type channelTagger struct {
 	// store's descriptions carry the producer, which is not a guess nagus
 	// makes on its own.
 	producerFromBody bool
+	// declared, when non-nil, replaces the computed legal-destination set:
+	// the operator's declaration of where this seller ships.
+	declared []string
 }
 
 // producerLabelRe matches a description that opens with the producer, as
@@ -79,12 +82,26 @@ func TagWineChannel(conn listing.Connector, src shipping.Source, rules shipping.
 
 func (t *channelTagger) SourceID() string { return t.inner.SourceID() }
 
+// FetchComplete forwards the inner connector's completeness, which gates
+// offer expiry (nagus-3ua). Without it every wine source read as complete:
+// a truncated catalogue walk, or a promo source that deferred images to a
+// later poll, would have expired offers nagus simply had not reached.
+func (t *channelTagger) FetchComplete() bool {
+	if rc, ok := t.inner.(interface{ FetchComplete() bool }); ok {
+		return rc.FetchComplete()
+	}
+	return true
+}
+
 func (t *channelTagger) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	raws, err := t.inner.Fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
 	legalTo := strings.Join(t.rules.LegalDestinations(t.src), " ")
+	if t.declared != nil {
+		legalTo = strings.Join(t.declared, " ")
+	}
 	for i := range raws {
 		if raws[i].Aspects == nil {
 			raws[i].Aspects = map[string]string{}
@@ -168,6 +185,12 @@ type WineDeps struct {
 	// so one declared Producer cannot serve; the producer is an identity HINT
 	// (quark resolves identity; nagus only extracts what the listing says).
 	ProducerFromBody bool
+	// ShipsTo, when non-nil, is the OPERATOR's declaration of where this
+	// seller ships, from the seller's own shipping policy ("US-WA", or "US"
+	// for every US subdivision). It REPLACES the legal-destination set the
+	// rules table computes from channel and origin, for this source only.
+	// Validated at construction (well-formed, modeled, not empty).
+	ShipsTo []string
 }
 
 // WineFilter builds the deterministic hard-filter for the wine category.
@@ -250,9 +273,33 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 	if err := src.Validate(); err != nil {
 		return nil, fmt.Errorf("wine: %w", err)
 	}
+	var declared []string
+	if deps.ShipsTo != nil {
+		d, err := deps.shipRules().ExpandDeclared(deps.ShipsTo)
+		if err != nil {
+			return nil, fmt.Errorf("wine: wineShipsTo: %w", err)
+		}
+		declared = d
+		// The override must be visible: say which destinations it adds
+		// beyond the default legal model.
+		if deps.Logf != nil {
+			computed := map[string]bool{}
+			for _, c := range deps.shipRules().LegalDestinations(src) {
+				computed[c] = true
+			}
+			var extra []string
+			for _, c := range d {
+				if !computed[c] {
+					extra = append(extra, c)
+				}
+			}
+			deps.Logf("wine source %s: wineShipsTo (operator-declared) replaces the default legal model; %d destination(s) beyond it: %s",
+				conn.SourceID(), len(extra), strings.Join(extra, " "))
+		}
+	}
 	ing := &pipeline.Ingester{
 		Connector: &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
-			producerFromBody: deps.ProducerFromBody},
+			producerFromBody: deps.ProducerFromBody, declared: declared},
 		Sanitizer:        sanitizerOr(deps.Sanitizer, "wine"),
 		Extractor:        extwine.New(),
 		Store:            deps.Store,

@@ -227,10 +227,13 @@ type Config struct {
 	// LookupTXT resolves DKIM public keys; nil = the system resolver.
 	LookupTXT    func(domain string) ([]string, error)
 	LookbackDays int
-	MaxBytes     int64
-	Parser       Parser
-	Now          func() time.Time
-	Logf         func(string, ...any)
+	// NewestFirst hands messages to the parser newest arrival first, so a
+	// parser with a call budget (promo-vision-v1) spends it on current mail.
+	NewestFirst bool
+	MaxBytes    int64
+	Parser      Parser
+	Now         func() time.Time
+	Logf        func(string, ...any)
 }
 
 // Connector implements listing.Connector.
@@ -446,6 +449,9 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 		msgs, err := cl.Fetch(set, opts).Collect()
 		if err != nil {
 			return nil, fmt.Errorf("imapmail %s: fetch: %w", c.cfg.Name, err)
+		}
+		if c.cfg.NewestFirst {
+			sort.SliceStable(msgs, func(i, j int) bool { return received[msgs[i].UID].After(received[msgs[j].UID]) })
 		}
 		for _, m := range msgs {
 			at := received[m.UID]

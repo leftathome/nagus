@@ -1,0 +1,41 @@
+{
+  "profiles": [
+    {
+      "name": "newegg",
+      "seller": "Newegg",
+      "category": "hdd",
+      "senderDomains": ["newegg.com"],
+      "imageHosts": ["c1.neweggimages.com", "c2.neweggimages.com"],
+      "productAlt": "^item_((?:[0-9]{2}-[0-9]{3}-[0-9]{3})|(?:9SI[0-9A-Z]{8,14})|(?:[0-9A-Z]{3}-[0-9A-Z]{4}-[0-9A-Z]{5}))$",
+      "linkHosts": ["l.promo.newegg.com"],
+      "productHosts": ["www.newegg.com"],
+      "canonical": "newegg-item",
+      "maxImages": 24
+    },
+    {
+      "name": "winecom",
+      "seller": "Wine.com",
+      "category": "wine",
+      "senderDomains": ["wine.com"],
+      "imageHosts": ["image.richrelevance.com"],
+      "linkHosts": ["links.e.wine.com"],
+      "productHosts": ["www.wine.com"],
+      "productPath": "^/product/[a-z0-9-]{1,120}/[0-9]{1,10}$",
+      "slugHasVintage": true,
+      "canonical": "follow-link",
+      "maxImages": 12
+    },
+    {
+      "name": "totalwine",
+      "seller": "Total Wine & More",
+      "category": "wine",
+      "senderDomains": ["email-totalwine.com", "totalwine.com"],
+      "imageHosts": ["mi.totalwine.com"],
+      "linkHosts": ["click.email-totalwine.com"],
+      "productHosts": ["www.totalwine.com"],
+      "productPath": "^/(?:[a-z0-9-]{1,80}/){1,5}p/[0-9]{1,10}$",
+      "canonical": "follow-link",
+      "maxImages": 12
+    }
+  ]
+}

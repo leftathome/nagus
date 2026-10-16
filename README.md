@@ -77,6 +77,15 @@ Household humans and agents can also email a deal nagus cannot see itself
 (in-store, image-only newsletters, tips) as one JSON object per line:
 [`docs/deal-submission.md`](docs/deal-submission.md).
 
+Image-only retailer newsletters on the same mailbox (Newegg, wine.com, Total
+Wine) are read automatically by a vision model (`promo-vision-v1`): product
+images are fetched from the retailer's own CDN, each is read twice with two
+independent prompts, a product is kept only when both reads agree on the
+price, and only a clean canonical product URL is stored. Rows from these
+sources carry `offer_origin: "email_image"` and `submitted_by:
+"retailer:<name>"` so agents can treat them as lower trust:
+[`docs/design/2026-10-16-promo-vision.md`](docs/design/2026-10-16-promo-vision.md).
+
 ## Boundaries
 
 - **glovebox** owns connectors + sanitization + extract/tokenize.

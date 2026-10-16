@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
+	"github.com/leftathome/nagus/internal/promo"
 	"github.com/leftathome/nagus/internal/store"
 	"github.com/leftathome/nagus/internal/watch"
 )
@@ -53,6 +55,9 @@ type server struct {
 	// deals is the deal-submission hub (nagus-4uu); nil when no deal source
 	// is configured. Read by the deal_submission_* MCP tools and /metrics.
 	deals *deal.Hub
+	// promo is the metrics of the promo-vision-v1 sources (nagus-3ua); nil
+	// when none is configured.
+	promo *promo.Metrics
 }
 
 func (s *server) clock() time.Time {
@@ -143,6 +148,9 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.deals != nil {
 		s.deals.Ledger.WriteMetrics(w)
+	}
+	if s.promo != nil {
+		s.promo.WriteMetrics(w)
 	}
 	if len(ebaySources) == 0 {
 		return
@@ -422,6 +430,11 @@ func runServe(args []string) error {
 	if opts.deals, err = buildDealHub(cfg.Sources, nil); err != nil {
 		return err
 	}
+	// One runtime for every promo source (nagus-3ua): the vision client
+	// and the daily call budget are shared, the GPU host is too.
+	if slices.ContainsFunc(cfg.Sources, isPromoSource) {
+		opts.promo = promoRuntimeFromEnv(logf)
+	}
 
 	surfaces := make(map[string]*pipeline.Surface, len(cfg.Categories))
 	for name, cc := range cfg.Categories {
@@ -454,6 +467,9 @@ func runServe(args []string) error {
 	}
 	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
 		sanitizer: opts.sanitizer, deals: opts.deals, sourcePolicies: buildSourcePolicies(cfg.Sources, ingesters)}
+	if opts.promo != nil {
+		srv.promo = opts.promo.metrics
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

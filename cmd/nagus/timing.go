@@ -13,11 +13,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
+	"github.com/leftathome/nagus/internal/promo"
 )
 
 // expires_basis values.
@@ -55,6 +57,10 @@ type sourcePolicy struct {
 	// License 8.1(b)): price-history points older than it are never served,
 	// even before retention deletes them (nagus-0ta).
 	historyMaxAge time.Duration
+	// origin and principal, when set, mark a source whose offers were read
+	// from retailer email images (promo-vision-v1, nagus-3ua): every row
+	// of it says so, so an agent can treat it as lower trust.
+	origin, principal string
 }
 
 // buildSourcePolicies derives each configured source's policy, keyed by the
@@ -71,7 +77,11 @@ func buildSourcePolicies(sources []SourceConfig, ingesters []*pipeline.Ingester)
 		if ret.Policy == offer.Purge {
 			p.historyMaxAge = ret.Window
 		}
-		if isDealSource(src) {
+		if isPromoSource(src) {
+			p.origin = promo.OriginEmailImage
+			p.principal = "retailer:" + strings.TrimSpace(src.PromoProfile)
+		}
+		if isMailDealSource(src) {
 			days := src.IMAPLookbackDays
 			if days <= 0 {
 				days = imapmail.DefaultLookbackDays
@@ -109,6 +119,13 @@ type OfferTiming struct {
 	ExpiresBasis string `json:"expires_basis,omitempty"`
 	// OfferNote is expiredNote on an expired listing.
 	OfferNote string `json:"offer_note,omitempty"`
+	// OfferOrigin, SubmittedBy and OfferOriginNote are set on rows of a
+	// source whose prices were machine-read from retailer email images
+	// (offer_origin "email_image", submitted_by "retailer:<profile>",
+	// nagus-3ua): lower trust than a catalogue feed.
+	OfferOrigin     string `json:"offer_origin,omitempty"`
+	SubmittedBy     string `json:"submitted_by,omitempty"`
+	OfferOriginNote string `json:"offer_origin_note,omitempty"`
 }
 
 func rfc3339(t time.Time) string {
@@ -132,12 +149,15 @@ func (s *server) timingFor(sm offer.Summary) *OfferTiming {
 		at := sm.PriceCents <= sm.MinPriceSeen
 		t.AtLowestPrice = &at
 	}
+	pol, known := s.sourcePolicies[sm.SourceID]
+	if known && pol.origin != "" {
+		t.OfferOrigin, t.SubmittedBy, t.OfferOriginNote = pol.origin, pol.principal, promo.OriginNote
+	}
 	if sm.Status == offer.StatusExpired {
 		t.ExpiredAt = rfc3339(sm.ExpiredAt)
 		t.OfferNote = expiredNote
 		return t
 	}
-	pol, known := s.sourcePolicies[sm.SourceID]
 	switch {
 	case known && pol.dealLookback > 0:
 		end := sm.EndsAt

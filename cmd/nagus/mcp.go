@@ -66,7 +66,9 @@ const offerFieldsDescription = "Each row carries its listing's offer fields: fir
 	"listed until its mail leaves nagus's read window (not the seller's end date); \"not_seen_3_polls\" = an ASSUMPTION " +
 	"(last_seen_at plus three poll intervals, when nagus would mark it gone if no poll sees it), never a stated deadline -- " +
 	"describe it as an estimate. A listing whose stated end has passed is hidden like an expired one (get_item marks it with " +
-	"offer_note). Times are RFC 3339 UTC. These fields are ABSENT (not zero) when the offer layer is off or " +
+	"offer_note). A row whose price was machine-read from a retailer's promotional email image carries offer_origin " +
+	"\"email_image\", submitted_by \"retailer:<name>\" and offer_origin_note: treat it as lower trust and confirm the price " +
+	"at the link. Times are RFC 3339 UTC. These fields are ABSENT (not zero) when the offer layer is off or " +
 	"a row has no offer (the release category never has one)."
 
 // searchItemsArgs is search_items' argument object. Every field is optional.
