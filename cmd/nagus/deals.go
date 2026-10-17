@@ -117,8 +117,12 @@ func buildDealHub(sources []SourceConfig, now func() time.Time) (*deal.Hub, erro
 		} else if !slices.Equal(lowerSet(s.IMAPSenders), lowerSet(first.IMAPSenders)) ||
 			!slices.Equal(lowerSet(s.IMAPForwarders), lowerSet(first.IMAPForwarders)) ||
 			aliasKey(s.IMAPSenderAliases) != aliasKey(first.IMAPSenderAliases) ||
-			s.IMAPMailbox != first.IMAPMailbox || s.IMAPLookbackDays != first.IMAPLookbackDays {
-			return nil, fmt.Errorf("source %q: every %s source must have the same imapSenders, imapForwarders, imapSenderAliases, imapMailbox and imapLookbackDays as %q",
+			s.IMAPMailbox != first.IMAPMailbox || s.IMAPLookbackDays != first.IMAPLookbackDays ||
+			!slices.Equal(lowerSet(s.IMAPTrustARCSealers), lowerSet(first.IMAPTrustARCSealers)) ||
+			!slices.Equal(lowerSet(s.IMAPTrustARCAuthservIDs), lowerSet(first.IMAPTrustARCAuthservIDs)) ||
+			!slices.Equal(lowerSet(s.IMAPTrustARCRecipients), lowerSet(first.IMAPTrustARCRecipients)) ||
+			s.IMAPTrustARCMaxAgeMinutes != first.IMAPTrustARCMaxAgeMinutes {
+			return nil, fmt.Errorf("source %q: every %s source must have the same imapSenders, imapForwarders, imapSenderAliases, imapMailbox, imapLookbackDays and ARC trust as %q",
 				s.Name, deal.ParserName, first.Name)
 		}
 		if s.DealSubmitTo != "" {
@@ -159,6 +163,8 @@ func buildDealConnector(s SourceConfig, o categoryOpts) (listing.Connector, erro
 		LookbackDays: s.IMAPLookbackDays, Parser: p, CountIgnored: true, Observe: hub.Observer(), Logf: o.logf,
 		Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 		Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
+		TrustARCSealers: s.IMAPTrustARCSealers, TrustARCAuthServ: s.IMAPTrustARCAuthservIDs,
+		TrustARCRecipients: s.IMAPTrustARCRecipients, ARCMaxAge: time.Duration(s.IMAPTrustARCMaxAgeMinutes) * time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", s.Name, err)

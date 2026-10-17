@@ -84,6 +84,7 @@ import (
 	"github.com/emersion/go-msgauth/dkim"
 	"golang.org/x/net/publicsuffix"
 
+	"github.com/leftathome/nagus/internal/arc"
 	"github.com/leftathome/nagus/internal/listing"
 )
 
@@ -218,6 +219,22 @@ type Config struct {
 	// TrustedAuthServ are authserv-ids whose Authentication-Results header is
 	// trusted when TrustAuthResults is on; empty = DefaultTrustedAuthServ.
 	TrustedAuthServ []string
+	// TrustARCSealers turns on ARC trust (OFF when empty): when direct DKIM
+	// of a message fails, its TOP ARC set is accepted if sealed by one of
+	// these d= domains, the seal verifies, the ARC-Authentication-Results'
+	// authserv-id is in TrustARCAuthServ, and it records dkim=pass for a
+	// domain aligned with the sender's. For a mailbox whose storage alters
+	// bodies after its MX verified them (ForwardEmail). Both lists are
+	// required together.
+	TrustARCSealers  []string
+	TrustARCAuthServ []string
+	// TrustARCRecipients are this mailbox's own addresses as they appear in
+	// To: an ARC-accepted message must have exactly one To naming one of
+	// them. Required with ARC trust.
+	TrustARCRecipients []string
+	// ARCMaxAge bounds how long before receipt the top seal was made; 0 =
+	// DefaultARCMaxAge.
+	ARCMaxAge time.Duration
 	// Forwarders are addresses whose DKIM-verified forwards of this sender's
 	// mail are accepted as the sender's (the household's own mailboxes).
 	Forwarders []string
@@ -333,6 +350,32 @@ func NewConnector(cfg Config) (*Connector, error) {
 	}
 	cfg.Forwarders = fwd
 	cfg.DKIMDomain = strings.ToLower(cfg.DKIMDomain)
+	sealers, authserv := normDomains(cfg.TrustARCSealers), normDomains(cfg.TrustARCAuthServ)
+	if (len(sealers) == 0) != (len(authserv) == 0) {
+		return nil, errors.New("imapmail: ARC trust needs both trusted sealers and trusted authserv-ids")
+	}
+	for _, d := range append(append([]string{}, sealers...), authserv...) {
+		if !validDomain(d) {
+			return nil, fmt.Errorf("imapmail: ARC trust: %q is not a domain name", d)
+		}
+	}
+	var recips []string
+	for _, a := range cfg.TrustARCRecipients {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if _, err := netmail.ParseAddress(a); err != nil || !strings.Contains(a, "@") {
+			return nil, fmt.Errorf("imapmail: ARC trust: recipient %q is not an address", a)
+		}
+		if !slices.Contains(recips, a) {
+			recips = append(recips, a)
+		}
+	}
+	if len(sealers) > 0 && len(recips) == 0 {
+		return nil, errors.New("imapmail: ARC trust needs the mailbox's recipient addresses (TrustARCRecipients)")
+	}
+	if cfg.ARCMaxAge < 0 {
+		return nil, errors.New("imapmail: ARC max age must not be negative")
+	}
+	cfg.TrustARCSealers, cfg.TrustARCAuthServ, cfg.TrustARCRecipients = sealers, authserv, recips
 	if cfg.TrustAuthResults && len(cfg.TrustedAuthServ) == 0 {
 		cfg.TrustedAuthServ = DefaultTrustedAuthServ
 	}
@@ -464,7 +507,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			for _, b := range m.BodySection {
 				raw = b.Bytes
 			}
-			msg, why, temporary := c.verifyMessage(raw)
+			msg, why, temporary := c.verifyMessage(raw, at)
 			if why != "" {
 				skipped[why]++
 				if !temporary {
@@ -591,22 +634,29 @@ func (c *Connector) dial() (*imapclient.Client, error) {
 // declared forwarder) with a DKIM pass for that address's domain. A non-empty
 // reason means it was skipped.
 func (c *Connector) verify(raw []byte) (Message, string) {
-	m, why, _ := c.verifyMessage(raw)
+	m, why, _ := c.verifyMessage(raw, time.Time{})
+	return m, why
+}
+
+// verifyAt is verify for a message the server received at received (IMAP
+// INTERNALDATE), which the ARC path needs for its recency check.
+func (c *Connector) verifyAt(raw []byte, received time.Time) (Message, string) {
+	m, why, _ := c.verifyMessage(raw, received)
 	return m, why
 }
 
 // verifyMessage is verify, also reporting whether a refusal is TEMPORARY (a
 // DNS lookup that failed or timed out): only permanent refusals are
 // remembered.
-func (c *Connector) verifyMessage(raw []byte) (Message, string, bool) {
+func (c *Connector) verifyMessage(raw []byte, received time.Time) (Message, string, bool) {
 	// Atomic: go-msgauth verifies a message's signatures concurrently, so
 	// several key lookups may report a temporary failure at once (rv35c R1).
 	var temporary atomic.Bool
-	m, why := c.verifyWith(raw, &temporary)
+	m, why := c.verifyWith(raw, received, &temporary)
 	return m, why, temporary.Load() && why == whyNoDKIM
 }
 
-func (c *Connector) verifyWith(raw []byte, temporary *atomic.Bool) (Message, string) {
+func (c *Connector) verifyWith(raw []byte, received time.Time, temporary *atomic.Bool) (Message, string) {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
 		return Message{}, "unparseable"
@@ -640,7 +690,22 @@ func (c *Connector) verifyWith(raw []byte, temporary *atomic.Bool) (Message, str
 			return Message{}, whyNotSender
 		}
 	}
-	if (!c.cfg.TrustAuthResults || !c.dkimVerified(h.Values("Authentication-Results"), domain)) && !c.dkimSigned(raw, domain, temporary) {
+	path := ""
+	switch {
+	case c.cfg.TrustAuthResults && c.dkimVerified(h.Values("Authentication-Results"), domain):
+		path = PathAuthResults
+	case c.dkimSigned(raw, domain, temporary):
+		path = PathDKIM
+	case len(c.cfg.TrustARCSealers) > 0 && c.arcVerified(raw, h, addr, domain, received, temporary):
+		// Only after direct DKIM failed, and only for a source that opted
+		// in: the mailbox's own MX verified DKIM on receipt and sealed
+		// that verdict; its storage later altered the body.
+		path = PathARC
+	}
+	if path != "" {
+		countAuth(path)
+	}
+	if path == "" {
 		if c.cfg.Logf != nil {
 			c.cfg.Logf("imapmail %s: REJECTED a message claiming to be from %s without a verified DKIM pass for %s (possible spoof)",
 				c.cfg.Name, addr, domain)
@@ -785,6 +850,166 @@ func (c *Connector) dkimSigned(raw []byte, domain string, temporary *atomic.Bool
 	return false
 }
 
+// Authentication paths, the closed label set of AuthStats.
+const (
+	PathDKIM        = "dkim"
+	PathAuthResults = "auth_results"
+	PathARC         = "arc"
+)
+
+// AuthPaths in metric order.
+var AuthPaths = []string{PathDKIM, PathAuthResults, PathARC}
+
+var authCounts sync.Map // path -> *atomic.Int64
+
+func countAuth(path string) {
+	v, _ := authCounts.LoadOrStore(path, &atomic.Int64{})
+	v.(*atomic.Int64).Add(1)
+}
+
+// AuthStats returns, per path, how many message verifications that path
+// authenticated in this process (every poll re-verifies the window, so these
+// count verifications, not distinct messages).
+func AuthStats() map[string]int64 {
+	out := map[string]int64{}
+	for _, p := range AuthPaths {
+		if v, ok := authCounts.Load(p); ok {
+			out[p] = v.(*atomic.Int64).Load()
+		} else {
+			out[p] = 0
+		}
+	}
+	return out
+}
+
+// DefaultARCMaxAge is how long before the server received a message its
+// top ARC seal may have been made.
+const DefaultARCMaxAge = time.Hour
+
+// arcClockSkew is how far after the receive time a seal may claim to be.
+const arcClockSkew = 5 * time.Minute
+
+// arcVerified reports whether the message's top ARC set makes it genuine
+// mail from domain, delivered to THIS mailbox recently (nagus-25g; see
+// internal/arc for what the seal and the AMS bind):
+//
+//   - the top seal is by a trusted sealer and verifies, and the top AMS
+//     verifies over this message's From, To, Subject and Date (the body is
+//     not bound: storage rewrote it);
+//   - the seal was made within ARCMaxAge before the server received the
+//     message (INTERNALDATE), so an old seal cannot be replayed;
+//   - the message has exactly one To, naming one of TrustARCRecipients: a
+//     seal replayed from another mailbox carries that mailbox's address;
+//   - the top ARC-Authentication-Results comes from a trusted authserv-id and
+//     records dkim=pass for a domain aligned with domain (the same rule as
+//     direct DKIM); when it names the signature (header.b, header.s), a
+//     DKIM-Signature of this message must match it.
+func (c *Connector) arcVerified(raw []byte, h mail.Header, addr, domain string, received time.Time, temporary *atomic.Bool) bool {
+	if received.IsZero() {
+		return false
+	}
+	ch, err := arc.Verify(raw, arc.Options{LookupTXT: c.boundedLookup(temporary), TrustedSealers: c.cfg.TrustARCSealers})
+	if err != nil {
+		return false
+	}
+	maxAge := c.cfg.ARCMaxAge
+	if maxAge <= 0 {
+		maxAge = DefaultARCMaxAge
+	}
+	if ch.SealTime.After(received.Add(arcClockSkew)) || ch.SealTime.Before(received.Add(-maxAge)) {
+		return false
+	}
+	if len(h.Values("To")) != 1 {
+		return false
+	}
+	// EXACTLY one address, and it is this mailbox's: with several, a
+	// co-recipient of a genuine sealed message could replay it with another
+	// body (the body is not bound). A group with one member reduces to that
+	// member; an empty group has none. Bcc co-recipients are invisible here
+	// and are the accepted residual risk (design doc, "ARC trust").
+	to, err := h.AddressList("To")
+	if err != nil || len(to) != 1 || !slices.Contains(c.cfg.TrustARCRecipients, strings.ToLower(to[0].Address)) {
+		return false
+	}
+	if !slices.Contains(c.cfg.TrustARCAuthServ, ch.AuthServID) {
+		return false
+	}
+	sigs := dkimSignatures(h)
+	for _, r := range ch.Results {
+		if r.Method != "dkim" || r.Value != "pass" {
+			continue
+		}
+		d := strings.ToLower(r.Props["header.d"])
+		if d == "" {
+			if i := r.Props["header.i"]; strings.Contains(i, "@") {
+				d = strings.ToLower(i[strings.LastIndex(i, "@")+1:])
+			}
+		}
+		if !aligned(d, domain) || !namesASignature(r.Props, d, sigs) {
+			continue
+		}
+		if c.cfg.Logf != nil {
+			c.cfg.Logf("imapmail %s: accepted a message from %s via the ARC seal of %s (i=%d, authserv %s, dkim=pass for %s); direct DKIM of the stored copy failed",
+				c.cfg.Name, addr, ch.Sealer, ch.Instance, ch.AuthServID, d)
+		}
+		return true
+	}
+	return false
+}
+
+type dkimSig struct{ d, s, b string }
+
+// dkimSignatures are the message's DKIM-Signature d=, s= and b= values.
+func dkimSignatures(h mail.Header) []dkimSig {
+	var out []dkimSig
+	for _, v := range h.Values("DKIM-Signature") {
+		sig := dkimSig{}
+		for _, part := range strings.Split(v, ";") {
+			k, val, ok := strings.Cut(part, "=")
+			if !ok {
+				continue
+			}
+			val = strings.Join(strings.Fields(val), "")
+			switch strings.TrimSpace(k) {
+			case "d":
+				sig.d = strings.ToLower(val)
+			case "s":
+				sig.s = val
+			case "b":
+				sig.b = val
+			}
+		}
+		out = append(out, sig)
+	}
+	return out
+}
+
+// minHeaderB is the shortest header.b prefix accepted (RFC 6008 asks for
+// at least 8 characters).
+const minHeaderB = 8
+
+// namesASignature: when the result names a signature (header.b, a prefix of
+// its b= of at least minHeaderB characters; header.s, its selector), one of
+// the message's DKIM-Signatures by domain d must match it. A result that
+// names none matches. This is a CONSISTENCY check, not a security boundary:
+// the verdict's integrity comes from the seal, and the quote-aware AAR
+// tokenizer is what stops a smuggled identity.
+func namesASignature(props map[string]string, d string, sigs []dkimSig) bool {
+	b, s := props["header.b"], props["header.s"]
+	if b == "" && s == "" {
+		return true
+	}
+	if b != "" && len(b) < minHeaderB {
+		return false
+	}
+	for _, sig := range sigs {
+		if aligned(sig.d, d) && aligned(d, sig.d) && (b == "" || strings.HasPrefix(sig.b, b)) && (s == "" || sig.s == s) {
+			return true
+		}
+	}
+	return false
+}
+
 // coversFrom reports whether a signature's h= covers From. go-msgauth
 // already refuses one that does not; this keeps the rule explicit here.
 func coversFrom(keys []string) bool {
@@ -863,6 +1088,21 @@ func aligned(d, domain string) bool {
 	}
 	return strings.Contains(d, ".")
 }
+
+func normDomains(in []string) []string {
+	var out []string
+	for _, d := range in {
+		if d = strings.ToLower(strings.TrimSpace(d)); d != "" && !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+var domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
+
+// validDomain is a lower-case DNS name of at least two labels.
+func validDomain(d string) bool { return len(d) <= 253 && domainRe.MatchString(d) }
 
 func domainOf(addr string) string {
 	return strings.ToLower(addr[strings.LastIndex(addr, "@")+1:])

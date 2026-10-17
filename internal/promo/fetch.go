@@ -32,6 +32,19 @@ const (
 // imageTypes are the content types an image may have.
 var imageTypes = []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 
+// normImageType lower-cases a declared Content-Type, drops its parameters,
+// and maps the non-standard JPEG spellings some CDNs send (image.richrelevance.com
+// answers "image/jpg") onto image/jpeg. The sniffed type is still required
+// to be an image.
+func normImageType(v string) string {
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(v, ";", 2)[0]))
+	switch ct {
+	case "image/jpg", "image/pjpeg", "image/jpe":
+		return "image/jpeg"
+	}
+	return ct
+}
+
 // ErrPrivateAddress is returned by the public dialer for an address that is
 // not a public unicast one.
 var ErrPrivateAddress = errors.New("promo: refusing to connect to a non-public address")
@@ -197,7 +210,7 @@ func (f *Fetcher) fetchOnce(ctx context.Context, u *url.URL, hosts []string) (Im
 		case resp.StatusCode != http.StatusOK:
 			return Image{}, &FetchError{Reason: DropImgHTTPError}
 		}
-		ct := strings.ToLower(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]))
+		ct := normImageType(resp.Header.Get("Content-Type"))
 		if !slices.Contains(imageTypes, ct) {
 			return Image{}, &FetchError{Reason: DropNotImage}
 		}

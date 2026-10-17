@@ -127,7 +127,7 @@ func TestManyTimingOutSignaturesAreRaceFree(t *testing.T) {
 		c.LookupTXT = func(string) ([]string, error) { calls.Add(1); <-block; return nil, nil }
 	})
 	start := time.Now()
-	_, why, temporary := c.verifyMessage([]byte(raw))
+	_, why, temporary := c.verifyMessage([]byte(raw), time.Time{})
 	if why == "" || !temporary || calls.Load() < 2 || time.Since(start) > 3*time.Second {
 		t.Fatalf("why=%q temporary=%v lookups=%d elapsed=%v", why, temporary, calls.Load(), time.Since(start))
 	}

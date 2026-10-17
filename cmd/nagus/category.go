@@ -287,6 +287,9 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if isPromoSource(s) {
 			return buildPromoConnector(s, o)
 		}
+		if arcTrustDeclared(s) {
+			return nil, fmt.Errorf("source %q: ARC trust (imapTrustARC*) is only for promo-vision-v1 and deal-jsonl-v1 sources", s.Name)
+		}
 		p, err := imapmail.Lookup(s.IMAPParser)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)

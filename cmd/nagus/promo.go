@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/promo"
 )
 
@@ -165,6 +167,8 @@ func buildPromoConnector(s SourceConfig, o categoryOpts) (listing.Connector, err
 		Parser: p, Logf: o.logf, NewestFirst: true,
 		Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 		Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
+		TrustARCSealers: s.IMAPTrustARCSealers, TrustARCAuthServ: s.IMAPTrustARCAuthservIDs,
+		TrustARCRecipients: s.IMAPTrustARCRecipients, ARCMaxAge: time.Duration(s.IMAPTrustARCMaxAgeMinutes) * time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", s.Name, err)
@@ -178,4 +182,33 @@ func promoMetricsOf(c listing.Connector) *promo.Metrics {
 		return ps.Metrics()
 	}
 	return nil
+}
+
+// writeIMAPAuthMetrics renders how the imap sources authenticated mail (direct
+// DKIM, a trusted Authentication-Results header, or a trusted ARC seal), when
+// any imap source is configured.
+func writeIMAPAuthMetrics(w io.Writer, ingesters []*pipeline.Ingester) {
+	has := false
+	for _, ing := range ingesters {
+		if strings.HasPrefix(ing.SourceID(), imapmail.SourceID+":") {
+			has = true
+		}
+	}
+	if !has {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("# HELP nagus_imap_authenticated_total Mail verifications by the path that authenticated them (every poll re-verifies the lookback window).\n")
+	b.WriteString("# TYPE nagus_imap_authenticated_total counter\n")
+	st := imapmail.AuthStats()
+	for _, p := range imapmail.AuthPaths {
+		fmt.Fprintf(&b, "nagus_imap_authenticated_total{path=%q} %d\n", p, st[p])
+	}
+	_, _ = io.WriteString(w, b.String())
+}
+
+// arcTrustDeclared reports whether a source sets any ARC trust key.
+func arcTrustDeclared(s SourceConfig) bool {
+	return len(s.IMAPTrustARCSealers) > 0 || len(s.IMAPTrustARCAuthservIDs) > 0 || len(s.IMAPTrustARCRecipients) > 0 ||
+		s.IMAPTrustARCMaxAgeMinutes != 0
 }
