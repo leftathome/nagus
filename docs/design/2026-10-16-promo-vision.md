@@ -292,6 +292,91 @@ parser does not use the submission ledger (its senders are retailers, not
 household principals, and its per-line semantics differ). Use the metrics
 and the per-message log line instead.
 
+## ARC trust (nagus-25g, operator decision 2026-10-17)
+
+In production the Newegg and Total Wine copies in the deals mailbox were
+REFUSED "without a verified DKIM pass": ForwardEmail's MX verifies DKIM on
+receipt, but its IMAP STORAGE then alters the body, so nagus's own check of
+the stored copy fails (`dkim: body hash did not verify`). Every such
+message carries a valid ARC chain: i=1,2 by google.com (the operator's Gmail
+auto-forward), i=3 sealed by `d=forwardemail.net`, whose
+ARC-Authentication-Results (authserv-id `mx1.forwardemail.net` /
+`mx2...`) records `dkim=pass header.i=@<sender domain>`. (wine.com's stored
+copies still verify directly.)
+
+An imap source may opt in with `imapTrustARCSealers`,
+`imapTrustARCAuthservIDs` and `imapTrustARCRecipients` (all three required;
+`imapTrustARCMaxAgeMinutes`, default 60; OFF by default; promo and
+deal-jsonl sources only, deal sources must agree; a promo source still
+refuses `imapTrustAuthResults`). Order: direct DKIM exactly as before; only
+if it fails, and only on an opted-in source, the ARC path.
+
+What binds what (and why both checks are needed):
+
+- The top ARC-Seal signs ONLY the ARC header fields of instances 1..N
+  (AAR, AMS, AS). It proves the sealer wrote that verdict and that AMS, but
+  a seal copied onto another message still verifies: alone it would let
+  anyone who ever received a sealed message (any ForwardEmail alias) swap
+  its Subject and body and send it to deals@ (security review of !42).
+- The top ARC-Message-Signature signs the message header fields in its h=
+  (From, To, Subject, Date, Message-ID, ...) and the body hash bh= as the
+  sealer computed it on receipt. nagus verifies the AMS signature over THIS
+  message's headers using bh= AS WRITTEN (it does not recompute the body
+  hash, which storage broke), and requires h= to cover from, to, subject
+  and date. The BODY is therefore not bound; the headers are.
+- The trust anchor is the sealer's DNS key: for ForwardEmail
+  `default._domainkey.forwardemail.net`, an RSA 1024-bit key (the
+  verifier's minimum).
+
+Checks (`internal/arc`, RFC 8617, then `imapmail`):
+
+- the ARC sets are a contiguous 1..N with exactly one AAR, AMS and AS each;
+  cv=none at i=1 and cv=pass above; the header block is well formed
+  (no leading continuation line, every line has a colon); selectors are
+  `[A-Za-z0-9._-]+`; a key record restricted to another service (`s=`
+  without `email` or `*`) is refused (`t=s` has no meaning without `i=`);
+- the top seal is by a trusted sealer, verifies (rsa-sha256 or
+  ed25519-sha256) over the relaxed AAR, AMS and AS of instances 1..N with
+  its b= emptied, and carries t=;
+- the top AMS is by the same sealer and verifies over its h= headers,
+  selected bottom-up as in DKIM;
+- RECENCY: the seal's t= is no more than `imapTrustARCMaxAgeMinutes` before
+  the server's INTERNALDATE (and at most 5 minutes after it), so an old
+  seal cannot be replayed;
+- DELIVERY: the message has exactly one To header holding EXACTLY ONE
+  address (a group of one member reduces to it; an empty group has none),
+  and it is one of `imapTrustARCRecipients`. A retailer's DKIM covers To,
+  so a seal replayed from another subscriber's copy names that subscriber,
+  and a co-recipient listed in To cannot replay a shared message. Accepted
+  residual risk: a Bcc co-recipient of a genuine sealed message to this
+  mailbox (invisible in the headers) could replay it with another body
+  within the recency window -- retailer newsletters are sent one per
+  subscriber;
+- VERDICT: the top AAR comes from a trusted authserv-id and records
+  `dkim=pass` with header.d (or header.i's domain) aligned with the
+  sender's domain by the direct-DKIM rule; header.d / header.i must be
+  unquoted and domain-shaped, and a property repeated within one result
+  makes the AAR unparseable (a quoted value cannot smuggle a second
+  header.i); when the result names the signature (header.b, a prefix of
+  its b=; header.s), one of this message's DKIM-Signatures by that domain
+  must match it (a header.b prefix must be at least 8 characters). This is
+  a consistency check, not a security boundary.
+
+Newest-first processing cannot let a replay override a genuine message:
+a copy that fails authentication never reaches the parser, so it neither
+suppresses nor replaces the genuine copy's products even with the same
+Message-ID (tested); an authenticated later copy is genuine mail and may.
+
+The message's own address in To for the promo sources is the operator's
+Gmail address (the retailers mail it; Gmail auto-forwards to deals@):
+real addresses live in gitops only. Locally the three captured stored
+copies pass this whole path (Newegg and Total Wine via `arc`, wine.com via
+`dkim`), and with Subject or To swapped they are refused.
+
+Also from production: image.richrelevance.com serves JPEGs as
+`Content-Type: image/jpg`; the declared `image/jpg` / `image/pjpeg` are now
+read as `image/jpeg` (the sniffed type is still required to be an image).
+
 ## Observability
 
 One log line per processed message: profile, a short hash of the

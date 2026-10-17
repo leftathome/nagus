@@ -279,6 +279,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **wine.com promo images were all refused `not_an_image`** (nagus-25g):
+  image.richrelevance.com declares `Content-Type: image/jpg`. The declared
+  `image/jpg` and `image/pjpeg` now read as `image/jpeg`; the sniffed type
+  must still be an image.
+- **Newegg and Total Wine promo mail was refused "without a verified DKIM
+  pass"** (nagus-25g): ForwardEmail's storage alters bodies after its MX
+  verified them. New opt-in per imap source: `imapTrustARCSealers` +
+  `imapTrustARCAuthservIDs` + `imapTrustARCRecipients` (all required, OFF by
+  default; promo and deal-jsonl sources only; deal sources must agree). When direct DKIM fails, the
+  TOP ARC seal (RFC 8617) by a trusted sealer is verified from DNS, the
+  chain must be well formed (contiguous, cv=none then pass), and its
+  ARC-Authentication-Results must come from a trusted authserv-id and record
+  dkim=pass aligned with the sender (unquoted, domain-shaped, matching a
+  DKIM-Signature of the message when it names one). The top
+  ARC-Message-Signature is verified over the message's From, To, Subject
+  and Date (its body hash as written: the body is not bound), the seal must
+  be recent (`imapTrustARCMaxAgeMinutes`, default 60, against INTERNALDATE),
+  and the message must have exactly one To naming one of the REQUIRED
+  `imapTrustARCRecipients`, so a seal replayed onto other headers or from
+  another subscriber's copy is refused. New metric
+  `nagus_imap_authenticated_total{path}` (dkim, auth_results, arc).
+
 - **Wine sources no longer hide an incomplete fetch** (nagus-3ua). The wine
   bundle's channel tagger wrapped every wine connector without forwarding
   `FetchComplete`, so a truncated catalogue walk (or a rate-limited one)

@@ -137,10 +137,33 @@ type SourceConfig struct {
 	// topmost Authentication-Results header of a trusted MX. OFF by default:
 	// ForwardEmail writes no A-R header, so the topmost one would be the
 	// sender's own forgery (rv35 C1). Deal sources refuse it.
-	IMAPTrustAuthResults bool              `json:"imapTrustAuthResults,omitempty"`
-	IMAPSenders          []string          `json:"imapSenders,omitempty"`
-	IMAPSenderAliases    map[string]string `json:"imapSenderAliases,omitempty"`
-	DealSubmitTo         string            `json:"dealSubmitTo,omitempty"`
+	IMAPTrustAuthResults bool `json:"imapTrustAuthResults,omitempty"`
+
+	// imapTrustARCSealers / imapTrustARCAuthservIDs turn on ARC trust for
+	// this source (OFF by default; both required together): when direct
+	// DKIM of a message fails, its TOP ARC set is accepted if sealed by one
+	// of the sealer domains (seal verified from DNS), its
+	// ARC-Authentication-Results' authserv-id is one of the listed ones, and
+	// it records dkim=pass for a domain aligned with the sender's. For the
+	// deals mailbox: ForwardEmail's MX verifies DKIM and seals the verdict,
+	// then its storage alters bodies so direct DKIM of the stored copy
+	// fails. e.g. ["forwardemail.net"] and ["mx1.forwardemail.net",
+	// "mx2.forwardemail.net"]. Allowed on promo and deal-jsonl sources only
+	// (deal sources must all agree); a promo source still refuses
+	// imapTrustAuthResults. With ARC trust, imapTrustARCRecipients is
+	// REQUIRED: the addresses this mailbox's mail is addressed To (an
+	// ARC-accepted message must have exactly one To naming one of them, so a
+	// seal replayed from another subscriber's mailbox is refused), and
+	// imapTrustARCMaxAgeMinutes bounds how long before receipt the seal was
+	// made (default 60).
+	IMAPTrustARCSealers       []string `json:"imapTrustARCSealers,omitempty"`
+	IMAPTrustARCAuthservIDs   []string `json:"imapTrustARCAuthservIDs,omitempty"`
+	IMAPTrustARCRecipients    []string `json:"imapTrustARCRecipients,omitempty"`
+	IMAPTrustARCMaxAgeMinutes int      `json:"imapTrustARCMaxAgeMinutes,omitempty"`
+
+	IMAPSenders       []string          `json:"imapSenders,omitempty"`
+	IMAPSenderAliases map[string]string `json:"imapSenderAliases,omitempty"`
+	DealSubmitTo      string            `json:"dealSubmitTo,omitempty"`
 	// Retailer promo mail read by a vision model (imapParser
 	// "promo-vision-v1", nagus-3ua; docs/design/2026-10-16-promo-vision.md):
 	// promoProfile names a built-in retailer profile (newegg, winecom,

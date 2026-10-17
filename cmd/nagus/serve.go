@@ -152,6 +152,7 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	if s.promo != nil {
 		s.promo.WriteMetrics(w)
 	}
+	writeIMAPAuthMetrics(w, s.ingesters)
 	if len(ebaySources) == 0 {
 		return
 	}
