@@ -33,7 +33,7 @@ func TestPostgresOfferStoreSatisfiesTheContract(t *testing.T) {
 	offerstoretest.Run(t, func(t *testing.T) offer.Store {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		if _, err := s.pool.Exec(ctx, `DELETE FROM offers; DELETE FROM offer_price_history`); err != nil {
+		if _, err := s.pool.Exec(ctx, `DELETE FROM offers; DELETE FROM offer_price_history; DELETE FROM promo_messages; DELETE FROM promo_readings; DELETE FROM vision_usage`); err != nil {
 			pgtest.LogActivity(t, dsn)
 			t.Fatalf("reset offers: %v", err)
 		}

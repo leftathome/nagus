@@ -18,6 +18,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/category"
 	"github.com/leftathome/nagus/internal/connector/ebay"
+	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/enrich"
 	"github.com/leftathome/nagus/internal/item"
@@ -58,6 +59,8 @@ type server struct {
 	// promo is the metrics of the promo-vision-v1 sources (nagus-3ua); nil
 	// when none is configured.
 	promo *promo.Metrics
+	// janitor is the deals mailbox janitor (nagus-c0s); nil when off.
+	janitor *imapmail.Janitor
 }
 
 func (s *server) clock() time.Time {
@@ -153,6 +156,7 @@ func (s *server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		s.promo.WriteMetrics(w)
 	}
 	writeIMAPAuthMetrics(w, s.ingesters)
+	writeJanitorMetrics(w, s.janitor)
 	if len(ebaySources) == 0 {
 		return
 	}
@@ -450,6 +454,8 @@ func runServe(args []string) error {
 		}
 		surfaces[name] = sf
 	}
+	conns := map[string]imapConn{}
+	opts.imapConns = &conns
 	ingesters := make([]*pipeline.Ingester, 0, len(cfg.Sources))
 	intervals := make([]time.Duration, 0, len(cfg.Sources))
 	for _, src := range cfg.Sources {
@@ -478,7 +484,18 @@ func runServe(args []string) error {
 	// One ingest goroutine per source, each on its own configured interval;
 	// per-source failure isolation (a bad source never blocks another's loop
 	// or the HTTP surface). Cancelled by the same ctx as the HTTP shutdown.
+	// The deals mailbox janitor (nagus-c0s): the mailbox's only writer.
+	// Validated before any source starts.
+	janitor, err := buildJanitor(cfg.IMAPJanitor, conns, ingesters, logf)
+	if err != nil {
+		return err
+	}
 	srv.startIngest(ctx, intervals)
+	if janitor != nil {
+		srv.janitor = janitor
+		go runJanitor(ctx, janitor, time.Duration(cfg.IMAPJanitor.IntervalMinutes)*time.Minute, logf)
+		logf("imap janitor enabled (markSeen=%v deleteAfterDays=%d dryRun=%v)", cfg.IMAPJanitor.MarkSeen, cfg.IMAPJanitor.DeleteAfterDays, cfg.IMAPJanitor.dryRun())
+	}
 
 	// One-time backfill of offers.price_changed_at_ns (nagus-417), in the
 	// background and in short batches: reads already treat an unfilled row

@@ -95,8 +95,11 @@ canonical URL is stored. Each product then goes through `deal.Decode` and
 `deal.ToRaw` exactly like a household submission, then the gate and the
 category extractor. Load-bearing details: vision calls are budgeted (per
 poll, per UTC day, shared GPU); a deferred image makes the fetch INCOMPLETE
-so nothing expires; results are cached per message and readings per image hash, in memory (a
-restart starts a fresh daily budget and re-reads the window: nagus-p7x);
+so nothing expires; processed messages (with their products), readings by image hash and the
+daily vision usage are persisted in the offers database (nagus-p7x), so a
+restart re-emits processed mail without a vision call; a mailbox janitor
+(the shared mailbox's only writer; sources stay read-only) marks processed
+mail read and deletes it after deleteAfterDays (nagus-c0s);
 the two reads must carry the same numbers, and a followed link's slug must
 match the title; an hdd promo product must also
 look like a drive (`categoryFit`) because the hdd extractor does not refuse

@@ -43,6 +43,11 @@ type Ingester struct {
 	// is retained as evidence (what a vendor charged, and when) but stops being
 	// purchasable. Deletion is OfferRetention's job alone.
 	OfferExpireAfter time.Duration
+	// MailStateWindow, when > 0 and the offer store keeps mail-reader state
+	// (offer.MailState, nagus-p7x), purges this source's processed-message
+	// records, and the shared readings and daily usage, older than the
+	// window in the same retention pass.
+	MailStateWindow time.Duration
 
 	// TextHints sends a listing's TITLE to quark as hint text when the source
 	// states no product identifiers (quark QUARK-02: eBay titles carry part
@@ -261,6 +266,11 @@ func (i *Ingester) keepOffers(ctx context.Context, res *IngestResult) {
 			i.logf("ingest: expire offers %s failed: %v", src, err)
 		} else {
 			res.OffersExpired = n
+		}
+	}
+	if ms, ok := i.Offers.(offer.MailState); ok && i.MailStateWindow > 0 {
+		if err := ms.PurgeMailState(ctx, src, now.Add(-i.MailStateWindow)); err != nil {
+			i.logf("ingest: purge mail state %s failed: %v", src, err)
 		}
 	}
 	if i.OfferRetention.Policy != "" {

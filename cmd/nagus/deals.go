@@ -169,6 +169,7 @@ func buildDealConnector(s SourceConfig, o categoryOpts) (listing.Connector, erro
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", s.Name, err)
 	}
+	o.registerIMAP(conn)
 	return &deal.Source{Inner: conn, Hub: hub}, nil
 }
 

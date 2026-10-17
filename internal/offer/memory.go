@@ -15,6 +15,10 @@ type MemoryStore struct {
 	// history is each offer's price history, oldest first, at most one point
 	// per observed_at (offer_price_history's primary key).
 	history map[string][]PricePoint
+
+	// mail-reader state (MailState, nagus-p7x), created on first use.
+	mailOnce  sync.Once
+	mailState *memMailState
 }
 
 // NewMemoryStore returns an empty MemoryStore.

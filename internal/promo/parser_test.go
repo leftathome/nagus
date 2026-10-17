@@ -11,6 +11,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 )
 
 // Placeholders only: no real address belongs in this repo. A sender must
@@ -26,6 +27,7 @@ type rigOpts struct {
 	profile, category string
 	perPoll, perDay   int
 	vision            *Vision
+	state             offer.MailState
 }
 
 type prig struct {
@@ -38,6 +40,8 @@ type prig struct {
 	idsMu  sync.Mutex
 	ids    map[string]uint8 // image src (path+query) -> image id
 	cands  []Candidate
+	// restart rebuilds the parser (and its budget) as a new process would.
+	restart func()
 }
 
 // newPRig wires a parser for one fixture: every selected image is served by
@@ -72,23 +76,27 @@ func newPRig(t *testing.T, o rigOpts, fixtureFile string) *prig {
 			_, _ = rw.Write(b)
 		})
 	}
-	r.budget = NewBudget(o.perDay, func() time.Time { return testNow })
 	vis := o.vision
 	if vis == nil {
 		vis = r.fv.vision()
 	}
-	r.m = NewMetrics(r.budget, vis.Enabled())
 	cl := r.w.client()
-	p, err := NewParser(Config{
-		Profile: prof, Category: o.category, SourceID: r.src, Vision: vis,
-		Fetcher:  &Fetcher{Client: cl, Retries: 1, Backoff: func(int) time.Duration { return 0 }},
-		Resolver: &Resolver{Client: cl}, Budget: r.budget, PerPoll: o.perPoll, Metrics: r.m,
-		Now: func() time.Time { return testNow }, Logf: t.Logf,
-	})
-	if err != nil {
-		t.Fatal(err)
+	r.restart = func() {
+		r.budget = NewBudget(o.perDay, func() time.Time { return testNow })
+		r.budget.State = o.state
+		r.m = NewMetrics(r.budget, vis.Enabled())
+		p, err := NewParser(Config{
+			Profile: prof, Category: o.category, SourceID: r.src, Vision: vis,
+			Fetcher:  &Fetcher{Client: cl, Retries: 1, Backoff: func(int) time.Duration { return 0 }},
+			Resolver: &Resolver{Client: cl}, Budget: r.budget, PerPoll: o.perPoll, Metrics: r.m,
+			Now: func() time.Time { return testNow }, Logf: t.Logf, State: o.state,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.p = p
 	}
-	r.p = p
+	r.restart()
 	return r
 }
 

@@ -178,6 +178,10 @@ func New(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("sqliteoffer: migrate resolution columns: %w", err)
 	}
+	if _, err := db.Exec(mailSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqliteoffer: mail state schema: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

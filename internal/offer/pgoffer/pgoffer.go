@@ -137,6 +137,10 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("pgoffer: schema: %w", err)
 	}
+	if _, err := pool.Exec(ctx, mailSchema); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pgoffer: mail state schema: %w", err)
+	}
 	return &Store{pool: pool}, nil
 }
 
