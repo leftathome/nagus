@@ -20,6 +20,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade notes
 
+- **New tables `promo_messages`, `promo_readings`, `vision_usage`**
+  (nagus-p7x; offers database: Postgres, SQLite, memory). `CREATE TABLE IF
+  NOT EXISTS` on startup, nothing backfilled; an older binary ignores them.
+  The first deploy of this release processes the promo mail in the window
+  once more (nothing was persisted before); from then on a restart re-emits
+  processed mail without a vision call, an image fetch or a link
+  resolution, and continues the day's vision count.
+- **Chart 0.16.0** renders `imapJanitor` into config.json (off by default).
+
 - **Retailer promo mail read by a vision model** (nagus-3ua,
   `promo-vision-v1`; design `docs/design/2026-10-16-promo-vision.md`). Inert
   until configured: add one imap source per retailer (`imapParser:
@@ -462,6 +471,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   short of the catalogue the walk stopped.
 
 ### Added
+
+- **Promo state survives restarts** (nagus-p7x). Processed promo messages
+  (with their agreed products as `nagus.deal/v1` lines), the vision
+  readings by image SHA-256 and the daily vision usage are persisted in the
+  offers database; a restart re-emits processed mail's products (re-validated
+  by `deal.Decode`) with zero vision calls, fetches and link resolutions, and
+  does not reset the daily budget. Deferred messages are not recorded and
+  are retried. Purged in the retention pass after lookback + 2 days. Metric
+  outcome `nagus_promo_messages_total{outcome="restored"}`. With vision OFF,
+  products already agreed keep being re-emitted from the ledger. Stored
+  products are re-judged on restore (category fit, link/slug match,
+  `RulesVersion`), so a rule fix clears earlier false positives at once.
+- **Deals mailbox janitor** (nagus-c0s; run config `imapJanitor`, off by
+  default): the shared mailbox's only writer (sources stay read-only). Marks
+  a message `\Seen` + `$NagusProcessed` once every source whose senders
+  match it has completed a fetch begun after it arrived (mail matching no
+  source: once every source has), and at most once a day deletes mail older
+  than `deleteAfterDays` (default 0 = never, 30 recommended; must exceed
+  every sharing source's lookback + 1; age measured exactly from
+  INTERNALDATE; only with UID EXPUNGE -- a server without UIDPLUS is not
+  cleaned). `dryRun` DEFAULTS TO TRUE (read-only EXAMINE), count-only logs,
+  metrics `nagus_imap_janitor_*`.
 
 - **`promo-vision-v1`: image-only retailer promo mail becomes deals**
   (nagus-3ua, supersedes nagus-xgc). New package `internal/promo`: retailer

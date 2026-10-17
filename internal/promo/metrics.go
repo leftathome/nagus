@@ -20,10 +20,11 @@ const (
 	MsgCached    = "cached"    // already processed; results reused
 	MsgDeferred  = "deferred"  // budget or a transient failure left images for a later poll
 	MsgDisabled  = "disabled"  // vision is not configured
+	MsgRestored  = "restored"  // re-emitted from the persisted ledger (after a restart): no fetch, no call
 )
 
 // MessageOutcomes in metric order.
-var MessageOutcomes = []string{MsgProcessed, MsgCached, MsgDeferred, MsgDisabled}
+var MessageOutcomes = []string{MsgProcessed, MsgCached, MsgDeferred, MsgDisabled, MsgRestored}
 
 // Image stages (nagus_promo_images_total), in pipeline order.
 const (

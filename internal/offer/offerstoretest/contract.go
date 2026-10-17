@@ -88,6 +88,8 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("TextHintStaleAnswerIsDiscarded", func(t *testing.T) { textHintStaleAnswerIsDiscarded(t, newStore(t)) })
 	t.Run("VintageModeRoundTripsAndResets", func(t *testing.T) { vintageModeRoundTripsAndResets(t, newStore(t)) })
 	t.Run("Validation", func(t *testing.T) { validation(t, newStore(t)) })
+	// mail-reader state (nagus-p7x) -- see mailstate.go.
+	runMailState(t, newStore)
 	t.Run("FiltersAndOrdering", func(t *testing.T) { filtersAndOrdering(t, newStore(t)) })
 	t.Run("SellerFilter", func(t *testing.T) { sellerFilter(t, newStore(t)) })
 	t.Run("SellerFilterCombinedWithSource", func(t *testing.T) { sellerFilterCombinedWithSource(t, newStore(t)) })

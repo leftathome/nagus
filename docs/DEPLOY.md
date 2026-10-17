@@ -106,6 +106,17 @@ outbound source-API creds -- one secret, one property per source).
 | Zillapi (land live ingest) | `eso/nagus/sources` -> `zillapi_key` | `NAGUS_ZILLAPI_KEY` | `land.zillapiExternalSecret` (or `land.zillapiSecret` override) |
 | Vision endpoint key (promo-vision-v1) | `eso/nagus/vision` -> `api_key` (chart default; a LiteLLM virtual key for nagus) | `NAGUS_VISION_API_KEY` | `vision.apiKeyExternalSecret` (optional secretKeyRef: missing = promo reading off) |
 
+### Deals mailbox janitor
+
+`imapJanitor` (chart value, rendered into config.json; off by default) is the
+shared mailbox's only writer: it marks processed mail read
+(`markSeen`, keyword `$NagusProcessed`) and deletes mail older than
+`deleteAfterDays` at most once a day, which must exceed every imap source's
+`imapLookbackDays` + 1. Start with `dryRun: true` and watch
+`nagus_imap_janitor_dry_run_*`. Design:
+[`docs/design/2026-10-16-promo-vision.md`](design/2026-10-16-promo-vision.md),
+"Mailbox hygiene".
+
 ### Retailer promo mail (promo-vision-v1)
 
 Image-only retailer newsletters on the deals mailbox are read by a vision

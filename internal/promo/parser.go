@@ -17,6 +17,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 )
 
 // Aspect keys a promo product sets on its listing (besides deal.ToRaw's).
@@ -63,6 +64,11 @@ type Config struct {
 	Metrics      *Metrics
 	Logf         func(string, ...any)
 	Now          func() time.Time
+	// State, when set, persists processed messages and readings in the
+	// offers database (nagus-p7x): a restart then re-emits every processed
+	// message's products without an image fetch, a vision call or a link
+	// resolution. Nil keeps them in memory only.
+	State offer.MailState
 }
 
 // itemResult is where one candidate image of one message stands.
@@ -72,9 +78,29 @@ type itemResult struct {
 	stage    int // index into Stages reached (0 selected .. 4 kept)
 	attempts int
 	raw      *listing.Raw
+	stored   *storedProduct
+}
+
+// RulesVersion names the product rules (agreement guard, category fit,
+// link/slug match) a stored product was judged under. Bump it when a rule
+// changes: stored products of another version are not re-emitted, their
+// message is processed again (its readings are reused, so it costs fetches
+// and link resolutions, not vision calls).
+const RulesVersion = "2026-10-17.1"
+
+// storedProduct is what promo_messages keeps per kept product: the
+// nagus.deal/v1 line and the extra aspects, everything needed to re-emit the
+// offer exactly as it was first emitted.
+type storedProduct struct {
+	// Rules is the RulesVersion the product was judged under.
+	Rules     string `json:"rules"`
+	Line      string `json:"line"`
+	CompareAt string `json:"compare_at_cents,omitempty"`
+	Model     string `json:"vision_model,omitempty"`
 }
 
 type msgEntry struct {
+	restored []listing.Raw // products re-emitted from the persisted ledger
 	selected bool
 	seen     int
 	skipped  map[string]int
@@ -153,23 +179,57 @@ type cachedRead struct {
 // SHA-256 of its bytes: a tile repeated across mails is read once.
 func (p *Parser) cachedReads(sum [32]byte) ([2]Reading, bool) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	c, ok := p.reads[sum]
-	if !ok {
+	if ok {
+		c.at = p.cfg.Now()
+		p.reads[sum] = c
+	}
+	p.mu.Unlock()
+	if ok {
+		return c.reads, true
+	}
+	// Behind the memory front, the persisted cache (nagus-p7x): readings
+	// made before a restart, or by another source.
+	if p.cfg.State == nil {
 		return [2]Reading{}, false
 	}
-	c.at = p.cfg.Now()
-	p.reads[sum] = c
-	return c.reads, true
+	ctx, cancel := context.WithTimeout(context.Background(), stateTimeout)
+	defer cancel()
+	b, ok, err := p.cfg.State.GetPromoReading(ctx, hex.EncodeToString(sum[:]))
+	if err != nil || !ok {
+		return [2]Reading{}, false
+	}
+	var reads [2]Reading
+	if json.Unmarshal(b, &reads) != nil {
+		return [2]Reading{}, false
+	}
+	p.remember(sum, reads)
+	return reads, true
 }
 
-func (p *Parser) storeReads(sum [32]byte, reads [2]Reading) {
+func (p *Parser) remember(sum [32]byte, reads [2]Reading) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.reads) >= maxCachedReads {
 		p.reads = map[[32]byte]cachedRead{}
 	}
 	p.reads[sum] = cachedRead{reads: reads, at: p.cfg.Now()}
+}
+
+func (p *Parser) storeReads(sum [32]byte, reads [2]Reading) {
+	p.remember(sum, reads)
+	if p.cfg.State == nil {
+		return
+	}
+	b, err := json.Marshal(reads)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stateTimeout)
+	defer cancel()
+	if err := p.cfg.State.PutPromoReading(ctx, hex.EncodeToString(sum[:]), b, p.cfg.Now()); err != nil {
+		p.cfg.Logf("promo %s: storing a reading: %v", p.cfg.SourceID, err)
+	}
 }
 
 // stopForAuth stops this poll's vision reads after an auth refusal; the
@@ -247,6 +307,16 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 		p.cfg.Metrics.drop(src, DropSenderNotProfile, 1)
 		return nil, nil
 	}
+	key := MessageKey(m.From, m.ID)
+	e := p.entry(key)
+	if !e.done && !e.selected && p.restore(e, key) {
+		p.cfg.Metrics.message(src, MsgRestored)
+		return e.raws(), nil
+	}
+	if e.done {
+		p.cfg.Metrics.message(src, MsgCached)
+		return e.raws(), nil
+	}
 	if !p.cfg.Vision.Enabled() {
 		p.mu.Lock()
 		first := !p.disabled
@@ -257,11 +327,6 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 			p.cfg.Logf("promo %s: vision is not configured (NAGUS_VISION_BASE_URL/_API_KEY/_MODEL); no image is fetched or read", src)
 		}
 		return nil, nil
-	}
-	e := p.entry(strings.ToLower(m.From) + "\x00" + m.ID)
-	if e.done {
-		p.cfg.Metrics.message(src, MsgCached)
-		return e.raws(), nil
 	}
 	if !e.selected {
 		sel := SelectImages(m.HTML, prof)
@@ -321,6 +386,8 @@ func (p *Parser) Parse(m imapmail.Message) ([]listing.Raw, error) {
 		p.mu.Lock()
 		p.deferred = true
 		p.mu.Unlock()
+	} else {
+		p.persist(e, key, m)
 	}
 	p.cfg.Metrics.message(src, outcome)
 	for k, n := range e.skipped {
@@ -347,6 +414,11 @@ func fmtDrops(d map[string]int) string {
 // raws returns copies of the message's kept products.
 func (e *msgEntry) raws() []listing.Raw {
 	var out []listing.Raw
+	for _, r := range e.restored {
+		c := r
+		c.Aspects = maps.Clone(r.Aspects)
+		out = append(out, c)
+	}
 	for _, r := range e.results {
 		if r.final && r.raw != nil {
 			c := *r.raw
@@ -453,11 +525,11 @@ func (p *Parser) work(ctx context.Context, m imapmail.Message, c Candidate, prev
 	if prof.Canonical == CanonicalFollowLink && !slugMatchesTitle(u, prod.Title, prof.SlugHasVintage) {
 		return final(3, DropLinkTitleMismatch)
 	}
-	raw, ok := p.toRaw(prod, u)
+	raw, sp, ok := p.toRaw(prod, u)
 	if !ok {
 		return final(3, DropDealInvalid)
 	}
-	r.raw = &raw
+	r.raw, r.stored = &raw, &sp
 	r.final, r.stage, r.drop = true, 4, ""
 	for s := 1; s < len(Stages); s++ {
 		p.cfg.Metrics.image(src, Stages[s], 1)
@@ -466,8 +538,9 @@ func (p *Parser) work(ctx context.Context, m imapmail.Message, c Candidate, prev
 }
 
 // toRaw renders the product as ONE nagus.deal/v1 line and decodes it with the
-// same strict validator a human submission meets, then maps it like one.
-func (p *Parser) toRaw(prod Product, canonicalURL string) (listing.Raw, bool) {
+// same strict validator a human submission meets, then maps it like one. The
+// stored form re-emits it identically (rawFromStored).
+func (p *Parser) toRaw(prod Product, canonicalURL string) (listing.Raw, storedProduct, bool) {
 	prof := p.cfg.Profile
 	d := map[string]any{
 		"schema":   deal.SchemaID,
@@ -483,20 +556,114 @@ func (p *Parser) toRaw(prod Product, canonicalURL string) (listing.Raw, bool) {
 	}
 	line, err := json.Marshal(d)
 	if err != nil {
-		return listing.Raw{}, false
+		return listing.Raw{}, storedProduct{}, false
 	}
-	dl, why := deal.Decode(line)
-	if why != deal.ReasonNone {
-		return listing.Raw{}, false
-	}
-	raw := dl.ToRaw(Key(prof.Name, canonicalURL), prof.Principal())
-	raw.Aspects[AspectOrigin] = OriginEmailImage
-	raw.Aspects[AspectProfile] = prof.Name
+	sp := storedProduct{Rules: RulesVersion, Line: string(line)}
 	if p.cfg.Vision != nil {
-		raw.Aspects[AspectVisionModel] = p.cfg.Vision.Model
+		sp.Model = p.cfg.Vision.Model
 	}
 	if prod.WasPrice != "" {
-		raw.Aspects[AspectCompareAt] = strconv.FormatInt(cents(prod.WasPrice), 10)
+		sp.CompareAt = strconv.FormatInt(cents(prod.WasPrice), 10)
+	}
+	raw, ok := p.rawFromStored(sp)
+	return raw, sp, ok
+}
+
+// rawFromStored maps a stored product to its listing, through deal.Decode
+// again, and re-applies the category fit and the link/slug match: a stored
+// line is re-judged, never trusted as is, so a rule fix also clears an
+// earlier false positive.
+func (p *Parser) rawFromStored(sp storedProduct) (listing.Raw, bool) {
+	prof := p.cfg.Profile
+	if sp.Rules != RulesVersion {
+		return listing.Raw{}, false
+	}
+	dl, why := deal.Decode([]byte(sp.Line))
+	if why != deal.ReasonNone || dl.Category != p.cfg.Category || !categoryFit(p.cfg.Category, dl.Title) {
+		return listing.Raw{}, false
+	}
+	if prof.Canonical == CanonicalFollowLink && !slugMatchesTitle(dl.URL, dl.Title, prof.SlugHasVintage) {
+		return listing.Raw{}, false
+	}
+	raw := dl.ToRaw(Key(prof.Name, dl.URL), prof.Principal())
+	raw.Aspects[AspectOrigin] = OriginEmailImage
+	raw.Aspects[AspectProfile] = prof.Name
+	if sp.Model != "" {
+		raw.Aspects[AspectVisionModel] = sp.Model
+	}
+	if sp.CompareAt != "" {
+		raw.Aspects[AspectCompareAt] = sp.CompareAt
 	}
 	return raw, true
+}
+
+// MessageKey identifies a message in the persisted ledger: a hash of the
+// verified sender and the Message-ID (the id itself is never stored).
+func MessageKey(from, messageID string) string {
+	s := sha256.Sum256([]byte("nagus promo message|" + strings.ToLower(from) + "\x00" + messageID))
+	return hex.EncodeToString(s[:16])
+}
+
+// stateTimeout bounds one persisted-state call.
+const stateTimeout = 10 * time.Second
+
+// restore fills e from the persisted ledger, when the message was processed
+// before (by this process or an earlier one). Failures read as "not
+// processed": the message is processed again, which costs calls, never
+// correctness.
+func (p *Parser) restore(e *msgEntry, key string) bool {
+	if p.cfg.State == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stateTimeout)
+	defer cancel()
+	pm, ok, err := p.cfg.State.GetPromoMessage(ctx, p.cfg.SourceID, key)
+	if err != nil {
+		p.cfg.Logf("promo %s: reading the processed-message ledger: %v", p.cfg.SourceID, err)
+		return false
+	}
+	if !ok {
+		return false
+	}
+	var sps []storedProduct
+	if err := json.Unmarshal(pm.Products, &sps); err != nil {
+		p.cfg.Logf("promo %s: a processed-message record is unreadable; processing the message again", p.cfg.SourceID)
+		return false
+	}
+	var raws []listing.Raw
+	for _, sp := range sps {
+		raw, ok := p.rawFromStored(sp)
+		if !ok {
+			p.cfg.Logf("promo %s: a stored product no longer validates; processing the message again", p.cfg.SourceID)
+			return false
+		}
+		raws = append(raws, raw)
+	}
+	e.restored, e.done, e.selected = raws, true, true
+	return true
+}
+
+// persist records a message that reached a final outcome.
+func (p *Parser) persist(e *msgEntry, key string, m imapmail.Message) {
+	if p.cfg.State == nil {
+		return
+	}
+	sps := []storedProduct{}
+	for _, r := range e.results {
+		if r.final && r.stored != nil {
+			sps = append(sps, *r.stored)
+		}
+	}
+	b, err := json.Marshal(sps)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stateTimeout)
+	defer cancel()
+	if err := p.cfg.State.PutPromoMessage(ctx, offer.PromoMessage{
+		SourceID: p.cfg.SourceID, MessageKey: key, UIDValidity: m.UIDValidity, UID: m.UID,
+		ProcessedAt: p.cfg.Now(), Outcome: MsgProcessed, Products: b,
+	}); err != nil {
+		p.cfg.Logf("promo %s: recording a processed message: %v (it will be processed again after a restart)", p.cfg.SourceID, err)
+	}
 }

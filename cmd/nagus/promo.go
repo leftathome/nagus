@@ -18,6 +18,7 @@ import (
 	"github.com/leftathome/nagus/internal/connector/imapmail"
 	"github.com/leftathome/nagus/internal/deal"
 	"github.com/leftathome/nagus/internal/listing"
+	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/pipeline"
 	"github.com/leftathome/nagus/internal/promo"
 )
@@ -44,6 +45,27 @@ type promoRuntime struct {
 	fetcher  *promo.Fetcher
 	resolver *promo.Resolver
 	perPoll  int
+	// state persists processed messages, readings and the daily usage in
+	// the offers database (nagus-p7x); nil without the offer layer.
+	state offer.MailState
+}
+
+// useState persists the runtime's state in store when it keeps mail state.
+func (rt *promoRuntime) useState(store offer.Store) {
+	if ms, ok := store.(offer.MailState); ok && rt.state == nil {
+		rt.state = ms
+		rt.budget.State = ms
+	}
+}
+
+// promoStateWindow is how long a promo source's persisted state is kept:
+// its mail is re-read for the lookback window, plus two days of slack.
+func promoStateWindow(s SourceConfig) time.Duration {
+	days := s.IMAPLookbackDays
+	if days <= 0 {
+		days = imapmail.DefaultLookbackDays
+	}
+	return time.Duration(days+2) * 24 * time.Hour
 }
 
 // isPromoSource reports whether a source reads retailer promo mail.
@@ -108,6 +130,7 @@ func promoRuntimeFromEnv(logf func(string, ...any)) *promoRuntime {
 		Client: &http.Client{Timeout: envDuration(envVisionTimeout, 90*time.Second) + 5*time.Second},
 	}
 	budget := promo.NewBudget(int(envInt64(envVisionPerDay, promo.DefaultCallsPerDay)), nil)
+	budget.Logf = logf
 	rt := &promoRuntime{
 		vision:  v,
 		budget:  budget,
@@ -145,6 +168,7 @@ func buildPromoConnector(s SourceConfig, o categoryOpts) (listing.Connector, err
 	if rt == nil {
 		rt = promoRuntimeFromEnv(o.logf)
 	}
+	rt.useState(o.offers)
 	if s.PromoMaxImages > 0 && s.PromoMaxImages < prof.MaxImages {
 		cp := *prof
 		cp.MaxImages = s.PromoMaxImages
@@ -157,7 +181,7 @@ func buildPromoConnector(s SourceConfig, o categoryOpts) (listing.Connector, err
 	p, err := promo.NewParser(promo.Config{
 		Profile: prof, Category: s.Category, SourceID: imapmail.SourceID + ":" + s.Name,
 		Vision: rt.vision, Fetcher: rt.fetcher, Resolver: rt.resolver, Budget: rt.budget, Metrics: rt.metrics,
-		PerPoll: perPoll, LookbackDays: s.IMAPLookbackDays, Logf: o.logf,
+		PerPoll: perPoll, LookbackDays: s.IMAPLookbackDays, Logf: o.logf, State: rt.state,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", s.Name, err)
@@ -173,6 +197,7 @@ func buildPromoConnector(s SourceConfig, o categoryOpts) (listing.Connector, err
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", s.Name, err)
 	}
+	o.registerIMAP(conn)
 	return &promo.Source{Inner: conn, Parser: p}, nil
 }
 

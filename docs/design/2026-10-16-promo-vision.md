@@ -157,9 +157,8 @@ handed to the parser NEWEST FIRST, so a budget is spent on current mail.
 A budget refusal is counted (`nagus_promo_vision_budget_exhausted_total`)
 whether the availability check or the reservation refused it.
 
-The budget is IN MEMORY: a restart starts a fresh day's allowance and
-re-reads the window, so N restarts in a day can spend N times the daily
-budget. Persisting used-today (and the reading cache) is nagus-p7x. When a budget runs out the rest of the message is DEFERRED: retried on
+The day's count is PERSISTED in the offers database (`vision_usage`,
+nagus-p7x): a restart continues it. When a budget runs out the rest of the message is DEFERRED: retried on
 a later poll, the fetch reported incomplete so no offer expires meanwhile.
 
 ## Product URL
@@ -267,7 +266,7 @@ Message-ID, image index) for the lookback window plus two days (bounded), so
 a re-poll reuses them and only deferred or transiently failed images are
 retried. The two READINGS of an image are also cached by the SHA-256 of its
 bytes ACROSS messages, so a tile repeated in later mails costs no call.
-Both caches are in memory (nagus-p7x).
+Both are persisted (see "Persistence"), with an in-memory front.
 
 Wine promo sources may carry `wineShipsTo` (an operator declaration from the
 seller's own shipping policy that replaces the computed legal-destination
@@ -376,6 +375,91 @@ copies pass this whole path (Newegg and Total Wine via `arc`, wine.com via
 Also from production: image.richrelevance.com serves JPEGs as
 `Content-Type: image/jpg`; the declared `image/jpg` / `image/pjpeg` are now
 read as `image/jpeg` (the sniffed type is still required to be an image).
+
+## Persistence (nagus-p7x, operator: "we need to not reprocess those deals on restart")
+
+A restart costs ZERO vision calls, image fetches and link resolutions for
+mail already processed, and does not reset the daily budget. With the offer
+layer on, three tables in the OFFERS database (Postgres; SQLite and memory
+implement the same `offer.MailState` contract, `offerstoretest`):
+
+| table | key | columns | written | read |
+|---|---|---|---|---|
+| `promo_messages` | (source_id, message_key) | uid_validity, uid (hints), processed_at_ns, outcome, products (JSON) | when a message reaches a FINAL outcome (every image final) | on the first poll that meets the message in a process: its products are re-emitted, nothing is fetched or read |
+| `promo_readings` | image_sha256 | readings (JSON: both reads), stored_at_ns | after both reads of an image | before reading an image, behind the in-memory front |
+| `vision_usage` | day (UTC, `2006-01-02`) | calls | every reservation and refund (one upsert, never below 0) | at startup and at each UTC day change |
+
+- `message_key` is a hash of the verified sender and the Message-ID (the
+  id itself is not stored); `products` are the products' `nagus.deal/v1`
+  lines with `compare_at_cents` and `vision_model`. A stored line is
+  re-validated by `deal.Decode` when re-emitted; one that no longer
+  validates makes the message be processed again.
+- A deferred message (the budget ran out mid-message, a transient failure)
+  is NOT recorded: it is retried, and the readings already made are reused.
+- Re-emitted products are the same listings, so offers keep being seen while
+  the mail is in the lookback window and expiry is unchanged. With vision
+  OFF, products already agreed keep being re-emitted from the ledger.
+- A stored product is RE-JUDGED on restore: deal.Decode, the category fit
+  and the link/slug match run again, and products judged under another
+  `RulesVersion` are not re-emitted -- the message is processed again
+  (readings reused: fetches and link resolutions, no vision calls). A rule
+  fix therefore clears earlier false positives at once, not at purge.
+- The daily usage is read and written OUTSIDE the budget's lock, so a slow
+  database stalls only the caller; memory stays authoritative.
+- Purged in the existing retention pass (complete fetches only): a promo
+  source's messages, and the shared readings and days, older than its
+  lookback + 2 days (`pipeline.Ingester.MailStateWindow`).
+- Without the offer layer everything stays in memory, as before.
+- New tables only: `CREATE TABLE IF NOT EXISTS`, no backfill; an older binary
+  ignores them.
+
+## Mailbox hygiene (nagus-c0s, operator: "mark read now, delete after 30d")
+
+All nagus imap sources share ONE mailbox and filter it by sender; the deal
+sources read the same household mail; email offers stay listed by being
+re-read inside the 14-day lookback. A single janitor per mailbox (run config
+`imapJanitor`, off by default) is its ONLY writer -- the sources keep opening
+it read-only (EXAMINE); the janitor SELECTs it read-write:
+
+- MARK (`markSeen`): `\Seen` plus the keyword (default `$NagusProcessed`,
+  when the server allows keywords; otherwise `\Seen` alone and UNSEEN as the
+  candidate filter) once EVERY source whose senders or forwarders match the
+  message's From has completed a fetch that BEGAN after the message's
+  INTERNALDATE (2 minutes of clock margin), in the same UIDVALIDITY, without
+  leaving it pending (a temporary DKIM key failure). A message matching no
+  source is marked once every source sharing the mailbox has. A source's
+  "complete" includes its wrapper's (a promo source that deferred work is
+  not complete).
+  - Why no per-source keyword or table: a source re-reads its whole window
+    each poll, so one complete fetch begun after arrival has processed or
+    permanently refused every message of its senders. The sources' last
+    fetch reports, in memory, are therefore the record; after a restart
+    marking only waits one poll cycle. And a per-source keyword would make
+    every source a writer.
+  - Marking changes nothing nagus reads: sources search by date and sender,
+    never by `\Seen`.
+- DELETE (`deleteAfterDays`, default 0 = never; 30 recommended): at most
+  once a day, every message whose INTERNALDATE is at least deleteAfterDays
+  x 24h old -- measured EXACTLY from each candidate's INTERNALDATE; IMAP
+  SEARCH BEFORE compares dates in the server's view of each message's zone,
+  so it only narrows the candidates (a day later than the cutoff, none
+  missed) -- is flagged `\Deleted` and removed with UID EXPUNGE. A server
+  without UID EXPUNGE (no UIDPLUS, not IMAP4rev2) is NOT cleaned
+  (fail closed, `nagus_imap_janitor_delete_skipped_total`): a plain EXPUNGE
+  would also remove messages a human or another client flagged `\Deleted`.
+  Startup REFUSES a deleteAfterDays not greater than the largest
+  `imapLookbackDays` of the sources sharing the mailbox plus one day.
+- `dryRun` DEFAULTS TO TRUE: it counts what would be marked and deleted,
+  opens the mailbox read-only (EXAMINE) and changes nothing; the janitor
+  writes only with `dryRun: false`. The mailbox name INBOX matches
+  case-insensitively, other names exactly.
+- Each pass has a 5-minute connection deadline and ends when nagus shuts
+  down.
+  Logs carry counts only, never an address. Metrics
+  `nagus_imap_janitor_{runs,errors,marked,deleted,dry_run_marked,dry_run_deleted}_total`
+  and `nagus_imap_janitor_last_run_timestamp_seconds`.
+- It runs every `intervalMinutes` (default 15), first after one interval so
+  the sources have polled.
 
 ## Observability
 

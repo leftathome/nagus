@@ -241,6 +241,9 @@ type RunConfig struct {
 	Sources         []SourceConfig            `json:"sources"`
 	Categories      map[string]CategoryConfig `json:"categories"`
 	DefaultCategory string                    `json:"defaultCategory,omitempty"`
+	// IMAPJanitor is the shared deals mailbox's janitor (nagus-c0s): mark
+	// processed mail read, delete old mail. Off unless enabled.
+	IMAPJanitor *IMAPJanitorConfig `json:"imapJanitor,omitempty"`
 }
 
 // LoadRunConfig reads and validates config.json.

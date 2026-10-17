@@ -75,6 +75,9 @@ type categoryOpts struct {
 	// promo is the state every promo-vision-v1 source shares (nagus-3ua);
 	// nil outside serve (a lone promo source then gets its own).
 	promo *promoRuntime
+	// imapConns collects the imap connectors built, by source id, for the
+	// mailbox janitor (nagus-c0s); nil outside serve.
+	imapConns *map[string]imapConn
 	// sanitizer is the trust boundary every ingested listing crosses; nil is
 	// the in-process Passthrough. Set from NAGUS_GLOVEBOX_SANITIZE_URL and
 	// NAGUS_GLOVEBOX_TOKEN by sanitizerFromEnv (nagus-9ib).
@@ -294,13 +297,18 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
-		return imapmail.NewConnector(imapmail.Config{
+		conn, err := imapmail.NewConnector(imapmail.Config{
 			Name: s.Name, From: s.IMAPFrom, DKIMDomain: s.IMAPDKIMDomain, Mailbox: s.IMAPMailbox,
 			LookbackDays: s.IMAPLookbackDays, Forwarders: s.IMAPForwarders, Parser: p, Logf: o.logf,
 			TrustAuthResults: s.IMAPTrustAuthResults,
 			Host:             envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 			Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
 		})
+		if err != nil {
+			return nil, err
+		}
+		o.registerIMAP(conn)
+		return conn, nil
 	case "ttbcola":
 		if len(s.ColaBrands) == 0 && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: ttbcola needs colaBrands (brand names as registered with TTB)", s.Name)
@@ -462,6 +470,9 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 		// passed the line (rv35 I3).
 		ing.HintsNeedGate = isMailDealSource(s)
 		withDealLedger(ing, conn)
+		if isPromoSource(s) {
+			ing.MailStateWindow = promoStateWindow(s)
+		}
 		return ing, nil
 	case "land":
 		ing := category.NewLandIngester(conn, category.LandDeps{
@@ -510,6 +521,9 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			return nil, fmt.Errorf("source %q: %w", s.Name, err)
 		}
 		withDealLedger(ing, conn)
+		if isPromoSource(s) {
+			ing.MailStateWindow = promoStateWindow(s)
+		}
 		return ing, nil
 	case "release":
 		// A release signal is not an offer: no offer layer, no retention purge.

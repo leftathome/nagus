@@ -10,6 +10,9 @@ type: application
 # 0.14.0: offers.priceHistoryRetention renders NAGUS_PRICE_HISTORY_RETENTION
 #   (offer price history window for retain-full sources, nagus-0ta). Unset
 #   keeps the binary default (8760h).
+# 0.16.0: imapJanitor (nagus-c0s) is rendered into config.json: the deals
+#   mailbox janitor (mark processed mail read, delete after deleteAfterDays).
+#   Off by default (enabled: false).
 # 0.15.0: vision.* (nagus-3ua, promo-vision-v1): renders NAGUS_VISION_BASE_URL,
 #   _MODEL, _MAX_CALLS_PER_POLL, _MAX_CALLS_PER_DAY, _TIMEOUT, and an optional
 #   NAGUS_VISION_API_KEY from the new vision ExternalSecret (Vault
@@ -47,7 +50,7 @@ type: application
 # 0.2.0: multi-source/multi-category deployment (dgq) -- renders config.json
 # (sources[]+categories{}) when .Values.sources is set; legacy single-category
 # render unchanged.
-version: 0.15.0
+version: 0.16.0
 appVersion: "0.5.1"
 kubeVersion: ">=1.27.0-0"
 keywords:

@@ -128,6 +128,8 @@ type Message struct {
 	Date    time.Time
 	Text    string // the text/plain part, if any (format=flowed is un-flowed)
 	HTML    string // the text/html part, if any
+	// UIDValidity and UID are where the message is in the mailbox.
+	UIDValidity, UID uint32
 }
 
 // SkipReason is why the connector skipped a message before any parser saw
@@ -258,6 +260,9 @@ type Connector struct {
 	cfg          Config
 	mu           sync.Mutex
 	lastComplete bool
+	// report describes the last fetch that completed (nagus-c0s): what the
+	// mailbox janitor needs to know this source has read a message.
+	report FetchReport
 	// verdicts remembers, per UID key, a message this connector already
 	// refused for a PERMANENT reason, so it is not fetched and re-verified
 	// (a DNS lookup each) on every poll of the lookback window (rv35b
@@ -405,6 +410,8 @@ func (c *Connector) FetchComplete() bool {
 // the offers its parser finds.
 func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	c.setComplete(false)
+	started := c.cfg.Now()
+	pending := map[uint32]bool{}
 	cl, err := c.dial()
 	if err != nil {
 		return nil, fmt.Errorf("imapmail %s: %w", c.cfg.Name, err)
@@ -512,6 +519,8 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 				skipped[why]++
 				if !temporary {
 					c.remember(uidKey(m.UID), why, now)
+				} else {
+					pending[uint32(m.UID)] = true
 				}
 				// Keyed by UID, never by the Message-ID: a spoofer writes
 				// that, and reusing one would hide later spoofs (rv35b NEW-4).
@@ -519,6 +528,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 				continue
 			}
 			msg.Received = at
+			msg.UIDValidity, msg.UID = sel.UIDValidity, uint32(m.UID)
 			raws, err := c.cfg.Parser.Parse(msg)
 			if err != nil {
 				skipped["parse: "+err.Error()]++
@@ -557,8 +567,41 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			c.cfg.Name, len(uids), len(c.senders()), c.cfg.LookbackDays, len(out), skipped)
 	}
 	c.setComplete(true)
+	c.mu.Lock()
+	c.report = FetchReport{Started: started, Complete: true, Mailbox: c.cfg.Mailbox, UIDValidity: sel.UIDValidity, Pending: pending}
+	c.mu.Unlock()
 	return out, nil
 }
+
+// FetchReport describes a source's last COMPLETED fetch: when it began, in
+// which mailbox and UIDVALIDITY, and the messages it could not judge for a
+// TEMPORARY reason (a DNS failure). Every other message of its senders that
+// was in the mailbox when it began has been processed or permanently
+// refused.
+type FetchReport struct {
+	Started     time.Time
+	Complete    bool
+	Mailbox     string
+	UIDValidity uint32
+	Pending     map[uint32]bool
+}
+
+// Report returns the last completed fetch's report (zero before one).
+func (c *Connector) Report() FetchReport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.report
+}
+
+// Addresses is every address this source searches: its senders, then its
+// forwarders, lower-cased.
+func (c *Connector) Addresses() []string { return c.addresses() }
+
+// MailboxName is the mailbox this source reads.
+func (c *Connector) MailboxName() string { return c.cfg.Mailbox }
+
+// LookbackDays is the window this source re-reads each poll.
+func (c *Connector) LookbackDays() int { return c.cfg.LookbackDays }
 
 // senders is every address this source reads as a sender.
 func (c *Connector) senders() []string {

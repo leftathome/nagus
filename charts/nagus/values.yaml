@@ -31,6 +31,24 @@ categories: {}
 # defaultCategory pins the read default when >1 category and a request omits ?category=.
 defaultCategory: ""
 
+# imapJanitor: the shared deals mailbox's janitor (nagus-c0s), rendered into
+# config.json. The only writer of the mailbox (the sources stay read-only):
+# marks mail \Seen + keyword once every source whose senders match it has
+# read it, and deletes mail older than deleteAfterDays (at most once a day;
+# must exceed every sharing source's imapLookbackDays + 1). Off by default.
+imapJanitor:
+  enabled: false
+  # Dry run by DEFAULT: nothing changes until dryRun is set false
+  # explicitly (the first live run deletes the whole backlog older than
+  # deleteAfterDays, unmatched household mail included).
+  dryRun: true
+  # mailbox: INBOX
+  # markSeen: true
+  # keyword: $NagusProcessed
+  # deleteAfterDays defaults to 0 (never delete); 30 is the recommended value.
+  # deleteAfterDays: 30
+  # intervalMinutes: 15
+
 # The long-running `nagus serve` process: the MCP server at /mcp (agent-facing,
 # tools search_items + get_item) plus a plain-HTTP read-only pull at /search +
 # /item, plus an optional in-process ingest loop (sqlite is single-writer, so one
