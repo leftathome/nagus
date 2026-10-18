@@ -53,6 +53,9 @@ type PromoMessage struct {
 	UIDValidity, UID uint32
 	ProcessedAt      time.Time
 	Outcome          string
+	// RulesVersion is the caller's rules version the message was processed
+	// under; a caller reprocesses a message of another version.
+	RulesVersion string
 	// Products is the caller's encoding of what to re-emit.
 	Products []byte
 }

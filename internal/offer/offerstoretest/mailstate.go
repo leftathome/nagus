@@ -36,13 +36,13 @@ func promoMessageRoundTrips(t *testing.T, s offer.MailState) {
 		t.Fatalf("missing message: ok %v err %v", ok, err)
 	}
 	pm := offer.PromoMessage{SourceID: "imap:promo", MessageKey: "k1", UIDValidity: 4000000001, UID: 4000000002,
-		ProcessedAt: T0, Outcome: "processed", Products: []byte(`[{"line":"{}"}]`)}
+		ProcessedAt: T0, Outcome: "processed", RulesVersion: "r1", Products: []byte(`[{"line":"{}"}]`)}
 	if err := s.PutPromoMessage(ctx, pm); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := s.GetPromoMessage(ctx, "imap:promo", "k1")
 	if err != nil || !ok || got.UIDValidity != pm.UIDValidity || got.UID != pm.UID || !got.ProcessedAt.Equal(T0) ||
-		got.Outcome != "processed" || string(got.Products) != string(pm.Products) {
+		got.Outcome != "processed" || got.RulesVersion != "r1" || string(got.Products) != string(pm.Products) {
 		t.Fatalf("round trip: %+v ok %v err %v", got, ok, err)
 	}
 	// Replace, and scoped by source.

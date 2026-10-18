@@ -223,6 +223,9 @@ var rowDetailKeys = []string{
 	// where a wine offer can legally ship: a row surfaced for one destination
 	// (a gift, another user's state) must say which destinations it is valid for
 	"ship_legal_to",
+	// a retailer promo product whose link could not be checked against the
+	// image (nagus-3hc)
+	"link_name_verified",
 }
 
 func rowDetails(attrs map[string]string) map[string]string {

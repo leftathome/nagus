@@ -204,12 +204,15 @@ func TestEndToEndNeweggToItems(t *testing.T) {
 			t.Fatalf("poll %d: price %d, want the later mail's 19999", poll, p)
 		}
 	}
-	// Poll 1 read the later mail (20 tiles, 40 calls) and deferred the
-	// older one; poll 2 read only the older mail's one new tile -- the rest
-	// are the same bytes, read once across mails; poll 3 read nothing. The
-	// forged copy never reached the parser.
-	if c := r.fv.calls.Load(); c != 42 {
-		t.Fatalf("vision calls %d, want 42", c)
+	// Each mail has 21 candidates: 20 item tiles plus one banner inside a
+	// tracked link (nagus-3hc: tiles without an item number are resolved via
+	// their link). Poll 1 spent its 40-call budget on 20 of the later mail's
+	// images and deferred; poll 2 read that mail's remaining banner and the
+	// older mail's one new tile (4 calls) -- the rest are the same bytes, read
+	// once across mails; poll 3 read nothing. The forged copy never reached
+	// the parser.
+	if c := r.fv.calls.Load(); c != 44 {
+		t.Fatalf("vision calls %d, want 44", c)
 	}
 	it, _, _ := items.Get(context.Background(), id)
 	if it.SourceURL != wantURL || it.Attributes["capacity_tb"] != "12" {
@@ -242,8 +245,11 @@ func TestEndToEndNeweggToItems(t *testing.T) {
 		`nagus_promo_vision_enabled 1`,
 		`nagus_promo_drops_total{source="imap:promo-newegg",reason="gate_refused"} 1`,
 		`nagus_promo_images_total{source="imap:promo-newegg",stage="kept"} 6`,
-		`nagus_promo_messages_total{source="imap:promo-newegg",outcome="cached"} 3`,
-		`nagus_promo_messages_total{source="imap:promo-newegg",outcome="deferred"} 1`,
+		// 21 candidates no longer fit poll 1's 40-call budget: both mails
+		// defer in poll 1, both finish in poll 2, both are cached in poll 3.
+		`nagus_promo_messages_total{source="imap:promo-newegg",outcome="processed"} 2`,
+		`nagus_promo_messages_total{source="imap:promo-newegg",outcome="cached"} 2`,
+		`nagus_promo_messages_total{source="imap:promo-newegg",outcome="deferred"} 2`,
 		`nagus_promo_vision_budget_exhausted_total{scope="day"} 0`,
 	} {
 		if !strings.Contains(buf.String(), want) {

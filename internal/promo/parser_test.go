@@ -248,9 +248,11 @@ func TestParserVisionOffAndTransient(t *testing.T) {
 	// poll, and the drop is final only after maxAttempts.
 	r := newPRig(t, rigOpts{profile: "newegg", category: deal.CategoryHDD}, "newegg.html")
 	r.fv.set(1, answers{A: product("WD Red Plus 12TB NAS Internal Hard Drive", "219.99", "")})
-	r.fv.fail.Store(1)
-	if raws := r.parse(t, neweggMsg(t)); len(raws) != 0 && r.cands[0].Item == "" {
-		t.Fatal("unexpected")
+	// The failure is aimed at the drive's own image (id 1), not at whichever
+	// image happens to be read first: no product this poll, retried next.
+	r.fv.failOn(1, 1)
+	if raws := r.parse(t, neweggMsg(t)); len(raws) != 0 {
+		t.Fatalf("the image whose read failed produced %d offers", len(raws))
 	}
 	if !r.p.incomplete() {
 		t.Fatal("a transient vision failure left the poll complete")

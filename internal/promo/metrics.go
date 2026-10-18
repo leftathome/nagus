@@ -54,7 +54,7 @@ var DropReasons = []string{
 	DropFetchFailed, DropTooLarge, DropNotImage, DropSmallImage, DropImgRedirect, DropImgHTTPError,
 	DropVisionFailed, DropNoProduct, DropMultiProduct, DropBadPrice, DropPriceDisagree, DropTitleDisagree, DropCurrency, DropPriceSanity, DropNoTitle,
 	DropLinkOffsite, DropHTTPDowngrade, DropRedirectLoop, DropTooManyHops, DropLinkUnresolved, DropLinkFailed, DropBadItemNumber,
-	DropLinkTitleMismatch, DropDealInvalid, DropSenderNotProfile,
+	DropLinkTitleMismatch, DropLinkUnverifiable, DropDealInvalid, DropSenderNotProfile,
 	DropGateRefused, DropNotInCategory, DropExtractFailed,
 }
 

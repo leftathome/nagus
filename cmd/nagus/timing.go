@@ -230,7 +230,7 @@ func (s *server) withOffers(ctx context.Context, rows []searchRow, known map[str
 		if !ok {
 			continue
 		}
-		rows[i].OfferTiming = s.timingFor(sm)
+		rows[i].OfferTiming = withLinkNote(s.timingFor(sm), rows[i].Details["link_name_verified"])
 		if sm.Resolution.State == offer.ResolutionResolved {
 			rows[i].ProductID = sm.Resolution.ProductID
 			rows[i].ComparisonKey, rows[i].VintageStatus = offer.ComparisonKey(
@@ -238,4 +238,17 @@ func (s *server) withOffers(ctx context.Context, rows []searchRow, known map[str
 		}
 	}
 	return rows
+}
+
+// linkNotVerifiedNote is appended to a promo row's offer_origin_note when its
+// link could not be checked against the image (nagus-3hc).
+const linkNotVerifiedNote = " The link was not name-verified: the retailer's product URL carries no product name, so it could not be checked against the image; confirm the product at the link."
+
+// withLinkNote appends linkNotVerifiedNote to a promo row whose item says
+// its link was not name-verified.
+func withLinkNote(t *OfferTiming, flag string) *OfferTiming {
+	if t != nil && flag == "false" && t.OfferOriginNote != "" {
+		t.OfferOriginNote += linkNotVerifiedNote
+	}
+	return t
 }

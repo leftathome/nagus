@@ -89,6 +89,39 @@ func canonical(p *Profile, u *url.URL) (string, bool) {
 	return "https://" + host + clean, true
 }
 
+// canonicalAny is canonical, plus Newegg's item-number entry point
+// (/Product/Product.aspx?Item=<item>), which carries its identity in the
+// query: it is rebuilt from the item number by NeweggURL.
+func canonicalAny(p *Profile, u *url.URL) (string, bool) {
+	if c, ok := canonical(p, u); ok {
+		return c, true
+	}
+	host := strings.ToLower(u.Hostname())
+	if p.Canonical == CanonicalNeweggItem && u.Scheme == "https" && slices.Contains(p.ProductHosts, host) &&
+		strings.EqualFold(u.Path, "/Product/Product.aspx") {
+		return NeweggURL(u.Query().Get("Item"))
+	}
+	return "", false
+}
+
+// upgradeRedirect turns an http:// redirect to a host the profile lists as a
+// tracked-link or redirect hop into https:// (wine.com's chain passes
+// http://recs.richrelevance.com, which answers the same over https). Any
+// other http:// target -- a product host, a host not listed -- is left as
+// is and hopOK refuses it (http_downgrade).
+func upgradeRedirect(p *Profile, u *url.URL) *url.URL {
+	host := strings.ToLower(u.Hostname())
+	if u.Scheme != "http" || u.User != nil || (u.Port() != "" && u.Port() != "80") {
+		return u
+	}
+	if !slices.Contains(p.LinkHosts, host) && !slices.Contains(p.RedirectHosts, host) {
+		return u
+	}
+	up := *u
+	up.Scheme, up.Host = "https", host
+	return &up
+}
+
 var trackingSeg = regexp.MustCompile(`[0-9]{8,}|[0-9a-f]{16,}`)
 
 // MinSlugJaccard is the least Jaccard overlap of the slug's and the title's
@@ -215,10 +248,26 @@ func slugOf(canonicalURL string) string {
 	if err != nil {
 		return ""
 	}
+	// Newegg's marketplace item-identity URL (/Product/Product.aspx?Item=9SI...)
+	// names no product: it is slug-less, not a slug "Product.aspx".
+	if strings.EqualFold(path.Base(u.Path), "product.aspx") {
+		return ""
+	}
 	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	// ".../<slug>/p/<item>" (Total Wine, Newegg): the segment before "p";
+	// "/p/<item>" has none.
+	for i := len(segs) - 1; i >= 0; i-- {
+		if segs[i] == "p" {
+			if i > 0 {
+				return segs[i-1]
+			}
+			return ""
+		}
+	}
+	// "/product/<slug>/<id>" or "/product/<id>" (wine.com).
 	for i := len(segs) - 1; i >= 0; i-- {
 		s := segs[i]
-		if s == "p" || s == "product" || allDigits(s) {
+		if s == "product" || allDigits(s) {
 			continue
 		}
 		return s
@@ -339,7 +388,7 @@ func hopOK(p *Profile, u *url.URL) string {
 // Resolve finds a candidate's canonical product URL. A non-empty reason is
 // a drop; temporary reports that a later poll may succeed.
 func (r *Resolver) Resolve(ctx context.Context, p *Profile, c Candidate) (string, string, bool) {
-	if p.Canonical == CanonicalNeweggItem {
+	if p.Canonical == CanonicalNeweggItem && (c.Item != "" || p.pathRe == nil) {
 		u, ok := NeweggURL(c.Item)
 		if !ok {
 			return "", DropBadItemNumber, false
@@ -358,7 +407,7 @@ func (r *Resolver) Resolve(ctx context.Context, p *Profile, c Candidate) (string
 		if why := hopOK(p, cur); why != "" {
 			return "", why, false
 		}
-		if u, ok := canonical(p, cur); ok {
+		if u, ok := canonicalAny(p, cur); ok {
 			// Reached the product URL: stop WITHOUT requesting the page.
 			return u, "", false
 		}
@@ -390,7 +439,7 @@ func (r *Resolver) Resolve(ctx context.Context, p *Profile, c Candidate) (string
 			if err != nil {
 				return "", DropLinkUnresolved, false
 			}
-			cur = next
+			cur = upgradeRedirect(p, next)
 		case code >= 500 || code == http.StatusTooManyRequests:
 			return "", DropLinkFailed, true
 		default:

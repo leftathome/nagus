@@ -110,6 +110,11 @@ func SelectImages(doc string, p *Profile) Selection {
 		return sel
 	}
 	seen := map[string]bool{}
+	// Tiles that carry their own item number fill the cap first; images
+	// found only through their tracked link (no item number on a profile
+	// that has one) come after, so banners never push real tiles over the
+	// cap or ahead in the vision budget. Document order is kept within each.
+	var primary, fallback []Candidate
 	var walk func(n *html.Node, href string)
 	walk = func(n *html.Node, href string) {
 		if n.Type == html.ElementNode {
@@ -124,10 +129,10 @@ func SelectImages(doc string, p *Profile) Selection {
 					sel.skip(SkipDuplicate)
 				} else {
 					seen[c.Src] = true
-					if len(sel.Candidates) >= p.MaxImages {
-						sel.skip(SkipOverCap)
+					if p.altRe != nil && c.Item == "" {
+						fallback = append(fallback, c)
 					} else {
-						sel.Candidates = append(sel.Candidates, c)
+						primary = append(primary, c)
 					}
 				}
 			}
@@ -137,6 +142,13 @@ func SelectImages(doc string, p *Profile) Selection {
 		}
 	}
 	walk(root, "")
+	for _, c := range append(primary, fallback...) {
+		if len(sel.Candidates) >= p.MaxImages {
+			sel.skip(SkipOverCap)
+			continue
+		}
+		sel.Candidates = append(sel.Candidates, c)
+	}
 	return sel
 }
 
@@ -166,11 +178,14 @@ func candidate(n *html.Node, href string, p *Profile) (Candidate, string) {
 	}
 	c := Candidate{Src: u.String(), Alt: alt}
 	if p.altRe != nil {
-		if c.Item = p.itemNumber(alt); c.Item == "" {
+		c.Item = p.itemNumber(alt)
+		if c.Item == "" && p.pathRe == nil {
 			return Candidate{}, SkipNoItem
 		}
 	}
-	if p.Canonical == CanonicalFollowLink {
+	// Without an item number the product is found by following the
+	// tile's tracked link (Newegg mails that dropped the item_ alt).
+	if p.Canonical == CanonicalFollowLink || c.Item == "" && p.altRe != nil {
 		lu, ok := upgradeURL(href)
 		if !ok || !slices.Contains(p.LinkHosts, lu.Host) {
 			return Candidate{}, SkipNoLink

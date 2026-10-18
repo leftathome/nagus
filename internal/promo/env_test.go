@@ -140,6 +140,10 @@ type fakeVision struct {
 	status atomic.Int64
 	// statusB, when non-zero, is the HTTP status of every PromptB call.
 	statusB atomic.Int64
+	// failID (image id + 1) and failIDLeft: the next failIDLeft calls for
+	// that one image answer 503 (see failOn).
+	failID     atomic.Int64
+	failIDLeft atomic.Int64
 }
 
 func newFakeVision(t *testing.T) *fakeVision {
@@ -187,6 +191,11 @@ func newFakeVision(t *testing.T) *fakeVision {
 			return
 		}
 		id, ok := imageID(url)
+		if ok && f.failID.Load() == int64(id)+1 && f.failIDLeft.Load() > 0 {
+			f.failIDLeft.Add(-1)
+			http.Error(rw, "busy", http.StatusServiceUnavailable)
+			return
+		}
 		content := `{"products":[]}`
 		if ok {
 			f.mu.Lock()
@@ -203,6 +212,13 @@ func newFakeVision(t *testing.T) *fakeVision {
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+// failOn makes the next n calls for image id answer 503: a transient
+// failure aimed at one image, whatever order the images are read in.
+func (f *fakeVision) failOn(id uint8, n int64) {
+	f.failID.Store(int64(id) + 1)
+	f.failIDLeft.Store(n)
 }
 
 func (f *fakeVision) set(id uint8, a answers) {

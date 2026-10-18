@@ -85,6 +85,12 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["capacity_tb"] = tb
 	}
 
+	// A retailer promo product whose link had no name slug to check
+	// (nagus-3hc): carried to rows so agents see it.
+	if s.Aspects["link_name_verified"] == "false" {
+		it.Attributes["link_name_verified"] = "false"
+	}
+
 	// Seller trust signals: coarse, non-identifying buckets derived from eBay's
 	// PUBLIC seller data (surfaced by the connector as aspects). Only the bucket
 	// is stored, never the raw percentage/count or the seller username -- so the

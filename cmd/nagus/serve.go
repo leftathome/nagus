@@ -244,7 +244,7 @@ func (s *server) itemWithOffer(ctx context.Context, id string) (itemView, bool, 
 		return itemView{}, false, err
 	}
 	if sm, ok := sums[id]; ok {
-		v.OfferTiming = s.timingFor(sm)
+		v.OfferTiming = withLinkNote(s.timingFor(sm), it.Attributes["link_name_verified"])
 		v.RecentPrices = s.recentPrices(ctx, sm)
 	}
 	return v, true, nil

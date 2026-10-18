@@ -25,8 +25,11 @@ CREATE TABLE IF NOT EXISTS promo_messages (
 	processed_at_ns BIGINT NOT NULL,
 	outcome         TEXT NOT NULL DEFAULT '',
 	products        TEXT NOT NULL DEFAULT '',
+	rules_version   TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (source_id, message_key)
 );
+-- rules_version (nagus-3hc) on a table created before it: catalog-only.
+ALTER TABLE promo_messages ADD COLUMN IF NOT EXISTS rules_version TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_promo_messages_processed ON promo_messages(source_id, processed_at_ns);
 CREATE TABLE IF NOT EXISTS promo_readings (
 	image_sha256 TEXT PRIMARY KEY,
@@ -45,8 +48,8 @@ func (s *Store) GetPromoMessage(ctx context.Context, sourceID, key string) (offe
 	var pm offer.PromoMessage
 	var uv, uid, at int64
 	var products string
-	err := s.pool.QueryRow(ctx, `SELECT uid_validity, uid, processed_at_ns, outcome, products FROM promo_messages
-		WHERE source_id = $1 AND message_key = $2`, sourceID, key).Scan(&uv, &uid, &at, &pm.Outcome, &products)
+	err := s.pool.QueryRow(ctx, `SELECT uid_validity, uid, processed_at_ns, outcome, products, rules_version FROM promo_messages
+		WHERE source_id = $1 AND message_key = $2`, sourceID, key).Scan(&uv, &uid, &at, &pm.Outcome, &products, &pm.RulesVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return offer.PromoMessage{}, false, nil
 	}
@@ -65,11 +68,12 @@ func (s *Store) PutPromoMessage(ctx context.Context, pm offer.PromoMessage) erro
 	if err := pm.Validate(); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO promo_messages (source_id, message_key, uid_validity, uid, processed_at_ns, outcome, products)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	_, err := s.pool.Exec(ctx, `INSERT INTO promo_messages (source_id, message_key, uid_validity, uid, processed_at_ns, outcome, products, rules_version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (source_id, message_key) DO UPDATE SET uid_validity = EXCLUDED.uid_validity, uid = EXCLUDED.uid,
-			processed_at_ns = EXCLUDED.processed_at_ns, outcome = EXCLUDED.outcome, products = EXCLUDED.products`,
-		pm.SourceID, pm.MessageKey, int64(pm.UIDValidity), int64(pm.UID), pm.ProcessedAt.UnixNano(), pm.Outcome, string(pm.Products))
+			processed_at_ns = EXCLUDED.processed_at_ns, outcome = EXCLUDED.outcome, products = EXCLUDED.products,
+			rules_version = EXCLUDED.rules_version`,
+		pm.SourceID, pm.MessageKey, int64(pm.UIDValidity), int64(pm.UID), pm.ProcessedAt.UnixNano(), pm.Outcome, string(pm.Products), pm.RulesVersion)
 	if err != nil {
 		return fmt.Errorf("pgoffer: put promo message: %w", err)
 	}
