@@ -182,6 +182,10 @@ func New(dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("sqliteoffer: mail state schema: %w", err)
 	}
+	if err := migrateMailState(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqliteoffer: migrate mail state: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

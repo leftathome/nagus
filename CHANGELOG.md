@@ -288,6 +288,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Promo mail kept 0 products in production** (nagus-3hc):
+  - wine.com: the richrelevance hops are winecom redirect hosts, and an
+    `http://` redirect to a host the profile lists as a hop is upgraded to
+    https (any other `http://`, the product URL included, is still refused).
+  - wine.com product URLs (`/product/<id>`) and many Newegg link targets
+    (`/p/<item>`) carry no name slug: accepted for profiles declaring
+    `allowSluglessLinks`, and marked `link_name_verified=false`, which rows
+    show in `offer_origin_note`. No headless verification is attempted.
+  - Newegg tiles without an `item_<number>` alt follow their tracked link
+    once to the canonical product URL. Tiles with their own item number fill
+    the per-message image cap first, so banners found only through a link
+    never displace real tiles; the marketplace `Product.aspx?Item=` URL is
+    slug-less (kept unverified), not a slug that never matches.
+  - The link name check is skipped only for profiles that build URLs from
+    item numbers (newegg); for every other profile it always runs. A
+    wine.com slug segment must contain a letter (`/product/1945/123` is
+    refused).
+  - `promo_messages.rules_version` (new column, default '') records the
+    rules per message; messages of another version -- including the ones
+    the first polls stored with no products -- are processed again
+    (readings reused, no vision calls). `RulesVersion` 2026-10-17.2.
+
 - **wine.com promo images were all refused `not_an_image`** (nagus-25g):
   image.richrelevance.com declares `Content-Type: image/jpg`. The declared
   `image/jpg` and `image/pjpeg` now read as `image/jpeg`; the sniffed type

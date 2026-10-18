@@ -25,6 +25,9 @@ const (
 	// another product than the image (an open-time image and its click are
 	// rendered separately and can disagree).
 	DropLinkTitleMismatch = "link_title_mismatch"
+	// DropLinkUnverifiable: the resolved URL has no name slug, and the
+	// profile does not accept such links.
+	DropLinkUnverifiable = "link_unverifiable"
 )
 
 // MinTitleAgreement is the least token overlap (Jaccard) two reads' titles

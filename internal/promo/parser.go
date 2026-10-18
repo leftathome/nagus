@@ -29,6 +29,9 @@ const (
 	// AspectMessageID is the connector's Message-ID aspect; on a promo offer
 	// it holds msgTag of the id, never the id.
 	AspectMessageID = "mail_message_id"
+	// AspectLinkNameVerified is "false" on a product whose link had no name
+	// slug to check against the image (wine.com /product/<id>).
+	AspectLinkNameVerified = "link_name_verified"
 )
 
 // OriginEmailImage is the offer_origin of a product read from an email image.
@@ -86,17 +89,21 @@ type itemResult struct {
 // changes: stored products of another version are not re-emitted, their
 // message is processed again (its readings are reused, so it costs fetches
 // and link resolutions, not vision calls).
-const RulesVersion = "2026-10-17.1"
+const RulesVersion = "2026-10-17.2"
 
 // storedProduct is what promo_messages keeps per kept product: the
 // nagus.deal/v1 line and the extra aspects, everything needed to re-emit the
 // offer exactly as it was first emitted.
 type storedProduct struct {
 	// Rules is the RulesVersion the product was judged under.
-	Rules     string `json:"rules"`
-	Line      string `json:"line"`
-	CompareAt string `json:"compare_at_cents,omitempty"`
-	Model     string `json:"vision_model,omitempty"`
+	Rules string `json:"rules"`
+	// Linked: the URL was reached by following the tracked link (not built
+	// from an item number). Unverified: it had no name slug to check.
+	Linked     bool   `json:"linked,omitempty"`
+	Unverified bool   `json:"unverified,omitempty"`
+	Line       string `json:"line"`
+	CompareAt  string `json:"compare_at_cents,omitempty"`
+	Model      string `json:"vision_model,omitempty"`
 }
 
 type msgEntry struct {
@@ -522,10 +529,17 @@ func (p *Parser) work(ctx context.Context, m imapmail.Message, c Candidate, prev
 	case why != "":
 		return final(3, why)
 	}
-	if prof.Canonical == CanonicalFollowLink && !slugMatchesTitle(u, prod.Title, prof.SlugHasVintage) {
-		return final(3, DropLinkTitleMismatch)
+	// A URL reached by following the tracked link is checked against the
+	// image by its name slug; one with no slug is accepted only where the
+	// profile declares such links, and marked not name-verified. (Image
+	// and link are fetched in the same poll: the residual risk is a click
+	// that resolves to another product than the image showed, documented.)
+	linked := c.Item == ""
+	verified, why := p.linkCheck(linked, u, prod.Title)
+	if why != "" {
+		return final(3, why)
 	}
-	raw, sp, ok := p.toRaw(prod, u)
+	raw, sp, ok := p.toRaw(prod, u, linked, verified)
 	if !ok {
 		return final(3, DropDealInvalid)
 	}
@@ -540,7 +554,30 @@ func (p *Parser) work(ctx context.Context, m imapmail.Message, c Candidate, prev
 // toRaw renders the product as ONE nagus.deal/v1 line and decodes it with the
 // same strict validator a human submission meets, then maps it like one. The
 // stored form re-emits it identically (rawFromStored).
-func (p *Parser) toRaw(prod Product, canonicalURL string) (listing.Raw, storedProduct, bool) {
+// linkCheck judges a resolved URL against the agreed title: (verified, "")
+// when its slug matches; (false, "") for a slug-less link the profile
+// accepts; ("", reason) to drop. A URL built from the tile's own item number
+// (not linked) needs no check -- and only a profile that builds URLs from item
+// numbers (ProductAlt) can produce one: for any other profile the link is
+// always checked, whatever a stored record's Linked flag says.
+func (p *Parser) linkCheck(linked bool, u, title string) (bool, string) {
+	prof := p.cfg.Profile
+	if !linked && prof.ProductAlt != "" {
+		return true, ""
+	}
+	if slugOf(u) == "" {
+		if prof.AllowSluglessLinks {
+			return false, ""
+		}
+		return false, DropLinkUnverifiable
+	}
+	if !slugMatchesTitle(u, title, prof.SlugHasVintage) {
+		return false, DropLinkTitleMismatch
+	}
+	return true, ""
+}
+
+func (p *Parser) toRaw(prod Product, canonicalURL string, linked, verified bool) (listing.Raw, storedProduct, bool) {
 	prof := p.cfg.Profile
 	d := map[string]any{
 		"schema":   deal.SchemaID,
@@ -558,7 +595,7 @@ func (p *Parser) toRaw(prod Product, canonicalURL string) (listing.Raw, storedPr
 	if err != nil {
 		return listing.Raw{}, storedProduct{}, false
 	}
-	sp := storedProduct{Rules: RulesVersion, Line: string(line)}
+	sp := storedProduct{Rules: RulesVersion, Line: string(line), Linked: linked, Unverified: !verified}
 	if p.cfg.Vision != nil {
 		sp.Model = p.cfg.Vision.Model
 	}
@@ -582,10 +619,14 @@ func (p *Parser) rawFromStored(sp storedProduct) (listing.Raw, bool) {
 	if why != deal.ReasonNone || dl.Category != p.cfg.Category || !categoryFit(p.cfg.Category, dl.Title) {
 		return listing.Raw{}, false
 	}
-	if prof.Canonical == CanonicalFollowLink && !slugMatchesTitle(dl.URL, dl.Title, prof.SlugHasVintage) {
+	verified, linkWhy := p.linkCheck(sp.Linked, dl.URL, dl.Title)
+	if linkWhy != "" || verified == sp.Unverified {
 		return listing.Raw{}, false
 	}
 	raw := dl.ToRaw(Key(prof.Name, dl.URL), prof.Principal())
+	if !verified {
+		raw.Aspects[AspectLinkNameVerified] = "false"
+	}
 	raw.Aspects[AspectOrigin] = OriginEmailImage
 	raw.Aspects[AspectProfile] = prof.Name
 	if sp.Model != "" {
@@ -625,6 +666,12 @@ func (p *Parser) restore(e *msgEntry, key string) bool {
 	if !ok {
 		return false
 	}
+	// A message processed under other rules is processed again -- also
+	// one stored with no products (nagus-3hc: the first production polls
+	// stored such messages as final). Its readings are reused.
+	if pm.RulesVersion != RulesVersion {
+		return false
+	}
 	var sps []storedProduct
 	if err := json.Unmarshal(pm.Products, &sps); err != nil {
 		p.cfg.Logf("promo %s: a processed-message record is unreadable; processing the message again", p.cfg.SourceID)
@@ -662,7 +709,7 @@ func (p *Parser) persist(e *msgEntry, key string, m imapmail.Message) {
 	defer cancel()
 	if err := p.cfg.State.PutPromoMessage(ctx, offer.PromoMessage{
 		SourceID: p.cfg.SourceID, MessageKey: key, UIDValidity: m.UIDValidity, UID: m.UID,
-		ProcessedAt: p.cfg.Now(), Outcome: MsgProcessed, Products: b,
+		ProcessedAt: p.cfg.Now(), Outcome: MsgProcessed, RulesVersion: RulesVersion, Products: b,
 	}); err != nil {
 		p.cfg.Logf("promo %s: recording a processed message: %v (it will be processed again after a restart)", p.cfg.SourceID, err)
 	}

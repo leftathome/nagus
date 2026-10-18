@@ -31,8 +31,10 @@ func TestSelectFixtures(t *testing.T) {
 		want          int
 		check         func(t *testing.T, c Candidate)
 	}{
-		{"newegg", "newegg.html", 20, func(t *testing.T, c Candidate) {
-			if !strings.HasPrefix(c.Src, "https://c2.neweggimages.com/") || c.Item == "" {
+		// 20 item tiles plus the one c2 banner inside a tracked link (no item
+		// alt: the link fallback, nagus-3hc).
+		{"newegg", "newegg.html", 21, func(t *testing.T, c Candidate) {
+			if !strings.HasPrefix(c.Src, "https://c2.neweggimages.com/") || (c.Item == "") == (c.Href == "") {
 				t.Errorf("newegg candidate %+v", c)
 			}
 		}},
@@ -116,7 +118,8 @@ func TestSelectNeweggAltAndCap(t *testing.T) {
 		b.WriteString(`<img src="https://c2.neweggimages.com/t` + string(rune('a'+i)) + `.jpg" alt="item_9SIC11UKGE3529">`)
 	}
 	sel := SelectImages(b.String(), ne)
-	if len(sel.Candidates) != ne.MaxImages || sel.Skipped[SkipNoItem] != 1 || sel.Skipped[SkipDuplicate] != 1 || sel.Skipped[SkipOverCap] != 31-ne.MaxImages {
+	// The banner has no item alt and no tracked link: no fallback either.
+	if len(sel.Candidates) != ne.MaxImages || sel.Skipped[SkipNoLink] != 1 || sel.Skipped[SkipDuplicate] != 1 || sel.Skipped[SkipOverCap] != 31-ne.MaxImages {
 		t.Fatalf("candidates %d skipped %v", len(sel.Candidates), sel.Skipped)
 	}
 	if sel.Candidates[0].Item != "34-156-677" || sel.Candidates[1].Item != "9SIC11UKGE3529" {

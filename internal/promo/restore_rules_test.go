@@ -30,7 +30,7 @@ func TestRestoreRejudgesStoredProducts(t *testing.T) {
 			r := newPRig(t, rigOpts{profile: "newegg", category: deal.CategoryHDD, perPoll: 1000, perDay: 1000, state: state}, "newegg.html")
 			b, _ := json.Marshal([]storedProduct{sp})
 			_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{SourceID: r.src, MessageKey: MessageKey(neweggSender, neweggMsg(t).ID),
-				ProcessedAt: testNow, Outcome: MsgProcessed, Products: b})
+				ProcessedAt: testNow, Outcome: MsgProcessed, RulesVersion: RulesVersion, Products: b})
 			r.parse(t, neweggMsg(t))
 			if r.m.Messages(r.src, MsgRestored) != 0 || r.fv.calls.Load() == 0 {
 				t.Fatal("a product today's rules refuse was re-emitted")
@@ -42,7 +42,7 @@ func TestRestoreRejudgesStoredProducts(t *testing.T) {
 	r := newPRig(t, rigOpts{profile: "winecom", category: deal.CategoryWine, perPoll: 1000, perDay: 1000, state: state}, "winecom.html")
 	b, _ := json.Marshal([]storedProduct{{Rules: RulesVersion, Line: line("wine", "Tolaini Al Passo Toscana 2022", "https://www.wine.com/product/caymus-cabernet-sauvignon-2021/1")}})
 	msgID := "wc-rejudge@example.com"
-	_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{SourceID: r.src, MessageKey: MessageKey(wineSender, msgID), ProcessedAt: testNow, Products: b})
+	_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{SourceID: r.src, MessageKey: MessageKey(wineSender, msgID), ProcessedAt: testNow, RulesVersion: RulesVersion, Products: b})
 	if pm, _, _ := state.GetPromoMessage(context.Background(), r.src, MessageKey(wineSender, msgID)); len(pm.Products) == 0 {
 		t.Fatal("setup")
 	}

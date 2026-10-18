@@ -63,7 +63,12 @@ type Profile struct {
 	// SlugHasVintage: the retailer's product slugs carry the vintage, so a
 	// title's year must appear in the slug (wine.com).
 	SlugHasVintage bool `json:"slugHasVintage,omitempty"`
-	MaxImages      int  `json:"maxImages,omitempty"`
+	// AllowSluglessLinks accepts a resolved product URL that carries no name
+	// slug (wine.com /product/<id>, Newegg /p/<item>): the link cannot be
+	// checked against the image, so the offer is marked link not
+	// name-verified. Without it such a link is dropped.
+	AllowSluglessLinks bool `json:"allowSluglessLinks,omitempty"`
+	MaxImages          int  `json:"maxImages,omitempty"`
 
 	altRe  *regexp.Regexp
 	pathRe *regexp.Regexp
@@ -136,6 +141,9 @@ func (p *Profile) init() error {
 	case CanonicalNeweggItem:
 		if p.altRe == nil || p.altRe.NumSubexp() < 1 {
 			return fmt.Errorf("canonical %s needs a productAlt with an item-number group", p.Canonical)
+		}
+		if p.ProductPath != "" && len(p.LinkHosts) == 0 {
+			return fmt.Errorf("canonical %s with a productPath (the tracked-link fallback) needs linkHosts", p.Canonical)
 		}
 	case CanonicalFollowLink:
 		if len(p.LinkHosts) == 0 || p.ProductPath == "" {

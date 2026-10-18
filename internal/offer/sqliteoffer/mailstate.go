@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS promo_messages (
 	processed_at_ns INTEGER NOT NULL,
 	outcome         TEXT NOT NULL DEFAULT '',
 	products        TEXT NOT NULL DEFAULT '',
+	rules_version   TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (source_id, message_key)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_promo_messages_processed ON promo_messages(source_id, processed_at_ns);
@@ -38,13 +39,42 @@ CREATE TABLE IF NOT EXISTS vision_usage (
 ) WITHOUT ROWID;
 `
 
+// migrateMailState adds columns added after promo_messages first shipped.
+// SQLite has no ADD COLUMN IF NOT EXISTS.
+func migrateMailState(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(promo_messages)`)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		have[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !have["rules_version"] {
+		if _, err := db.Exec(`ALTER TABLE promo_messages ADD COLUMN rules_version TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add column rules_version: %w", err)
+		}
+	}
+	return nil
+}
+
 // GetPromoMessage implements offer.MailState.
 func (s *Store) GetPromoMessage(ctx context.Context, sourceID, key string) (offer.PromoMessage, bool, error) {
 	var pm offer.PromoMessage
 	var uv, uid, at int64
 	var products string
-	err := s.db.QueryRowContext(ctx, `SELECT uid_validity, uid, processed_at_ns, outcome, products FROM promo_messages
-		WHERE source_id = ? AND message_key = ?`, sourceID, key).Scan(&uv, &uid, &at, &pm.Outcome, &products)
+	err := s.db.QueryRowContext(ctx, `SELECT uid_validity, uid, processed_at_ns, outcome, products, rules_version FROM promo_messages
+		WHERE source_id = ? AND message_key = ?`, sourceID, key).Scan(&uv, &uid, &at, &pm.Outcome, &products, &pm.RulesVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return offer.PromoMessage{}, false, nil
 	}
@@ -63,11 +93,12 @@ func (s *Store) PutPromoMessage(ctx context.Context, pm offer.PromoMessage) erro
 	if err := pm.Validate(); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO promo_messages (source_id, message_key, uid_validity, uid, processed_at_ns, outcome, products)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO promo_messages (source_id, message_key, uid_validity, uid, processed_at_ns, outcome, products, rules_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (source_id, message_key) DO UPDATE SET uid_validity = excluded.uid_validity, uid = excluded.uid,
-			processed_at_ns = excluded.processed_at_ns, outcome = excluded.outcome, products = excluded.products`,
-		pm.SourceID, pm.MessageKey, int64(pm.UIDValidity), int64(pm.UID), pm.ProcessedAt.UnixNano(), pm.Outcome, string(pm.Products))
+			processed_at_ns = excluded.processed_at_ns, outcome = excluded.outcome, products = excluded.products,
+			rules_version = excluded.rules_version`,
+		pm.SourceID, pm.MessageKey, int64(pm.UIDValidity), int64(pm.UID), pm.ProcessedAt.UnixNano(), pm.Outcome, string(pm.Products), pm.RulesVersion)
 	if err != nil {
 		return fmt.Errorf("sqliteoffer: put promo message: %w", err)
 	}

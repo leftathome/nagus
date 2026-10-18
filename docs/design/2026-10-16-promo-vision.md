@@ -376,6 +376,47 @@ Also from production: image.richrelevance.com serves JPEGs as
 `Content-Type: image/jpg`; the declared `image/jpg` / `image/pjpeg` are now
 read as `image/jpeg` (the sniffed type is still required to be an image).
 
+## Production fixes (nagus-3hc, 2026-10-17)
+
+The first production polls read 16 images, agreed on 9 and kept 0:
+
+- **wine.com's link chain** (traced live, hosts and paths only):
+  `links.e.wine.com/uni/ls/click` -302-> `image.richrelevance.com/rrmail/click/recs`
+  -303-> `http://recs.richrelevance.com/rrserver/click` -301->
+  `https://www.wine.com/product/<id>`. Both richrelevance hosts are winecom
+  `redirectHosts`, and a redirect to `http://` on a host the profile lists as
+  a tracked-link or redirect hop is UPGRADED to https (recs.richrelevance.com
+  answers the same over https); `http://` to any other host, the product
+  host included, is still refused (`http_downgrade`).
+- **Slug-less product URLs.** wine.com's are `/product/<id>`, and Newegg's
+  link targets are often `/p/<item>`: there is no name to check against the
+  image. A profile may declare `allowSluglessLinks` (winecom, newegg): such
+  a product is kept and marked LINK NOT NAME-VERIFIED -- aspect
+  `link_name_verified=false`, carried by the extractors to the item, and
+  appended to the row's `offer_origin_note`. Where a slug exists the
+  slug/vintage checks apply as before; a profile without the flag drops a
+  slug-less link (`link_unverifiable`). Headless verification of wine.com is
+  NOT attempted: it serves a CAPTCHA to automation and 403 to plain
+  clients, and nagus does not evade either. Residual risk: an open-time
+  image and its click are rendered separately and could name different
+  products; the image fetch and the link resolution of a product happen in
+  the same poll, which narrows it, and the note tells the agent to confirm
+  at the link.
+- **Newegg tiles without `item_<number>`.** The newest Newegg mails dropped
+  the alt. A tile without an item number inside a `l.promo.newegg.com` link
+  is resolved by following the link once (traced: `l.promo.newegg.com/rts/go2.aspx`
+  -302-> `https://www.newegg.com:443/p/<item>?...`); accepted product URLs
+  are `/<slug>/p/<item>`, `/p/<item>` and `/Product/Product.aspx?Item=<item>`
+  (rebuilt from the item number). A tile with an item number is never
+  followed, as before.
+- **Rules version per message.** Messages processed under the old rules
+  were stored FINAL with zero products, so the ledger would never have
+  revisited them. `promo_messages.rules_version` (new column; `ALTER TABLE
+  ... ADD COLUMN IF NOT EXISTS` on Postgres, a checked ADD COLUMN on
+  SQLite, default '') records `RulesVersion` per message; a message of any
+  other version is processed again (readings reused: fetches and link
+  resolutions, no vision calls). `RulesVersion` is now `2026-10-17.2`.
+
 ## Persistence (nagus-p7x, operator: "we need to not reprocess those deals on restart")
 
 A restart costs ZERO vision calls, image fetches and link resolutions for
@@ -385,7 +426,7 @@ implement the same `offer.MailState` contract, `offerstoretest`):
 
 | table | key | columns | written | read |
 |---|---|---|---|---|
-| `promo_messages` | (source_id, message_key) | uid_validity, uid (hints), processed_at_ns, outcome, products (JSON) | when a message reaches a FINAL outcome (every image final) | on the first poll that meets the message in a process: its products are re-emitted, nothing is fetched or read |
+| `promo_messages` | (source_id, message_key) | uid_validity, uid (hints), processed_at_ns, outcome, products (JSON), rules_version | when a message reaches a FINAL outcome (every image final) | on the first poll that meets the message in a process: its products are re-emitted, nothing is fetched or read |
 | `promo_readings` | image_sha256 | readings (JSON: both reads), stored_at_ns | after both reads of an image | before reading an image, behind the in-memory front |
 | `vision_usage` | day (UTC, `2006-01-02`) | calls | every reservation and refund (one upsert, never below 0) | at startup and at each UTC day change |
 

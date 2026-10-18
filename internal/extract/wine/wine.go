@@ -196,6 +196,12 @@ func (e *Extractor) Extract(_ context.Context, s listing.Sanitized) (item.Item, 
 		it.Attributes["critic_scores"] = renderRawScores(raw)
 	}
 
+	// A retailer promo product whose link had no name slug to check
+	// (nagus-3hc): carried to rows so agents see it.
+	if s.Aspects["link_name_verified"] == "false" {
+		it.Attributes["link_name_verified"] = "false"
+	}
+
 	// Per-source channel/legality stamps (aspect values are untrusted like
 	// any other: only the recognized vocabulary passes through). The
 	// legal-destination set is re-rendered from its VALIDATED tokens, and is
