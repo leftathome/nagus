@@ -29,8 +29,8 @@ stages:
 variables:
   # The Go toolchain for the GATES (test + vulncheck). Pinned to an explicit
   # patch version, and it MUST equal the version the Dockerfile's digest-pinned
-  # builder resolves to -- golang:1.26.9 amd64 is
-  # sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea,
+  # builder resolves to -- golang:1.26.10 amd64 is
+  # sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b,
   # which is exactly the Dockerfile's build-amd64 pin. Bump both together.
   #
   # WHY PINNED (nagus-ghb, 2026-08-30). This was the floating tag `golang:1.26`,
@@ -74,16 +74,16 @@ variables:
   # both pin `docker.io/golang:1.26@sha256:...` by digest and both are green;
   # only nagus used the tag, and only nagus was red.
   #
-  # The digest below IS golang 1.26.9 linux/amd64 -- verified by reading its
-  # config blob (GOLANG_VERSION=1.26.9, 2026-10-16; was 1.26.6) -- and is byte-identical to the
+  # The digest below IS golang 1.26.10 linux/amd64 -- verified by reading its
+  # config blob (GOLANG_VERSION=1.26.10, 2026-10-22; was 1.26.9, before that 1.26.6) -- and is byte-identical to the
   # Dockerfile's build-amd64 pin. So this does not merely restore the gate, it
   # makes "the gate runs what ships" structural instead of a comment two humans
   # have to keep in sync. The gates run amd64 (ci-templates defaults
   # KUBERNETES_NODE_SELECTOR_ARCH to amd64), so the amd64 pin is the correct one.
   #
   # Refresh together with the Dockerfile when bumping the base:
-  #   crane digest --platform linux/amd64 docker.io/library/golang:1.26.9
-  GO_IMAGE: "docker.io/golang:1.26@sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea"
+  #   crane digest --platform linux/amd64 docker.io/library/golang:1.26.10
+  GO_IMAGE: "docker.io/golang:1.26@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b"
   GOPATH: "$CI_PROJECT_DIR/.cache/go"
   GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
   GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
@@ -229,8 +229,8 @@ vulncheck:
 # GOLANGCI_LINT_VERSION in scripts/lint.sh.
 #
 # TOOLCHAIN. The image bundles Go 1.26.2 (its config GOLANG_VERSION); the gates
-# and the shipped binary use 1.26.9 (GO_IMAGE). GOTOOLCHAIN makes the image's go
-# switch to exactly 1.26.9, so the linter type-checks against the stdlib that
+# and the shipped binary use 1.26.10 (GO_IMAGE). GOTOOLCHAIN makes the image's go
+# switch to exactly 1.26.10, so the linter type-checks against the stdlib that
 # ships. Same minor as the linter's own build Go, so no version panic (a
 # v2.12.x linter panics against a newer MINOR such as go1.27). Bump with
 # GO_IMAGE. The toolchain download lands in GOMODCACHE, which is cached; the
@@ -243,7 +243,7 @@ lint:
   image: "docker.io/golangci/golangci-lint:v2.12.2@sha256:6ffe652d2215f590fcf6c6edcda8959c7a765a09378c200d31e098f7516f16c9"
   retry: *infra_retry
   variables:
-    GOTOOLCHAIN: "go1.26.9"
+    GOTOOLCHAIN: "go1.26.10"
   before_script:
     - |
       for i in 1 2 3 4 5; do

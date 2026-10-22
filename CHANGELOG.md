@@ -288,6 +288,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Go 1.26.10** (security). The CI gates, the lint job's GOTOOLCHAIN and
+  both Dockerfile builders move from golang 1.26.9 to 1.26.10, pinned by
+  single-platform digest (amd64 `sha256:3eca740e...`, arm64
+  `sha256:76182005...`), for GO-2026-6809 (crypto/x509: distrust compromised
+  intermediate certificates; reachable from the deals mailbox janitor's TLS
+  dial). govulncheck: no called vulnerabilities.
+
 - **Promo mail kept 0 products in production** (nagus-3hc):
   - wine.com: the richrelevance hops are winecom redirect hosts, and an
     `http://` redirect to a host the profile lists as a hop is upgraded to
