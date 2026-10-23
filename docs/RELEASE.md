@@ -6,14 +6,24 @@ nagus follows [Semantic Versioning](https://semver.org). A release is a git tag
 
 ## Cutting a release
 
-1. Ensure `main` is green: `go vet ./... && go test ./... -count=1 -race`.
+1. Ensure `main` is green: its latest pipeline (lint, test with `-race` and the
+   Postgres service, govulncheck) passed.
 2. Update `CHANGELOG.md` -- move the pending notes under a new `## [X.Y.Z]`
    heading with the date.
 3. Bump `charts/nagus/Chart.yaml` `version` **and** `appVersion` to `X.Y.Z`
    (on a tag the pipelines stamp the chart from the tag anyway, but keep the
    committed values in sync so a plain `main` build publishes the right number).
-4. Commit (`chore(release): vX.Y.Z`) and push `main`.
-5. Tag and push:
+   **`X.Y.Z` must be greater than the chart `version` already on `main`**: MRs
+   between releases bump the chart (new values, templates), and the tag
+   pipeline publishes chart `X.Y.Z`, so a lower release number would publish a
+   chart below one already deployed and later collide with an existing chart
+   version. (0.17.0 re-synced the two after 0.5.1 / chart 0.16.0 drifted.)
+   Corollary: after a release, `main` pushes republish chart `X.Y.Z`, so the
+   next MR that changes the chart must also bump its `version`.
+4. Commit (`chore(release): vX.Y.Z`) on a release branch and open an MR. It
+   gets an independent review that fact-checks the release notes against the
+   merged code; the operator merges it.
+5. Tag the merge commit and push the tag:
 
    ```
    git tag vX.Y.Z
@@ -28,7 +38,7 @@ nagus follows [Semantic Versioning](https://semver.org). A release is a git tag
 
 | stage | artifact |
 |---|---|
-| `test` | vet + `-race` gate |
+| `test` | `lint` and vet + `-race` tests (Postgres service) in parallel, then `vulncheck` |
 | `build` | kaniko image -> the in-cluster GitLab Container Registry |
 | `chart` | `charts/nagus` -> OCI chart, version stamped from the tag |
 | `release` | a GitLab Release for the tag |

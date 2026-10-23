@@ -6,13 +6,69 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-23
+
+The release number jumps from 0.5.1 to 0.17.0 on purpose: between releases the
+chart's `version` advanced to 0.16.0 while `appVersion` stayed 0.5.1, and the
+tag pipeline stamps both from the tag. 0.17.0 puts them back in step; from now
+on they move together (see docs/RELEASE.md).
+
+Highlights:
+
+- **Deal submission by email**: `nagus.deal/v1` JSONL from DKIM-verified,
+  allowlisted senders, with the `deal_submission_spec` and
+  `deal_submission_status` MCP tools.
+- **New deals for agents**: offer timing on every row, expired and ended
+  listings hidden, and the `new_deals` and `list_watches` MCP tools.
+- **Offer price history**: the `offer_price_history` table, per-product
+  roll-ups, the `price_history` MCP tool, and `recent_prices` on items.
+- **Image-only retailer promo mail becomes deals** (`promo-vision-v1`): product
+  images read twice by a vision model; links resolved once to clean product
+  URLs; ARC-seal trust for provider-altered stored copies; promo state
+  persisted across restarts; an opt-in deals-mailbox janitor (dry run by
+  default).
+- **`wineShipsTo`**, an operator-declared per-source shipping list.
+- **Wine identity comes from quark** (the LWIN resolver is removed), plus many
+  wine-extractor accuracy fixes.
+- **Security**: built with Go 1.26.10 (GO-2026-6809; earlier 1.26.9 for the
+  net/http, net/textproto and crypto/tls advisories) and golang.org/x/net
+  v0.60.0.
+- **CI**: a golangci-lint v2 job with gofumpt and goimports.
+- **`/mcp` runs on go-service-kit**: initialize agrees only to protocol
+  `2025-06-18`, a browser `Origin` gets 403 and a body over 1 MiB gets 413.
+- **imap no longer trusts Authentication-Results headers by default**, and
+  refuses messages with duplicate From, Sender, Subject or Message-ID.
+- **quark identity hints**: title text hints, the Shopify part-number re-key
+  and serverpartdeals collections; a vintage-aware `comparison_key`.
+
+Before upgrading, read **Upgrade notes** below: deploy quark with its LWIN
+catalog first (QUARK-04), then expect new tables and offers columns
+(backfilled in the background), new chart values, and the openclaw
+`toolFilter` additions. The chart versions 0.12.0-0.16.0 cited in the notes
+were main-branch builds between releases; all of them are in chart 0.17.0.
+
+Known gaps:
+
+- The mailbox janitor is off and in dry run by default: it changes the mailbox
+  only with `enabled: true` and `dryRun: false`, and deletes only with
+  `deleteAfterDays` set (default 0 = never).
+- wine.com product links, and Newegg links reached by following a tracked
+  link, carry no name slug, so they are kept but flagged "link not
+  name-verified".
+- Some real products are still dropped by the promo filters: enterprise
+  drives whose title mentions a server CPU or "precision", and wine titles
+  carrying an ABV percentage (nagus-dk4).
+- eBay price history covers at most the 6-hour eBay content window.
+- The `new_low` watch criterion is not implemented yet.
+
 ### CI
 
 - **New `lint` job** (nagus-cxj, test stage, MR + main + tags): golangci-lint
   v2.12.2 pinned by single-platform linux/amd64 digest, type-checking against
-  Go 1.26.9 (`GOTOOLCHAIN`), via the new `scripts/lint.sh` (also the local
+  Go 1.26.10 (`GOTOOLCHAIN`), via the new `scripts/lint.sh` (also the local
   command). `.golangci.yml` migrated to the v2 format with the same five
-  linters, plus the gofumpt and goimports formatters (quark parity). Existing
+  linters, plus the gofumpt and goimports formatters (quark parity; they took effect in
+  the follow-up !45, which also reformatted the repo with no behaviour change). Existing
   findings fixed rather than waived: staticcheck QF1001 De Morgan rewrites
   (wine appellations/nonwine, genappellations, deal parser, imapmail DKIM
   check, shopify part numbers), QF1002 tagged switches (shopify, zillapi,
@@ -131,8 +187,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carrying a forged `dkim=pass` was accepted. Only nagus's own DKIM
   verification admits a message now; a source behind an MX that does prepend
   A-R can opt back in with `imapTrustAuthResults: true` (refused on deal
-  sources). No imap source is configured in production, so nothing changes
-  there.
+  sources). No imap source was configured in production when this
+  changed.
 - **imap: a message with a duplicate From, Sender, Subject or Message-ID is
   refused** (rv35 C2: DKIM verifies the bottom-most From, the reader took the
   top one). Each candidate's envelope From is checked before its body is
@@ -149,8 +205,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/mcp` is served by go-service-kit's `mcp` package (v0.3.0)** (quark
   QUARK-06). The hand-rolled JSON-RPC core in `cmd/nagus/mcp.go` is deleted;
   what remains is one `mcp.NewTool` per tool and one `mcp.New`. **The agent
-  contract is unchanged**: the tools are still exactly `search_items` and
-  `get_item`, with the same input schemas, and structuredContent keeps its
+  contract of the existing tools is unchanged**: `search_items` and
+  `get_item` keep the same input schemas, and structuredContent keeps its
   shape (`{matched, filtered, items}` for a search, the item object for
   `get_item`). Verified end to end with `@modelcontextprotocol/sdk` 1.29.0,
   the client in the openclaw gateway image. The nagus-w1p guarantees (values
@@ -546,11 +602,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `nagus_promo_*` (messages, image stages, drop reasons, vision calls,
   budgets). `deal_submission_status` does not cover retailer principals.
   The two reads must also carry the same numbers (capacity, vintage); for
-  wine.com/Total Wine the product URL's slug must match the agreed title
+  wine.com/Total Wine the product URL's slug, when the URL carries one, must
+  match the agreed title
   (`link_title_mismatch`); a promo offer's `mail_message_id` is a tag, never
   the retailer's Message-ID; readings are cached across mails by image
-  hash and mail is read newest first. The vision budget is in memory: a
-  restart starts a fresh daily allowance (nagus-p7x). Stored titles must
+  hash and mail is read newest first. The daily vision budget is
+  persisted (nagus-p7x; see Promo state survives restarts). Stored titles must
   have every number confirmed by the second read; the link-slug check
   compares content tokens (a producer's other wine is refused); prebuilt
   PCs and NAS boxes are refused on hdd sources; a 401/403 from the vision
@@ -567,7 +624,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ...); titles and slugs are accent-folded; PC lines and NAS boxes are read
   on the full hdd title. Other numbers in a slug and title (a Bin number)
   must agree when both carry them, and wine.com slugs (which carry the
-  vintage) must carry the title's year.
+  vintage) must carry the title's year, when the URL carries a slug.
 
 - **Offer price history** (nagus-0ta; design
   `docs/design/2026-10-03-offer-price-history.md`). An append-only
@@ -609,11 +666,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `since` must be RFC 3339, at most 5 minutes ahead and 30 days back.
   `list_watches(name, limit)` lists active watches with their strong
   criteria and live candidate/strong counts (never `principal`), or one
-  watch's strong matches, capped at `limit` (default 25).
+  watch's strong matches, capped at `limit` (default 25). Both input schemas
+  are pinned in tests next to the unchanged `search_items` and `get_item`
+  schemas.
 - **Listings whose source-stated end has passed are hidden** from search,
   watches and new_deals like expired ones (an ended eBay auction no longer
-  waits ~90 minutes for expiry); get_item marks them ENDED. Both input schemas are pinned in tests next to the unchanged
-  `search_items` and `get_item` schemas.
+  waits ~90 minutes for expiry); get_item marks them ENDED.
 - **Offer timing on every row** (search_items, /search, /watches, get_item,
   /item, new_deals, list_watches): `first_seen_at`, `last_seen_at`,
   `price_changed_at`, `previous_price_cents`, `lowest_price_cents`,
