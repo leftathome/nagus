@@ -762,8 +762,10 @@ func (c *Connector) verifyWith(raw []byte, received time.Time, temporary *atomic
 	}
 	subject, _ := h.Subject()
 	date, _ := h.Date()
-	msg := Message{ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder,
-		Reply: h.Has("In-Reply-To") || h.Has("References")}
+	msg := Message{
+		ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder,
+		Reply: h.Has("In-Reply-To") || h.Has("References"),
+	}
 	for {
 		p, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {

@@ -501,8 +501,10 @@ func TestChannelTaggerProducer(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := listing.Raw{SourceKey: "k", Title: "2021 The Estates Merlot, Oak Knoll", Aspects: map[string]string{"vendor": "RMW"}}
-			tag := &channelTagger{inner: &fakeWineConn{id: "s", raws: []listing.Raw{raw}},
-				src: mustSource(t, tc.channel, "US-CA"), rules: shipping.DefaultRules(), producer: tc.declared}
+			tag := &channelTagger{
+				inner: &fakeWineConn{id: "s", raws: []listing.Raw{raw}},
+				src:   mustSource(t, tc.channel, "US-CA"), rules: shipping.DefaultRules(), producer: tc.declared,
+			}
 			got, err := tag.Fetch(context.Background())
 			if err != nil {
 				t.Fatal(err)

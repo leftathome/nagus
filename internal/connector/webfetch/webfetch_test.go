@@ -42,13 +42,15 @@ func TestGetGivesUpOnPersistent429AndCapsTheWait(t *testing.T) {
 	}))
 	defer srv.Close()
 	var max time.Duration
-	c := &Client{HTTP: srv.Client(), MaxRetries: 2, MaxWait: time.Minute,
+	c := &Client{
+		HTTP: srv.Client(), MaxRetries: 2, MaxWait: time.Minute,
 		Sleep: func(_ context.Context, d time.Duration) error {
 			if d > max {
 				max = d
 			}
 			return nil
-		}}
+		},
+	}
 	_, err := c.Get(context.Background(), srv.URL, nil)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want ErrRateLimited", err)

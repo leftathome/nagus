@@ -1,20 +1,41 @@
+# golangci-lint v2 configuration (nagus-cxj). Migrated from the v1 file with
+# `golangci-lint migrate`, then reviewed by hand. Run it with scripts/lint.sh;
+# CI runs the same script in the `lint` job.
+#
+# Linters: the same five the v1 file enabled, listed explicitly (they equal
+# v2's "standard" set, but an implicit default would silently change if v2
+# ever redefines it). In v2 gosimple + stylecheck are folded into staticcheck,
+# so staticcheck also reports the QF*/S*/ST* checks v1 split out.
+# Formatters: gofumpt + goimports, matching agentic/quark (which sets no
+# formatter options, so neither do we). Under v2 a formatter only runs when
+# it is listed in formatters.enable.
 version: "2"
+
+run:
+  # Carried over from the v1 file (v2 has no default timeout).
+  timeout: 5m
+
 linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
   exclusions:
+    # Carried over by `migrate` from v1's default exclude-use-default: true, so
+    # the v1 file's behaviour (no doc-comment / errcheck-on-Close noise) holds.
     generated: lax
     presets:
       - comments
       - common-false-positives
       - legacy
       - std-error-handling
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+
 formatters:
+  enable:
+    - gofumpt
+    - goimports
   exclusions:
     generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$

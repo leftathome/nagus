@@ -107,8 +107,10 @@ func TestDocsCarryTheExamples(t *testing.T) {
 			t.Errorf("docs/deal-submission.md does not show the example %s", ex)
 		}
 	}
-	for _, p := range []string{"../../docs/deal-submission.md", "../../docs/deal-submission-skill.md",
-		"../../docs/design/2026-09-26-deal-submission-jsonl.md", "deal-v1.schema.json"} {
+	for _, p := range []string{
+		"../../docs/deal-submission.md", "../../docs/deal-submission-skill.md",
+		"../../docs/design/2026-09-26-deal-submission-jsonl.md", "deal-v1.schema.json",
+	} {
 		b, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
@@ -202,8 +204,10 @@ func TestToRawMapsHintsPerCategory(t *testing.T) {
 	if raw.PriceCents != 21999 || raw.Currency != "USD" || raw.ConditionRaw != "refurb" || raw.SourceKey != "m1@example.org#L3" {
 		t.Fatalf("hdd raw %+v", raw)
 	}
-	for k, v := range map[string]string{"brand": "Example Digital", "mpn": "EX20T-0001", "capacity_tb": "20",
-		"seller": "Example Store", AspectSubmittedBy: "caspar", AspectSchema: SchemaID} {
+	for k, v := range map[string]string{
+		"brand": "Example Digital", "mpn": "EX20T-0001", "capacity_tb": "20",
+		"seller": "Example Store", AspectSubmittedBy: "caspar", AspectSchema: SchemaID,
+	} {
 		if raw.Aspects[k] != v {
 			t.Errorf("hdd aspect %s = %q, want %q", k, raw.Aspects[k], v)
 		}

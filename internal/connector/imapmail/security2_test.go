@@ -16,8 +16,10 @@ const testMailbox = "deals@example.org"
 func fetchConn(t *testing.T, addr string, mut func(*Config)) *Connector {
 	t.Helper()
 	host, port, _ := net.SplitHostPort(addr)
-	cfg := Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox, Password: "pw",
-		Senders: []string{"household@example.org"}, Parser: &recorder{}, CountIgnored: true, Now: func() time.Time { return now }}
+	cfg := Config{
+		Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox, Password: "pw",
+		Senders: []string{"household@example.org"}, Parser: &recorder{}, CountIgnored: true, Now: func() time.Time { return now },
+	}
 	mut(&cfg)
 	c, err := NewConnector(cfg)
 	if err != nil {

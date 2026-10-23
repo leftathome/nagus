@@ -40,36 +40,66 @@ func num(f float64) *float64 { return &f }
 // meta is keyed by JSON field name. TestSchemaMetaCoversEveryField fails when a
 // Deal field has no entry or an entry names no field.
 var meta = map[string]fieldMeta{
-	"schema": {Description: "Optional format marker. If present it must be exactly " + SchemaID + ".",
-		Const: SchemaID},
-	"category": {Description: "Which nagus category the deal is for. Each needs a deal source enabled for it.",
-		Enum: Categories},
-	"title": {Description: "What is for sale, as the store names it: producer, wine, vintage, size; or brand, model, capacity. Free text; untrusted. Tabs and non-breaking or typographic spaces become plain spaces, runs collapse, ends are trimmed (also in note, seller and brand); the length limit applies after that.",
-		MinLength: 1, MaxLength: MaxTitleLen},
-	"price": {Description: "The price in major units (dollars, not cents), as a decimal string \"24.99\" or a JSON number 24.99. At most 2 decimals; no sign, exponent or separators.",
-		Pattern: PricePattern},
-	"url": {Description: "An https link to the deal, or to the store/product page it is from. Lower-case https:// and host, printable ASCII (an IDN host as punycode), a public DNS host name: no IP address in any form, no userinfo, no port but :443, not .local/.internal/.lan/.home/.corp/.svc/.test/.invalid/.arpa/.onion. Every percent-escape must be valid and at most double-encoded.",
-		MinLength: 1, MaxLength: MaxURLLen, Pattern: URLPattern},
-	"currency": {Description: "ISO 4217 currency code. Default " + DefaultCurrency + ".",
-		Pattern: CurrencyPattern},
-	"seller": {Description: "The store or merchant selling it (e.g. a shop name). Free text; untrusted.",
-		MaxLength: MaxNameLen},
-	"brand": {Description: "hdd: the drive manufacturer (a product hint for identity). wine: the producer/winery, sent with the title as the wine's name hint.",
-		MaxLength: MaxNameLen},
-	"mpn": {Description: "hdd only: the manufacturer part number (a product hint for identity).",
-		MaxLength: MaxMPNLen},
-	"gtin": {Description: "GTIN-8, UPC-A, EAN-13 or GTIN-14 digits. hdd: a product hint; wine: stored, not used for identity.",
-		Pattern: GTINPattern},
-	"vintage": {Description: "wine only: the vintage year.",
-		Minimum: num(MinVintage), Maximum: num(MaxVintage)},
-	"bottle_ml": {Description: "wine only: bottle size in millilitres (750 standard, 1500 magnum).",
-		Minimum: num(MinBottleML), Maximum: num(MaxBottleML)},
-	"capacity_tb": {Description: "hdd only: capacity in terabytes.",
-		Minimum: num(MinCapacityTB), Maximum: num(MaxCapacityTB)},
-	"condition": {Description: "hdd only: the drive's condition.",
-		Enum: Conditions},
-	"note": {Description: "Free-text context (\"in store only\", \"ends Sunday\"). Stored with the deal; never used for identity. Untrusted.",
-		MaxLength: MaxNoteLen},
+	"schema": {
+		Description: "Optional format marker. If present it must be exactly " + SchemaID + ".",
+		Const:       SchemaID,
+	},
+	"category": {
+		Description: "Which nagus category the deal is for. Each needs a deal source enabled for it.",
+		Enum:        Categories,
+	},
+	"title": {
+		Description: "What is for sale, as the store names it: producer, wine, vintage, size; or brand, model, capacity. Free text; untrusted. Tabs and non-breaking or typographic spaces become plain spaces, runs collapse, ends are trimmed (also in note, seller and brand); the length limit applies after that.",
+		MinLength:   1, MaxLength: MaxTitleLen,
+	},
+	"price": {
+		Description: "The price in major units (dollars, not cents), as a decimal string \"24.99\" or a JSON number 24.99. At most 2 decimals; no sign, exponent or separators.",
+		Pattern:     PricePattern,
+	},
+	"url": {
+		Description: "An https link to the deal, or to the store/product page it is from. Lower-case https:// and host, printable ASCII (an IDN host as punycode), a public DNS host name: no IP address in any form, no userinfo, no port but :443, not .local/.internal/.lan/.home/.corp/.svc/.test/.invalid/.arpa/.onion. Every percent-escape must be valid and at most double-encoded.",
+		MinLength:   1, MaxLength: MaxURLLen, Pattern: URLPattern,
+	},
+	"currency": {
+		Description: "ISO 4217 currency code. Default " + DefaultCurrency + ".",
+		Pattern:     CurrencyPattern,
+	},
+	"seller": {
+		Description: "The store or merchant selling it (e.g. a shop name). Free text; untrusted.",
+		MaxLength:   MaxNameLen,
+	},
+	"brand": {
+		Description: "hdd: the drive manufacturer (a product hint for identity). wine: the producer/winery, sent with the title as the wine's name hint.",
+		MaxLength:   MaxNameLen,
+	},
+	"mpn": {
+		Description: "hdd only: the manufacturer part number (a product hint for identity).",
+		MaxLength:   MaxMPNLen,
+	},
+	"gtin": {
+		Description: "GTIN-8, UPC-A, EAN-13 or GTIN-14 digits. hdd: a product hint; wine: stored, not used for identity.",
+		Pattern:     GTINPattern,
+	},
+	"vintage": {
+		Description: "wine only: the vintage year.",
+		Minimum:     num(MinVintage), Maximum: num(MaxVintage),
+	},
+	"bottle_ml": {
+		Description: "wine only: bottle size in millilitres (750 standard, 1500 magnum).",
+		Minimum:     num(MinBottleML), Maximum: num(MaxBottleML),
+	},
+	"capacity_tb": {
+		Description: "hdd only: capacity in terabytes.",
+		Minimum:     num(MinCapacityTB), Maximum: num(MaxCapacityTB),
+	},
+	"condition": {
+		Description: "hdd only: the drive's condition.",
+		Enum:        Conditions,
+	},
+	"note": {
+		Description: "Free-text context (\"in store only\", \"ends Sunday\"). Stored with the deal; never used for identity. Untrusted.",
+		MaxLength:   MaxNoteLen,
+	},
 }
 
 type structField struct {

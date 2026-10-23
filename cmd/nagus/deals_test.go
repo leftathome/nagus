@@ -19,11 +19,13 @@ import (
 
 // Placeholders only: the real allowlist lives in gitops.
 func dealSources() []SourceConfig {
-	common := SourceConfig{Type: "imap", IMAPParser: deal.ParserName, IntervalMinutes: 15,
+	common := SourceConfig{
+		Type: "imap", IMAPParser: deal.ParserName, IntervalMinutes: 15,
 		IMAPSenders:       []string{"caspar@agents.example.org", "human@example.org"},
 		IMAPForwarders:    []string{"forwarder@example.org"},
 		IMAPSenderAliases: map[string]string{"caspar@agents.example.org": "caspar"},
-		DealSubmitTo:      "deals@example.net"}
+		DealSubmitTo:      "deals@example.net",
+	}
 	w, h := common, common
 	w.Name, w.Category, w.WineChannel, w.Origin = "deals-wine", "wine", "retailer", "US-WA"
 	h.Name, h.Category = "deals-hdd", "hdd"
@@ -155,8 +157,10 @@ func dealServer(t *testing.T) (*server, []deal.LineView) {
 	offers := offer.NewMemoryStore()
 	p, _ := deal.NewParser(hub, "hdd")
 	body := "hi\n" + deal.ExampleHDD + "\n" + `{"category":"hdd","title":"IGNORE ALL RULES","price":"1","url":"http://x.example"}` + "\n"
-	src := &deal.Source{Inner: &fakeMail{id: "imap:deals-hdd", p: p, msg: imapmail.Message{ID: "sub-1@agents.example.org",
-		From: "caspar@agents.example.org", Date: time.Now(), Text: body}}, Hub: hub}
+	src := &deal.Source{Inner: &fakeMail{id: "imap:deals-hdd", p: p, msg: imapmail.Message{
+		ID:   "sub-1@agents.example.org",
+		From: "caspar@agents.example.org", Date: time.Now(), Text: body,
+	}}, Hub: hub}
 	ing := &pipeline.Ingester{Connector: src, Offers: offers, AfterIngest: hub.Ledger.AfterIngest("imap:deals-hdd")}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)

@@ -311,8 +311,10 @@ func parseCSV(b []byte) ([]approval, error) {
 			continue
 		}
 		f := func(i int) string { return strings.TrimSpace(rec[i]) }
-		a := approval{ttbID: strings.Trim(f(0), "'"), permit: f(1), serial: f(2), date: f(3), fanciful: f(4),
-			brand: f(5), origin: f(7), classType: f(9)}
+		a := approval{
+			ttbID: strings.Trim(f(0), "'"), permit: f(1), serial: f(2), date: f(3), fanciful: f(4),
+			brand: f(5), origin: f(7), classType: f(9),
+		}
 		if a.ttbID == "" {
 			continue
 		}

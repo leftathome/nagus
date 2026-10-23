@@ -169,8 +169,13 @@ func TestKeyIsOpaqueAndStable(t *testing.T) {
 	}
 	seen := map[string]string{}
 	for _, c := range [][3]string{
-		{"a@x", "m#L1", "2"}, {"a@x", "m", "1"}, {"a@x/y", "m", "1"}, {"a@x", "y/m", "1"},
-		{"a@x", "m", "12"}, {"a@x", "m1", "2"}, {"b@x", "m", "1"},
+		{"a@x", "m#L1", "2"},
+		{"a@x", "m", "1"},
+		{"a@x/y", "m", "1"},
+		{"a@x", "y/m", "1"},
+		{"a@x", "m", "12"},
+		{"a@x", "m1", "2"},
+		{"b@x", "m", "1"},
 	} {
 		var n int
 		if _, err := fmt.Sscan(c[2], &n); err != nil {

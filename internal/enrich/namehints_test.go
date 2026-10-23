@@ -19,8 +19,10 @@ func (w *wineQuark) Resolve(_ context.Context, hints []quark.Hint, _ bool) (quar
 	for i, h := range hints {
 		switch h.Text {
 		case "2019 Cabernet Sauvignon, Walla Walla Valley":
-			out.Results[i] = quark.Result{Route: quark.RouteFuzzy, ProductID: "p-lwin-1101245", Confidence: 100, Standing: "authoritative",
-				Specs: []quark.Spec{{Key: quark.Untrusted{Value: "vintage_mode"}, Value: quark.Untrusted{Value: "vintage"}, Tier: "catalog"}}}
+			out.Results[i] = quark.Result{
+				Route: quark.RouteFuzzy, ProductID: "p-lwin-1101245", Confidence: 100, Standing: "authoritative",
+				Specs: []quark.Spec{{Key: quark.Untrusted{Value: "vintage_mode"}, Value: quark.Untrusted{Value: "vintage"}, Tier: "catalog"}},
+			}
 		case "2019 Reserve Cabernet, Seven Hills Vineyard":
 			out.Results[i] = quark.Result{Route: quark.RouteAdjudicate, Confidence: 100, Reason: "coverage"}
 		default:
@@ -38,8 +40,10 @@ func (w *wineQuark) Resolve(_ context.Context, hints []quark.Hint, _ bool) (quar
 func TestWineNameHintsStampOnlyTheAutoBand(t *testing.T) {
 	s := offer.NewMemoryStore()
 	mk := func(key, title string) offer.Offer {
-		o := offer.Offer{SourceID: "shopify:leonetti", SourceKey: key, PriceCents: 100, LastSeen: t0,
-			ProductHint: offer.ProductHint{Brand: "Leonetti Cellar", Text: title}}
+		o := offer.Offer{
+			SourceID: "shopify:leonetti", SourceKey: key, PriceCents: 100, LastSeen: t0,
+			ProductHint: offer.ProductHint{Brand: "Leonetti Cellar", Text: title},
+		}
 		if err := s.Put(context.Background(), o); err != nil {
 			t.Fatal(err)
 		}
@@ -50,8 +54,10 @@ func TestWineNameHintsStampOnlyTheAutoBand(t *testing.T) {
 	adj := mk("b", "2019 Reserve Cabernet, Seven Hills Vineyard")
 	none := mk("c", "Gift Card")
 	q := &wineQuark{}
-	e := &Enricher{Offers: s, Quark: q, Now: func() time.Time { return t0 },
-		CategoryFor: func(string) string { return "wine" }}
+	e := &Enricher{
+		Offers: s, Quark: q, Now: func() time.Time { return t0 },
+		CategoryFor: func(string) string { return "wine" },
+	}
 	if _, err := e.RunPass(context.Background()); err != nil {
 		t.Fatal(err)
 	}

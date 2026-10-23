@@ -35,17 +35,21 @@ func expFixture(t *testing.T, rows []expRow) (*store.MemoryStore, *offer.MemoryS
 		if price == 0 {
 			price = 10000
 		}
-		it := item.Item{ID: r.id, Category: "hdd", Class: item.ClassDurable, Title: "drive " + r.id,
+		it := item.Item{
+			ID: r.id, Category: "hdd", Class: item.ClassDurable, Title: "drive " + r.id,
 			PriceCents: price, SourceID: "shopify:s", SourceKey: r.id, SeenAt: r.seen,
-			Attributes: map[string]string{"capacity_tb": "16"}}
+			Attributes: map[string]string{"capacity_tb": "16"},
+		}
 		if err := st.Put(ctx, it); err != nil {
 			t.Fatal(err)
 		}
 		if r.status == "" {
 			continue
 		}
-		o := offer.Offer{ID: r.id, SourceID: "shopify:s", SourceKey: r.id, PriceCents: price,
-			FirstSeen: expT0.Add(-24 * time.Hour), LastSeen: r.seen, Status: r.status}
+		o := offer.Offer{
+			ID: r.id, SourceID: "shopify:s", SourceKey: r.id, PriceCents: price,
+			FirstSeen: expT0.Add(-24 * time.Hour), LastSeen: r.seen, Status: r.status,
+		}
 		if r.status == offer.StatusExpired {
 			o.ExpiredAt = r.seen.Add(time.Hour)
 		}
@@ -187,8 +191,10 @@ func TestSurfaceTopUpIsBounded(t *testing.T) {
 	st, offers := expFixture(t, rows)
 	var searches int
 	var logs []string
-	s := &Surface{Store: countingSearch{st, &searches}, Offers: offers, MaxCandidates: 2,
-		Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
+	s := &Surface{
+		Store: countingSearch{st, &searches}, Offers: offers, MaxCandidates: 2,
+		Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) },
+	}
 	res, err := s.Surface(context.Background(), store.Query{Category: "hdd"})
 	if err != nil {
 		t.Fatal(err)
@@ -234,8 +240,10 @@ func TestSurfaceHidesListingsPastTheirStatedEnd(t *testing.T) {
 	})
 	ctx := context.Background()
 	for id, end := range map[string]time.Time{"ended": expT0.Add(-time.Minute), "running": expT0.Add(time.Hour)} {
-		if err := offers.Put(ctx, offer.Offer{ID: id, SourceID: "shopify:s", SourceKey: id, PriceCents: 10000,
-			LastSeen: expT0, Status: offer.StatusActive, EndsAt: end}); err != nil {
+		if err := offers.Put(ctx, offer.Offer{
+			ID: id, SourceID: "shopify:s", SourceKey: id, PriceCents: 10000,
+			LastSeen: expT0, Status: offer.StatusActive, EndsAt: end,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

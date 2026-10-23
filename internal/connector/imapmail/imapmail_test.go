@@ -109,10 +109,12 @@ func (r *recorder) Parse(m Message) ([]listing.Raw, error) {
 func connector(t *testing.T, addr string, p Parser) *Connector {
 	t.Helper()
 	host, port, _ := net.SplitHostPort(addr)
-	c, err := NewConnector(Config{Name: "lastbottle", Host: host, Port: port, TLS: "none",
+	c, err := NewConnector(Config{
+		Name: "lastbottle", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: sender, Parser: p,
 		// These tests exercise the opt-in A-R path (rv35 C1: off by default).
-		TrustAuthResults: true, Now: func() time.Time { return now }, Logf: t.Logf})
+		TrustAuthResults: true, Now: func() time.Time { return now }, Logf: t.Logf,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,9 +173,11 @@ func TestSubdomainSenderWithRelaxedAlignment(t *testing.T) {
 	})
 	host, port, _ := net.SplitHostPort(addr)
 	rec := &recorder{}
-	c, err := NewConnector(Config{Name: "lb-mail", Host: host, Port: port, TLS: "none",
+	c, err := NewConnector(Config{
+		Name: "lb-mail", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: "offers@mail.lastbottlewines.com",
-		Parser: rec, TrustAuthResults: true, Now: func() time.Time { return now }})
+		Parser: rec, TrustAuthResults: true, Now: func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,9 +277,11 @@ func (k *keyring) lookupTXT(name string) ([]string, error) {
 func signedConnector(t *testing.T, addr string, p Parser, kr *keyring, forwarders ...string) *Connector {
 	t.Helper()
 	host, port, _ := net.SplitHostPort(addr)
-	c, err := NewConnector(Config{Name: "lastbottle", Host: host, Port: port, TLS: "none",
+	c, err := NewConnector(Config{
+		Name: "lastbottle", Host: host, Port: port, TLS: "none",
 		Username: "deals@totally.apocryph.al", Password: "pw", From: sender, Parser: p,
-		Forwarders: forwarders, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }, Logf: t.Logf})
+		Forwarders: forwarders, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }, Logf: t.Logf,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,8 +416,10 @@ func TestRealCapturedMessage(t *testing.T) {
 	if f := os.Getenv("NAGUS_IMAP_REAL_FORWARDER"); f != "" {
 		fw = []string{f}
 	}
-	c, err := NewConnector(Config{Name: "real", Host: "h", Username: "u", Password: "p", From: from,
-		Forwarders: fw, Parser: &recorder{}, Logf: t.Logf})
+	c, err := NewConnector(Config{
+		Name: "real", Host: "h", Username: "u", Password: "p", From: from,
+		Forwarders: fw, Parser: &recorder{}, Logf: t.Logf,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,8 +433,10 @@ func TestRealCapturedMessage(t *testing.T) {
 // --- sender allowlist (deal submission, nagus-4uu) ----------------------------
 
 func TestSendersListConfig(t *testing.T) {
-	base := Config{Name: "deals", Host: "h", Username: "u", Password: "p", Parser: &recorder{},
-		Senders: []string{"Agent@Example.org", "human@example.org", "agent@example.org"}}
+	base := Config{
+		Name: "deals", Host: "h", Username: "u", Password: "p", Parser: &recorder{},
+		Senders: []string{"Agent@Example.org", "human@example.org", "agent@example.org"},
+	}
 	c, err := NewConnector(base)
 	if err != nil {
 		t.Fatal(err)
@@ -462,9 +472,11 @@ func TestSendersAreEachVerifiedAndCredited(t *testing.T) {
 	host, port, _ := net.SplitHostPort(addr)
 	var obs []Observation
 	rec := &recorder{}
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
+	c, err := NewConnector(Config{
+		Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
 		Password: "pw", Senders: []string{"agent@agents.example.org", "human@example.org"}, Parser: rec, CountIgnored: true,
-		Observe: func(o Observation) { obs = append(obs, o) }, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
+		Observe: func(o Observation) { obs = append(obs, o) }, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -64,8 +64,10 @@ func (f *fakeQuark) Resolve(_ context.Context, hints []quark.Hint, retry bool) (
 
 func seed(t *testing.T, s offer.Store, source, key, mpn string) offer.Offer {
 	t.Helper()
-	o := offer.Offer{SourceID: source, SourceKey: key, PriceCents: 100, LastSeen: t0,
-		ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn}}
+	o := offer.Offer{
+		SourceID: source, SourceKey: key, PriceCents: 100, LastSeen: t0,
+		ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn},
+	}
 	if err := s.Put(context.Background(), o); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -307,8 +309,10 @@ func TestLastCleanPassTracksOnlyCleanPasses(t *testing.T) {
 func TestTextHintsAreSentAndStamped(t *testing.T) {
 	s := offer.NewMemoryStore()
 	mk := func(key, text string) offer.Offer {
-		o := offer.Offer{SourceID: "ebay:ebay", SourceKey: key, PriceCents: 100, LastSeen: t0,
-			ProductHint: offer.ProductHint{Text: text}}
+		o := offer.Offer{
+			SourceID: "ebay:ebay", SourceKey: key, PriceCents: 100, LastSeen: t0,
+			ProductHint: offer.ProductHint{Text: text},
+		}
 		if err := s.Put(context.Background(), o); err != nil {
 			t.Fatal(err)
 		}

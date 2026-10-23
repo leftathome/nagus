@@ -29,8 +29,10 @@ func TestRestoreRejudgesStoredProducts(t *testing.T) {
 			state := offer.NewMemoryStore()
 			r := newPRig(t, rigOpts{profile: "newegg", category: deal.CategoryHDD, perPoll: 1000, perDay: 1000, state: state}, "newegg.html")
 			b, _ := json.Marshal([]storedProduct{sp})
-			_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{SourceID: r.src, MessageKey: MessageKey(neweggSender, neweggMsg(t).ID),
-				ProcessedAt: testNow, Outcome: MsgProcessed, RulesVersion: RulesVersion, Products: b})
+			_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{
+				SourceID: r.src, MessageKey: MessageKey(neweggSender, neweggMsg(t).ID),
+				ProcessedAt: testNow, Outcome: MsgProcessed, RulesVersion: RulesVersion, Products: b,
+			})
 			r.parse(t, neweggMsg(t))
 			if r.m.Messages(r.src, MsgRestored) != 0 || r.fv.calls.Load() == 0 {
 				t.Fatal("a product today's rules refuse was re-emitted")

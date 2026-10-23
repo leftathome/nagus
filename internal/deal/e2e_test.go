@@ -159,8 +159,10 @@ type rig struct {
 // one mailbox, with the fake glovebox gate.
 func newRig(t *testing.T, addr string, kr *keyring) *rig {
 	t.Helper()
-	r := &rig{items: store.NewMemoryStore(), offers: offer.NewMemoryStore(),
-		sources: map[string]string{"wine": "imap:deals-wine", "hdd": "imap:deals-hdd"}}
+	r := &rig{
+		items: store.NewMemoryStore(), offers: offer.NewMemoryStore(),
+		sources: map[string]string{"wine": "imap:deals-wine", "hdd": "imap:deals-hdd"},
+	}
 	r.hub = deal.NewHub(r.sources, map[string]string{agent: "caspar"}, mailbox, 14, func() time.Time { return now })
 	gate := fakeGlovebox(t)
 	host, port, _ := net.SplitHostPort(addr)
@@ -169,10 +171,12 @@ func newRig(t *testing.T, addr string, kr *keyring) *rig {
 		if err != nil {
 			t.Fatal(err)
 		}
-		conn, err := imapmail.NewConnector(imapmail.Config{Name: "deals-" + cat, Host: host, Port: port, TLS: "none",
+		conn, err := imapmail.NewConnector(imapmail.Config{
+			Name: "deals-" + cat, Host: host, Port: port, TLS: "none",
 			Username: mailbox, Password: "pw", Senders: []string{agent, human}, Forwarders: []string{forwarder},
 			CountIgnored: true, Observe: r.hub.Observer(), Parser: p, LookupTXT: kr.lookupTXT,
-			Now: func() time.Time { return now }, Logf: t.Logf})
+			Now: func() time.Time { return now }, Logf: t.Logf,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,8 +184,10 @@ func newRig(t *testing.T, addr string, kr *keyring) *rig {
 		var ing *pipeline.Ingester
 		if cat == "wine" {
 			ship, _ := shipping.NewSource("retailer", "US-WA")
-			ing, err = category.NewWineIngester(src, ship, category.WineDeps{Store: r.items, Sanitizer: gate,
-				Offers: r.offers, LWINStamp: true, Logf: t.Logf})
+			ing, err = category.NewWineIngester(src, ship, category.WineDeps{
+				Store: r.items, Sanitizer: gate,
+				Offers: r.offers, LWINStamp: true, Logf: t.Logf,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

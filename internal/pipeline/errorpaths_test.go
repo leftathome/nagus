@@ -139,9 +139,11 @@ func (errpathSearchErrorStore) Put(context.Context, item.Item) error { return ni
 func (errpathSearchErrorStore) Get(context.Context, string) (item.Item, bool, error) {
 	return item.Item{}, false, nil
 }
+
 func (s errpathSearchErrorStore) Search(context.Context, store.Query) ([]item.Item, error) {
 	return nil, s.err
 }
+
 func (errpathSearchErrorStore) DeleteStale(context.Context, string, time.Time) (int, error) {
 	return 0, nil
 }

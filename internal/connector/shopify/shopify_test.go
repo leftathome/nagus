@@ -378,8 +378,10 @@ func TestSecondStoreWithDifferentShape(t *testing.T) {
 // filter would drop its entire catalog -- a config trap worth pinning.
 func TestAllowFilterEmptiesAStoreWithNoProductType(t *testing.T) {
 	unfiltered := mustFetch(t, Config{Name: "wp", FixturePath: waterPantherFixture})
-	filtered := mustFetch(t, Config{Name: "wp", FixturePath: waterPantherFixture,
-		ProductTypePrefixes: []string{"Hard Drives", "HDDs"}})
+	filtered := mustFetch(t, Config{
+		Name: "wp", FixturePath: waterPantherFixture,
+		ProductTypePrefixes: []string{"Hard Drives", "HDDs"},
+	})
 	if len(unfiltered) == 0 {
 		t.Fatal("precondition: unfiltered should yield rows")
 	}
@@ -629,8 +631,10 @@ func TestNonRateLimitErrorsAreNotRetried(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	c := NewConnector(Config{Name: "s", BaseURL: srv.URL, Now: func() time.Time { return fixedNow },
-		Sleep: func(context.Context, time.Duration) error { t.Fatal("must not sleep on a 404"); return nil }})
+	c := NewConnector(Config{
+		Name: "s", BaseURL: srv.URL, Now: func() time.Time { return fixedNow },
+		Sleep: func(context.Context, time.Duration) error { t.Fatal("must not sleep on a 404"); return nil },
+	})
 	if _, err := c.Fetch(context.Background()); err == nil {
 		t.Fatal("want an error")
 	}

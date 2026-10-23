@@ -14,9 +14,11 @@ func TestIMAPSourceNeedsARealParser(t *testing.T) {
 	t.Setenv("NAGUS_IMAP_HOST", "imap.forwardemail.net")
 	t.Setenv("NAGUS_IMAP_USERNAME", "deals@totally.apocryph.al")
 	t.Setenv("NAGUS_IMAP_PASSWORD", "x")
-	src := SourceConfig{Name: "lastbottle", Category: "wine", Type: "imap",
+	src := SourceConfig{
+		Name: "lastbottle", Category: "wine", Type: "imap",
 		IMAPFrom: "offers@lastbottlewines.com", IMAPParser: "lastbottle",
-		WineChannel: "retailer", Origin: "US-CA"}
+		WineChannel: "retailer", Origin: "US-CA",
+	}
 	_, err := buildIngester(src, CategoryConfig{WineShipTo: "US-WA"}, store.NewMemoryStore(), categoryOpts{logf: t.Logf})
 	if err == nil || !strings.Contains(err.Error(), "real captured email") {
 		t.Fatalf("want a startup error naming the missing parser, got %v", err)

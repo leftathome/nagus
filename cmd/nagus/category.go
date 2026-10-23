@@ -269,20 +269,26 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if s.Commerce7Tenant == "" && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: commerce7 needs commerce7Tenant (see nagus fingerprint)", s.Name)
 		}
-		return commerce7.NewConnector(commerce7.Config{Name: s.Name, Tenant: s.Commerce7Tenant, StoreURL: s.BaseURL,
-			MaxPages: s.MaxPages, FixturePath: s.Fixture, Logf: o.logf}), nil
+		return commerce7.NewConnector(commerce7.Config{
+			Name: s.Name, Tenant: s.Commerce7Tenant, StoreURL: s.BaseURL,
+			MaxPages: s.MaxPages, FixturePath: s.Fixture, Logf: o.logf,
+		}), nil
 	case "orderport":
 		if s.BaseURL == "" && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: orderport needs baseUrl (the <store>.orderport.net root)", s.Name)
 		}
-		return orderport.NewConnector(orderport.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
-			FixturePath: s.Fixture, Logf: o.logf}), nil
+		return orderport.NewConnector(orderport.Config{
+			Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
+			FixturePath: s.Fixture, Logf: o.logf,
+		}), nil
 	case "dynamics365":
 		if (s.BaseURL == "" || s.CatalogPath == "") && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: dynamics365 needs baseUrl and catalogPath (the category page, a /<id>.c path)", s.Name)
 		}
-		return dynamics365.NewConnector(dynamics365.Config{Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
-			FixturePath: s.Fixture, Logf: o.logf}), nil
+		return dynamics365.NewConnector(dynamics365.Config{
+			Name: s.Name, StoreURL: s.BaseURL, CatalogPath: s.CatalogPath,
+			FixturePath: s.Fixture, Logf: o.logf,
+		}), nil
 	case "imap":
 		if isDealSource(s) {
 			return buildDealConnector(s, o)
@@ -313,8 +319,10 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if len(s.ColaBrands) == 0 && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: ttbcola needs colaBrands (brand names as registered with TTB)", s.Name)
 		}
-		return ttbcola.NewConnector(ttbcola.Config{Name: s.Name, Brands: s.ColaBrands, LookbackDays: s.ColaLookbackDays,
-			FixturePath: s.Fixture, Logf: o.logf}), nil
+		return ttbcola.NewConnector(ttbcola.Config{
+			Name: s.Name, Brands: s.ColaBrands, LookbackDays: s.ColaLookbackDays,
+			FixturePath: s.Fixture, Logf: o.logf,
+		}), nil
 	default:
 		return nil, fmt.Errorf("source %q: unsupported type %q", s.Name, s.Type)
 	}

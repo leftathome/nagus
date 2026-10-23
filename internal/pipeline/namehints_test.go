@@ -28,8 +28,10 @@ func TestNameHintsCarryProducerAndTitleAfterTheGate(t *testing.T) {
 
 	offers := offer.NewMemoryStore()
 	san := &countingSanitizer{refuse: map[string]bool{"bad": true}}
-	ing := &Ingester{Connector: fakeConnector{raws: raws}, Sanitizer: san, Extractor: fakeExtractor{},
-		Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer"}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: raws}, Sanitizer: san, Extractor: fakeExtractor{},
+		Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer",
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +53,10 @@ func TestNameHintsCarryProducerAndTitleAfterTheGate(t *testing.T) {
 func TestNameHintsWithoutAProducerSendTheTitleAlone(t *testing.T) {
 	r := raw("p", "2019 Cabernet Sauvignon", 9000, "")
 	offers := offer.NewMemoryStore()
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{r}}, Sanitizer: &countingSanitizer{},
-		Extractor: fakeExtractor{}, Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer"}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{r}}, Sanitizer: &countingSanitizer{},
+		Extractor: fakeExtractor{}, Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer",
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +77,10 @@ func (g *sanitizingGate) Sanitize(_ context.Context, r listing.Raw) (listing.San
 	for k, v := range r.Aspects {
 		asp[k] = "[s] " + v
 	}
-	return listing.Sanitized{SourceID: r.SourceID, SourceKey: r.SourceKey, Title: "[s] " + r.Title,
-		Aspects: asp, PriceCents: r.PriceCents, Currency: r.Currency, SeenAt: r.SeenAt}, nil
+	return listing.Sanitized{
+		SourceID: r.SourceID, SourceKey: r.SourceKey, Title: "[s] " + r.Title,
+		Aspects: asp, PriceCents: r.PriceCents, Currency: r.Currency, SeenAt: r.SeenAt,
+	}, nil
 }
 
 // nagus !28 review N2 and N3: the name hint is built from what the gate
@@ -87,8 +93,10 @@ func TestNameHintsUseSanitizedTextAndSurviveAGateOutage(t *testing.T) {
 	r.Aspects["wine_producer"] = "Leonetti Cellar"
 	offers := offer.NewMemoryStore()
 	gate := &sanitizingGate{}
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{r}}, Sanitizer: gate, Extractor: fakeExtractor{},
-		Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer"}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{r}}, Sanitizer: gate, Extractor: fakeExtractor{},
+		Store: store.NewMemoryStore(), Offers: offers, NameHintProducer: "wine_producer",
+	}
 	ctx := context.Background()
 	if _, err := ing.Ingest(ctx); err != nil {
 		t.Fatal(err)

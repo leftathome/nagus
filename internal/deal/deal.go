@@ -402,8 +402,11 @@ func (d *Deal) validate() Reason {
 		v   string
 		max int
 	}{
-		{d.Title, MaxTitleLen}, {d.Note, MaxNoteLen}, {d.Seller, MaxNameLen},
-		{d.Brand, MaxNameLen}, {d.MPN, MaxMPNLen},
+		{d.Title, MaxTitleLen},
+		{d.Note, MaxNoteLen},
+		{d.Seller, MaxNameLen},
+		{d.Brand, MaxNameLen},
+		{d.MPN, MaxMPNLen},
 	} {
 		if !cleanText(t.v, t.max) {
 			return ReasonBadValue
@@ -440,8 +443,10 @@ var urlRe = regexp.MustCompile(URLPattern)
 // RefusedTLDs are final host labels that are never a public shop: reserved,
 // private-network and cluster-internal names. ".example" is reserved too but
 // stays usable: it is what documentation and tests use.
-var RefusedTLDs = []string{"local", "localhost", "localdomain", "internal", "intranet", "private", "lan", "home", "corp",
-	"svc", "cluster", "test", "invalid", "arpa", "onion"}
+var RefusedTLDs = []string{
+	"local", "localhost", "localdomain", "internal", "intranet", "private", "lan", "home", "corp",
+	"svc", "cluster", "test", "invalid", "arpa", "onion",
+}
 
 // httpsURL reports whether s is an acceptable deal url (rv35 I2, rv35b
 // NEW-1, NEW-7): URLPattern, at most MaxURLLen, no backslash, a final label

@@ -244,6 +244,21 @@ lint:
   retry: *infra_retry
   variables:
     GOTOOLCHAIN: "go1.26.10"
+    GOLANGCI_LINT_CACHE: "$CI_PROJECT_DIR/.cache/golangci-lint"
+  # Its OWN cache key (prefix lint-): with the shared key, test and lint run in
+  # parallel and race to upload one archive, and whichever wins drops the
+  # other's contents -- test's archive has no go1.26.10 toolchain (its image
+  # already is 1.26.10) and no golangci-lint analysis cache. A separate key keeps
+  # the downloaded toolchain and the lint cache across pipelines.
+  cache:
+    key:
+      prefix: lint
+      files:
+        - go.sum
+    paths:
+      - .cache/go/pkg/mod
+      - .cache/go-build
+      - .cache/golangci-lint
   before_script:
     - |
       for i in 1 2 3 4 5; do

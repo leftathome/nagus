@@ -63,6 +63,7 @@ type fakeGeo struct{ zone string }
 func (f fakeGeo) Geocode(_ context.Context, _ string) (float64, float64, error) {
 	return 38.5, -122.5, nil // valid coords for any address
 }
+
 func (f fakeGeo) Enrich(_ context.Context, _, _ float64) (geo.Result, error) {
 	return geo.Result{Flood: &geo.FloodInfo{Zone: f.zone}}, nil
 }

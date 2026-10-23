@@ -73,8 +73,12 @@ func writeSanitizeMetrics(w io.Writer, s listing.Sanitizer) {
 		name string
 		n    int64
 	}{
-		{"pass", st.Pass}, {"quarantine", st.Quarantine}, {"error", st.Error},
-		{"unauthorized", st.Unauthorized}, {"tripped", st.Tripped}, {"no_token", st.NoToken},
+		{"pass", st.Pass},
+		{"quarantine", st.Quarantine},
+		{"error", st.Error},
+		{"unauthorized", st.Unauthorized},
+		{"tripped", st.Tripped},
+		{"no_token", st.NoToken},
 		{"misconfigured", st.Misconfigured},
 	} {
 		fmt.Fprintf(w, "nagus_sanitize_total{outcome=%q} %d\n", o.name, o.n)
