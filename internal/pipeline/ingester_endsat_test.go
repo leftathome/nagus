@@ -18,8 +18,10 @@ func TestIngestCarriesEndsAtToTheOffer(t *testing.T) {
 	withEnd.EndsAt = end
 	plain := raw("fixed", "HGST 10TB", 9000, "10")
 	offers := offer.NewMemoryStore()
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{withEnd, plain}}, Sanitizer: sanitize.Passthrough{},
-		Extractor: fakeExtractor{}, Store: store.NewMemoryStore(), Offers: offers}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{withEnd, plain}}, Sanitizer: sanitize.Passthrough{},
+		Extractor: fakeExtractor{}, Store: store.NewMemoryStore(), Offers: offers,
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}

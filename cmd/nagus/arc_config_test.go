@@ -28,8 +28,10 @@ func TestARCTrustConfig(t *testing.T) {
 		t.Fatal("ARC trust without recipients accepted")
 	}
 	// Other imap parsers may not trust ARC.
-	plain := SourceConfig{Name: "lb", Category: "wine", Type: "imap", IMAPFrom: "offers@sender.example.com", IMAPParser: "whatever",
-		WineChannel: "retailer", Origin: "US-CA", IMAPTrustARCSealers: s.IMAPTrustARCSealers}
+	plain := SourceConfig{
+		Name: "lb", Category: "wine", Type: "imap", IMAPFrom: "offers@sender.example.com", IMAPParser: "whatever",
+		WineChannel: "retailer", Origin: "US-CA", IMAPTrustARCSealers: s.IMAPTrustARCSealers,
+	}
 	if _, err := buildIngester(plain, CategoryConfig{WineShipTo: "US-WA"}, store.NewMemoryStore(), o); err == nil || !strings.Contains(err.Error(), "ARC trust") {
 		t.Fatalf("plain imap source with ARC trust: %v", err)
 	}

@@ -73,16 +73,26 @@ func newDealsSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"since": map[string]any{"type": "string", "format": "date-time",
-				"description": "RFC 3339 time you last asked (pass the previous answer's as_of, minus an hour of overlap). At most 30 days ago; not in the future."},
-			"category": map[string]any{"type": "string",
-				"description": "One configured category (hdd, wine, ...). Omit for every category."},
-			"watch": map[string]any{"type": "string",
-				"description": "A watch name from list_watches: only that watch's category and text, and only rows that clear its strong (ping) criteria."},
-			"min_verdict": map[string]any{"type": "string", "enum": minVerdicts,
-				"description": "Lowest deal verdict to return; default good. Ladder: great > good > market > poor. any also returns unscored rows."},
-			"include_price_drops": map[string]any{"type": "boolean",
-				"description": "Default true: a listing seen before since also counts when its price DROPPED at or after since."},
+			"since": map[string]any{
+				"type": "string", "format": "date-time",
+				"description": "RFC 3339 time you last asked (pass the previous answer's as_of, minus an hour of overlap). At most 30 days ago; not in the future.",
+			},
+			"category": map[string]any{
+				"type":        "string",
+				"description": "One configured category (hdd, wine, ...). Omit for every category.",
+			},
+			"watch": map[string]any{
+				"type":        "string",
+				"description": "A watch name from list_watches: only that watch's category and text, and only rows that clear its strong (ping) criteria.",
+			},
+			"min_verdict": map[string]any{
+				"type": "string", "enum": minVerdicts,
+				"description": "Lowest deal verdict to return; default good. Ladder: great > good > market > poor. any also returns unscored rows.",
+			},
+			"include_price_drops": map[string]any{
+				"type":        "boolean",
+				"description": "Default true: a listing seen before since also counts when its price DROPPED at or after since.",
+			},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": newDealsMaxLimit},
 		},
 		"required":             []string{"since"},
@@ -94,10 +104,14 @@ func listWatchesSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"name": map[string]any{"type": "string",
-				"description": "One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only."},
-			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": newDealsMaxLimit,
-				"description": "With name: at most this many strong matches (best first); default 25. strong_count is the total."},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "One watch's name: returns that watch with its current strong matches as rows. Omit to list every watch with counts only.",
+			},
+			"limit": map[string]any{
+				"type": "integer", "minimum": 1, "maximum": newDealsMaxLimit,
+				"description": "With name: at most this many strong matches (best first); default 25. strong_count is the total.",
+			},
 		},
 		"additionalProperties": false,
 	}

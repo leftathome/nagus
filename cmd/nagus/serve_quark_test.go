@@ -38,8 +38,10 @@ func offerFor(t *testing.T, srv *server, offers offer.Store, itemID, mpn string)
 	if err := json.Unmarshal(rec.Body.Bytes(), &it); err != nil || it.SourceID == "" {
 		t.Fatalf("item %s: %v %+v", itemID, err, it)
 	}
-	o := offer.Offer{SourceID: it.SourceID, SourceKey: it.SourceKey, PriceCents: 100,
-		LastSeen: time.Now(), ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn}}
+	o := offer.Offer{
+		SourceID: it.SourceID, SourceKey: it.SourceKey, PriceCents: 100,
+		LastSeen: time.Now(), ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn},
+	}
 	if err := offers.Put(context.Background(), o); err != nil {
 		t.Fatalf("Put: %v", err)
 	}

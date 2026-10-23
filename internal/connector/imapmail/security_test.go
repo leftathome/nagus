@@ -13,8 +13,10 @@ import (
 
 func dealConn(t *testing.T, senders []string, kr *keyring, mut ...func(*Config)) *Connector {
 	t.Helper()
-	cfg := Config{Name: "deals", Host: "h", Port: "1", TLS: "none", Username: "u", Password: "p",
-		Senders: senders, Parser: &recorder{}, Now: func() time.Time { return now }}
+	cfg := Config{
+		Name: "deals", Host: "h", Port: "1", TLS: "none", Username: "u", Password: "p",
+		Senders: senders, Parser: &recorder{}, Now: func() time.Time { return now },
+	}
 	if kr != nil {
 		cfg.LookupTXT = kr.lookupTXT
 	} else {
@@ -108,9 +110,11 @@ func TestDisplayNameMatchIsNotFetched(t *testing.T) {
 	addr := serverFor(t, testMailbox, map[string]time.Time{raw: now.Add(-time.Hour)})
 	host, port, _ := net.SplitHostPort(addr)
 	var obs []Observation
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
+	c, err := NewConnector(Config{
+		Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
 		Password: "pw", Senders: []string{"human@example.org"}, Parser: &recorder{}, MaxBytes: 1024,
-		Observe: func(o Observation) { obs = append(obs, o) }, Now: func() time.Time { return now }})
+		Observe: func(o Observation) { obs = append(obs, o) }, Now: func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +135,10 @@ func TestReceivedIsTheInternalDate(t *testing.T) {
 	addr := serverFor(t, testMailbox, map[string]time.Time{kr.sign(raw, "example.org"): arrived})
 	host, port, _ := net.SplitHostPort(addr)
 	rec := &recorder{}
-	c, err := NewConnector(Config{Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
-		Password: "pw", Senders: []string{"human@example.org"}, Parser: rec, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now }})
+	c, err := NewConnector(Config{
+		Name: "deals", Host: host, Port: port, TLS: "none", Username: testMailbox,
+		Password: "pw", Senders: []string{"human@example.org"}, Parser: rec, LookupTXT: kr.lookupTXT, Now: func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

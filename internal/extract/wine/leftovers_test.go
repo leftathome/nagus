@@ -21,7 +21,8 @@ func extractTyped(title, wineType string) error {
 func checkVerdicts(t *testing.T, cases []struct {
 	title, wineType string
 	want            error
-}) {
+},
+) {
 	t.Helper()
 	for _, tc := range cases {
 		err := extractTyped(tc.title, tc.wineType)
@@ -151,12 +152,16 @@ func TestLeftovers_BroadNameCuveeAndEstate(t *testing.T) {
 // that the old denylist guard let through is not wine under any of the four
 // estate prefixes (rv3132/sweep.json).
 func TestLeftovers_EstateNeedsWineHead(t *testing.T) {
-	nouns := []string{"Sweatshirt", "Tumbler", "Koozie", "Pourer", "Ornament", "Polo", "Beanie", "Visor",
+	nouns := []string{
+		"Sweatshirt", "Tumbler", "Koozie", "Pourer", "Ornament", "Polo", "Beanie", "Visor",
 		"Umbrella", "Backpack", "Cooler", "Pen", "Notebook", "Calendar", "Journal", "Flag", "Banner", "Sign",
 		"Plaque", "Cork Screw", "Wine Key", "Coffee", "Tea", "Lotion", "Game", "Dog Collar", "Leash",
-		"Bandana", "Onesie", "Bib", "Golf Balls", "Carafe", "Throw Pillow", "Scarf"}
-	prefixes := []string{"Chateau Ste Michelle Columbia Valley", "Domaine Carneros Napa Valley",
-		"Quinta do Noval Douro", "Clos du Val Napa Valley"}
+		"Bandana", "Onesie", "Bib", "Golf Balls", "Carafe", "Throw Pillow", "Scarf",
+	}
+	prefixes := []string{
+		"Chateau Ste Michelle Columbia Valley", "Domaine Carneros Napa Valley",
+		"Quinta do Noval Douro", "Clos du Val Napa Valley",
+	}
 	for _, p := range prefixes {
 		for _, n := range nouns {
 			if err := extractErr(p + " " + n); !errors.Is(err, ErrNotWine) {

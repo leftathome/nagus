@@ -357,6 +357,8 @@ func NewHub(sources map[string]string, aliases map[string]string, mailbox string
 	if lookbackDays <= 0 {
 		lookbackDays = imapmail.DefaultLookbackDays
 	}
-	return &Hub{Ledger: NewLedger(retainFor(lookbackDays), now), Sources: sources, Aliases: al,
-		Mailbox: mailbox, LookbackDays: lookbackDays}
+	return &Hub{
+		Ledger: NewLedger(retainFor(lookbackDays), now), Sources: sources, Aliases: al,
+		Mailbox: mailbox, LookbackDays: lookbackDays,
+	}
 }

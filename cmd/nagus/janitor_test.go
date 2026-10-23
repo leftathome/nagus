@@ -30,8 +30,10 @@ func janitorFixture(t *testing.T, lookback int) (map[string]imapConn, []*pipelin
 	conns := map[string]imapConn{}
 	var ings []*pipeline.Ingester
 	for _, name := range []string{"a", "b"} {
-		c, err := imapmail.NewConnector(imapmail.Config{Name: name, Host: "imap.example.net", Username: "u", Password: "p",
-			Senders: []string{name + "@sender.example.com"}, Parser: nopParser{}, LookbackDays: lookback})
+		c, err := imapmail.NewConnector(imapmail.Config{
+			Name: name, Host: "imap.example.net", Username: "u", Password: "p",
+			Senders: []string{name + "@sender.example.com"}, Parser: nopParser{}, LookbackDays: lookback,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

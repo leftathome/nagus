@@ -104,9 +104,11 @@ func TestSearchesEachBrandInItsOwnSessionAndDedups(t *testing.T) {
 	srv := registry(t, map[string]string{"QUILCEDA CREEK": "fixture", "%QUILCEDA%": "fixture"}, &forms)
 	defer srv.Close()
 	var pauses int
-	c := NewConnector(Config{Name: "a", Brands: []string{"QUILCEDA CREEK", "CAYUSE VINEYARDS", "%QUILCEDA%"},
+	c := NewConnector(Config{
+		Name: "a", Brands: []string{"QUILCEDA CREEK", "CAYUSE VINEYARDS", "%QUILCEDA%"},
 		BaseURL: srv.URL + "/colasonline", HTTP: srv.Client(), Now: func() time.Time { return fixedNow },
-		Sleep: func(context.Context, time.Duration) error { pauses++; return nil }})
+		Sleep: func(context.Context, time.Duration) error { pauses++; return nil },
+	})
 	raws, err := c.Fetch(context.Background())
 	if err != nil || !c.FetchComplete() {
 		t.Fatalf("Fetch: %v", err)
@@ -147,9 +149,11 @@ type pki struct {
 func newCA(t *testing.T, cn string, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: cn},
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: cn},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
 	if parent == nil {
 		parent, parentKey = tmpl, key
 	}
@@ -170,10 +174,12 @@ func newPKI(t *testing.T) pki {
 func (p pki) leafServer(t *testing.T, host string) *httptest.Server {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: host},
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: host},
 		DNSNames: []string{host}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.inter, &key.PublicKey, p.inKey)
 	if err != nil {
 		t.Fatal(err)

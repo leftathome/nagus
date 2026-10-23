@@ -59,8 +59,10 @@ func gate(t *testing.T, srv *httptest.Server) *Gate {
 	return g
 }
 
-var raw = listing.Raw{SourceID: "shopify:x", SourceKey: "1", Title: "2021 Syrah", Body: "Dark fruit.",
-	PriceCents: 4000, Aspects: map[string]string{"vendor": "Kiona", "ship_legal_to": "US-WA"}}
+var raw = listing.Raw{
+	SourceID: "shopify:x", SourceKey: "1", Title: "2021 Syrah", Body: "Dark fruit.",
+	PriceCents: 4000, Aspects: map[string]string{"vendor": "Kiona", "ship_legal_to": "US-WA"},
+}
 
 func TestPassKeepsTheOriginalBytes(t *testing.T) {
 	f := &fakeGlovebox{verdict: "pass"}

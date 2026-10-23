@@ -472,8 +472,10 @@ func runServe(args []string) error {
 			def = name
 		}
 	}
-	srv := &server{ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
-		sanitizer: opts.sanitizer, deals: opts.deals, sourcePolicies: buildSourcePolicies(cfg.Sources, ingesters)}
+	srv := &server{
+		ingesters: ingesters, surfaces: surfaces, store: st, defaultCategory: def, watches: watches, offers: offerStore,
+		sanitizer: opts.sanitizer, deals: opts.deals, sourcePolicies: buildSourcePolicies(cfg.Sources, ingesters),
+	}
 	if opts.promo != nil {
 		srv.promo = opts.promo.metrics
 	}

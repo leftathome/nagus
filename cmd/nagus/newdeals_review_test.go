@@ -164,15 +164,19 @@ func TestListWatchesNameIsCapped(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 30; i++ {
 		key := fmt.Sprintf("extra-%02d", i)
-		it := item.Item{ID: offer.DeterministicID("ebay", key), Category: "hdd", Class: item.ClassDurable,
+		it := item.Item{
+			ID: offer.DeterministicID("ebay", key), Category: "hdd", Class: item.ClassDurable,
 			Title: "Example 16TB drive " + key, PriceCents: int64(5000 + i), Currency: "USD", Condition: "used",
-			SourceID: "ebay", SourceKey: key, SeenAt: f.now, Attributes: map[string]string{"capacity_tb": "16"}}
+			SourceID: "ebay", SourceKey: key, SeenAt: f.now, Attributes: map[string]string{"capacity_tb": "16"},
+		}
 		if err := f.srv.store.Put(ctx, it); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f.srv.watches = watch.Config{Watches: []watch.Watch{{Name: "everything", Category: "hdd",
-		StrongVerdicts: []string{"great", "good", "market", "poor", "unknown-no-reference", "unknown-no-price"}}}}
+	f.srv.watches = watch.Config{Watches: []watch.Watch{{
+		Name: "everything", Category: "hdd",
+		StrongVerdicts: []string{"great", "good", "market", "poor", "unknown-no-reference", "unknown-no-price"},
+	}}}
 	call := func(args string) (watchInfo, []searchRow, int) {
 		t.Helper()
 		_, res := callTool(t, f.srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_watches","arguments":`+args+`}}`)
@@ -210,8 +214,10 @@ func TestListWatchesNameIsCapped(t *testing.T) {
 // new_deals before any poll expires it; get_item says it ENDED.
 func TestEndedAuctionIsHiddenAndMarked(t *testing.T) {
 	f := offerTestServer(t)
-	if err := f.offers.Put(context.Background(), offer.Offer{SourceID: "ebay", SourceKey: hgstKey, PriceCents: 8950,
-		LastSeen: f.now.Add(-5 * time.Minute), EndsAt: f.now.Add(-time.Minute)}); err != nil {
+	if err := f.offers.Put(context.Background(), offer.Offer{
+		SourceID: "ebay", SourceKey: hgstKey, PriceCents: 8950,
+		LastSeen: f.now.Add(-5 * time.Minute), EndsAt: f.now.Add(-time.Minute),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	_, res := callTool(t, f.srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_items","arguments":{}}}`)

@@ -17,8 +17,10 @@ func TestRetentionPassPurgesMailState(t *testing.T) {
 	ctx := context.Background()
 	_ = offers.PutPromoMessage(ctx, offer.PromoMessage{SourceID: "fake", MessageKey: "old", ProcessedAt: now.AddDate(0, 0, -30)})
 	_ = offers.PutPromoMessage(ctx, offer.PromoMessage{SourceID: "fake", MessageKey: "new", ProcessedAt: now.AddDate(0, 0, -1)})
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{}}, Offers: offers, Now: func() time.Time { return now },
-		OfferRetention: offer.Retention{Policy: offer.RetainFull}}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{}}, Offers: offers, Now: func() time.Time { return now },
+		OfferRetention: offer.Retention{Policy: offer.RetainFull},
+	}
 	if _, err := ing.Ingest(ctx); err != nil {
 		t.Fatal(err)
 	}

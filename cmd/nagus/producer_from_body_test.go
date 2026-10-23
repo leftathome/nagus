@@ -20,9 +20,11 @@ func TestProducerFromBodyReachesTheItems(t *testing.T) {
 	}{{"enabled", true}, {"disabled", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := store.NewMemoryStore()
-			src := SourceConfig{Name: "bottlebarn", Category: "wine", Type: "shopify",
+			src := SourceConfig{
+				Name: "bottlebarn", Category: "wine", Type: "shopify",
 				Fixture:     "../../internal/connector/shopify/testdata/products_bottlebarn_wine.json",
-				WineChannel: "retailer", Origin: "US-CA", ProducerFromBody: tc.enable}
+				WineChannel: "retailer", Origin: "US-CA", ProducerFromBody: tc.enable,
+			}
 			ing, err := buildIngester(src, CategoryConfig{WineShipTo: "US-WA"}, st, categoryOpts{logf: t.Logf})
 			if err != nil {
 				t.Fatal(err)

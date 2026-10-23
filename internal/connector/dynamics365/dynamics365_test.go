@@ -84,8 +84,10 @@ func TestPagesWithSkipAndPauses(t *testing.T) {
 	}))
 	defer srv.Close()
 	var slept []time.Duration
-	c := NewConnector(Config{Name: "x", StoreURL: srv.URL, CatalogPath: "/shop/all-wines/1.c",
-		Sleep: func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }})
+	c := NewConnector(Config{
+		Name: "x", StoreURL: srv.URL, CatalogPath: "/shop/all-wines/1.c",
+		Sleep: func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil },
+	})
 	raws, err := c.Fetch(context.Background())
 	if err != nil || len(raws) != 60 || !c.FetchComplete() {
 		t.Fatalf("got %d %v complete=%v", len(raws), err, c.FetchComplete())

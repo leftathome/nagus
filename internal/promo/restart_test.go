@@ -96,8 +96,10 @@ func TestRestoreRefusesInvalidStoredLine(t *testing.T) {
 	state := offer.NewMemoryStore()
 	r := newPRig(t, rigOpts{profile: "newegg", category: deal.CategoryHDD, perPoll: 1000, perDay: 1000, state: state}, "newegg.html")
 	key := MessageKey(neweggSender, neweggMsg(t).ID)
-	_ = state.PutPromoMessage(t.Context(), offer.PromoMessage{SourceID: r.src, MessageKey: key, ProcessedAt: testNow, Outcome: MsgProcessed,
-		Products: []byte(`[{"line":"{\"category\":\"hdd\",\"title\":\"x\",\"price\":\"1\",\"url\":\"http://insecure.example.com/\"}"}]`)})
+	_ = state.PutPromoMessage(t.Context(), offer.PromoMessage{
+		SourceID: r.src, MessageKey: key, ProcessedAt: testNow, Outcome: MsgProcessed,
+		Products: []byte(`[{"line":"{\"category\":\"hdd\",\"title\":\"x\",\"price\":\"1\",\"url\":\"http://insecure.example.com/\"}"}]`),
+	})
 	r.parse(t, neweggMsg(t))
 	if r.fv.calls.Load() == 0 || r.m.Messages(r.src, MsgRestored) != 0 {
 		t.Fatal("an invalid stored line was re-emitted instead of reprocessing")

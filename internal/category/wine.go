@@ -298,8 +298,10 @@ func NewWineIngester(conn listing.Connector, src shipping.Source, deps WineDeps)
 		}
 	}
 	ing := &pipeline.Ingester{
-		Connector: &channelTagger{inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
-			producerFromBody: deps.ProducerFromBody, declared: declared},
+		Connector: &channelTagger{
+			inner: conn, src: src, rules: deps.shipRules(), producer: deps.Producer,
+			producerFromBody: deps.ProducerFromBody, declared: declared,
+		},
 		Sanitizer:        sanitizerOr(deps.Sanitizer, "wine"),
 		Extractor:        extwine.New(),
 		Store:            deps.Store,

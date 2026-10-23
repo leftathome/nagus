@@ -43,8 +43,10 @@ const (
 )
 
 // MessageOutcomes is every message outcome, in metric order.
-var MessageOutcomes = []string{MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, MsgNoTextPart,
-	MsgReplyNotAccepted, MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid}
+var MessageOutcomes = []string{
+	MsgAccepted, MsgPartial, MsgRejected, MsgEmpty, MsgNoTextPart,
+	MsgReplyNotAccepted, MsgUnknownSender, MsgUnverified, MsgTooLarge, MsgInvalid,
+}
 
 // MessageOutcomeMeanings explains the outcomes a SENDER can see in status
 // (the connector-level ones -- unknown_sender, unverified, too_large, invalid

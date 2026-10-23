@@ -49,8 +49,10 @@ func TestTextHintsAttachTitleOnlyAfterTheGatePasses(t *testing.T) {
 	raws := textHintFixture()
 	offers := offer.NewMemoryStore()
 	san := &countingSanitizer{refuse: map[string]bool{"bad": true}}
-	ing := &Ingester{Connector: fakeConnector{raws: raws}, Sanitizer: san, Extractor: fakeExtractor{},
-		Store: store.NewMemoryStore(), Offers: offers, TextHints: true}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: raws}, Sanitizer: san, Extractor: fakeExtractor{},
+		Store: store.NewMemoryStore(), Offers: offers, TextHints: true,
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +73,10 @@ func TestTextHintsAttachTitleOnlyAfterTheGatePasses(t *testing.T) {
 func TestTextHintsOffByDefault(t *testing.T) {
 	raws := textHintFixture()
 	offers := offer.NewMemoryStore()
-	ing := &Ingester{Connector: fakeConnector{raws: raws}, Sanitizer: &countingSanitizer{}, Extractor: fakeExtractor{},
-		Store: store.NewMemoryStore(), Offers: offers}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: raws}, Sanitizer: &countingSanitizer{}, Extractor: fakeExtractor{},
+		Store: store.NewMemoryStore(), Offers: offers,
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}

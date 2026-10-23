@@ -53,8 +53,10 @@ func TestWineRowsCompareOnVintageAwareKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q did not extract: %v", c.title, err)
 		}
-		o := offer.Offer{SourceID: "shopify:store", SourceKey: c.key, PriceCents: 10000, LastSeen: time.Now(),
-			ProductHint: offer.ProductHint{Brand: "producer", Text: c.title}}
+		o := offer.Offer{
+			SourceID: "shopify:store", SourceKey: c.key, PriceCents: 10000, LastSeen: time.Now(),
+			ProductHint: offer.ProductHint{Brand: "producer", Text: c.title},
+		}
 		if err := offers.Put(ctx, o); err != nil {
 			t.Fatal(err)
 		}

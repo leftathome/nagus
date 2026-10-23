@@ -150,10 +150,12 @@ func TestOlderRulesMessageIsReprocessed(t *testing.T) {
 	}
 	calls := r.fv.calls.Load()
 	key := MessageKey(wineSender, msg.ID)
-	_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{SourceID: r.src, MessageKey: key, ProcessedAt: testNow,
+	_ = state.PutPromoMessage(context.Background(), offer.PromoMessage{
+		SourceID: r.src, MessageKey: key, ProcessedAt: testNow,
 		// "" is exactly what production rows carry: the column's default for
 		// records written before rules_version existed.
-		Outcome: MsgProcessed, RulesVersion: "", Products: []byte(`[]`)})
+		Outcome: MsgProcessed, RulesVersion: "", Products: []byte(`[]`),
+	})
 	r.restart()
 	raws := r.parse(t, msg)
 	if len(raws) != 1 || r.m.Messages(r.src, MsgRestored) != 0 || r.fv.calls.Load() != calls {

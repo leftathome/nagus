@@ -47,9 +47,11 @@ func offerTestServer(t *testing.T) offerFixture {
 	srv := newTestServer(t)
 	offers := offer.NewMemoryStore()
 	now := time.Now().UTC().Truncate(time.Second)
-	f := offerFixture{srv: srv, offers: offers, now: now,
+	f := offerFixture{
+		srv: srv, offers: offers, now: now,
 		hgst: offer.DeterministicID("ebay", hgstKey), exos: offer.DeterministicID("ebay", exosKey), wdRed: offer.DeterministicID("ebay", wdKey),
-		exosOld: 32000, exosPrice: 27999}
+		exosOld: 32000, exosPrice: 27999,
+	}
 	put := func(key string, price int64, seen time.Time) {
 		t.Helper()
 		if err := offers.Put(ctx, offer.Offer{SourceID: "ebay", SourceKey: key, PriceCents: price, Currency: "USD", LastSeen: seen}); err != nil {
@@ -268,8 +270,10 @@ func TestNewDealsWithWatchAppliesStrongCriteria(t *testing.T) {
 func TestSearchItemsHidesExpiredAndCarriesTiming(t *testing.T) {
 	f := offerTestServer(t)
 	// Expire only the WD (not seen since 10 days ago in this variant).
-	if err := f.offers.Put(context.Background(), offer.Offer{SourceID: "ebay", SourceKey: wdKey, PriceCents: 12999,
-		LastSeen: f.now.Add(-10 * time.Minute), Status: offer.StatusExpired, ExpiredAt: f.now.Add(-time.Minute)}); err != nil {
+	if err := f.offers.Put(context.Background(), offer.Offer{
+		SourceID: "ebay", SourceKey: wdKey, PriceCents: 12999,
+		LastSeen: f.now.Add(-10 * time.Minute), Status: offer.StatusExpired, ExpiredAt: f.now.Add(-time.Minute),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	_, res := callTool(t, f.srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_items","arguments":{}}}`)
@@ -323,8 +327,10 @@ func TestRowsOmitOfferFieldsWithoutAnOffer(t *testing.T) {
 	if err := json.Unmarshal(res.StructuredContent, &raw); err != nil || len(raw.Items) == 0 {
 		t.Fatal(err)
 	}
-	offerKeys := []string{"first_seen_at", "last_seen_at", "price_changed_at", "previous_price_cents", "lowest_price_cents",
-		"at_lowest_price", "offer_status", "expired_at", "expires_at", "expires_basis", "offer_note", "new_reason"}
+	offerKeys := []string{
+		"first_seen_at", "last_seen_at", "price_changed_at", "previous_price_cents", "lowest_price_cents",
+		"at_lowest_price", "offer_status", "expired_at", "expires_at", "expires_basis", "offer_note", "new_reason",
+	}
 	for _, it := range raw.Items {
 		for _, k := range offerKeys {
 			if _, ok := it[k]; ok {

@@ -441,12 +441,16 @@ func (e categoryRejectingExtractor) Extract(ctx context.Context, s listing.Sanit
 func TestIngestRemovesAnItemItsCategoryNowRejects(t *testing.T) {
 	st := store.NewMemoryStore()
 	oldID := offer.DeterministicID("fake", "ssd")
-	if err := st.Put(context.Background(), item.Item{ID: oldID, Category: "hdd", Class: item.ClassDurable,
-		Title: "15.36TB SSD", SourceID: "fake", SourceKey: "ssd", SeenAt: time.Unix(900, 0)}); err != nil {
+	if err := st.Put(context.Background(), item.Item{
+		ID: oldID, Category: "hdd", Class: item.ClassDurable,
+		Title: "15.36TB SSD", SourceID: "fake", SourceKey: "ssd", SeenAt: time.Unix(900, 0),
+	}); err != nil {
 		t.Fatal(err)
 	}
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{raw("ssd", "15.36TB SSD", 9000, "15.36")}},
-		Sanitizer: sanitize.Passthrough{}, Extractor: categoryRejectingExtractor{}, Store: st}
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{raw("ssd", "15.36TB SSD", 9000, "15.36")}},
+		Sanitizer: sanitize.Passthrough{}, Extractor: categoryRejectingExtractor{}, Store: st,
+	}
 	res, err := ing.Ingest(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -463,10 +467,14 @@ func TestIngestRemovesAnItemItsCategoryNowRejects(t *testing.T) {
 func TestIngestKeepsItemsOnOrdinaryExtractErrors(t *testing.T) {
 	st := store.NewMemoryStore()
 	oldID := offer.DeterministicID("fake", "bad")
-	_ = st.Put(context.Background(), item.Item{ID: oldID, Category: "hdd", Class: item.ClassDurable,
-		Title: "x", SourceID: "fake", SourceKey: "bad", SeenAt: time.Unix(900, 0)})
-	ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{raw("bad", "broken", 1, "1")}},
-		Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: st}
+	_ = st.Put(context.Background(), item.Item{
+		ID: oldID, Category: "hdd", Class: item.ClassDurable,
+		Title: "x", SourceID: "fake", SourceKey: "bad", SeenAt: time.Unix(900, 0),
+	})
+	ing := &Ingester{
+		Connector: fakeConnector{raws: []listing.Raw{raw("bad", "broken", 1, "1")}},
+		Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: st,
+	}
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
