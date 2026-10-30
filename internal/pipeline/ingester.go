@@ -100,7 +100,9 @@ type Ingester struct {
 	// that recovers or disappears is logged again if it is dropped later.
 	// After an incomplete fetch, listings the walk did not reach keep their
 	// entry. Skips are still counted every pass -- only the log line is
-	// deduplicated, and only for content verdicts (see contentVerdict).
+	// deduplicated, and only for content verdicts (see contentVerdict). A gate
+	// outage records nothing, so the first good pass after one logs each
+	// content drop once more: a single burst, by design.
 	droppedMu sync.Mutex
 	dropped   map[string]string
 }
