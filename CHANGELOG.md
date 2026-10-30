@@ -10,8 +10,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **golang.org/x/net v0.60.0 -> v0.62.0** (GO-2026-6860): quadratic
   complexity when coalescing text nodes in `html.Parse`, which nagus reaches
-  from `promo.SelectImages` on untrusted retailer mail HTML. x/sync, x/sys,
-  x/text and x/tools move with it.
+  from `promo.SelectImages` on untrusted retailer mail HTML. Minimum version
+  selection moves x/crypto (v0.58.0), x/sync (v0.24.0), x/sys (v0.49.0),
+  x/text (v0.43.0, a direct dependency) and x/tools (v0.51.0) with it.
 
 ## [0.17.0] - 2026-10-23
 
