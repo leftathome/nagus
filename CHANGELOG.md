@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **golang.org/x/net v0.60.0 -> v0.62.0** (GO-2026-6860): quadratic
+  complexity when coalescing text nodes in `html.Parse`, which nagus reaches
+  from `promo.SelectImages` on untrusted retailer mail HTML. x/sync, x/sys,
+  x/text and x/tools move with it.
+
 ## [0.17.0] - 2026-10-23
 
 The release number jumps from 0.5.1 to 0.17.0 on purpose: between releases the
