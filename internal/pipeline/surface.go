@@ -83,9 +83,11 @@ const DefaultMaxCandidates = 5000
 // maxLoggedReasons bounds the distinct filter reasons one summary line names.
 const maxLoggedReasons = 5
 
-// summariseReasons renders reason counts most-common first ("2x reason; 1x
-// other"), naming at most limit reasons and counting the rest.
-func summariseReasons(counts map[string]int, limit int) string {
+// summariseReasons renders reason counts most-common first, each with one
+// example item ("2x reason (e.g. id1); 1x other (e.g. id2)"), naming at most
+// limit reasons and counting the rest. The example keeps "why is item X not
+// surfacing?" answerable from the log.
+func summariseReasons(counts map[string]int, example map[string]string, limit int) string {
 	reasons := make([]string, 0, len(counts))
 	for r := range counts {
 		reasons = append(reasons, r)
@@ -102,7 +104,7 @@ func summariseReasons(counts map[string]int, limit int) string {
 			parts = append(parts, fmt.Sprintf("and %d other reason(s)", len(reasons)-limit))
 			break
 		}
-		parts = append(parts, fmt.Sprintf("%dx %s", counts[r], r))
+		parts = append(parts, fmt.Sprintf("%dx %s (e.g. %s)", counts[r], r, example[r]))
 	}
 	return strings.Join(parts, "; ")
 }
@@ -132,11 +134,13 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 	// item per request: the same items fail the same filter on every request
 	// (nagus-c6l: ~28 items logged 334 times each in a week).
 	filtered := map[string]int{}
-	nFiltered := 0
+	example := map[string]string{}
 	for _, it := range items {
 		if ok, reason := s.Filter.Pass(it); !ok {
+			if filtered[reason] == 0 {
+				example[reason] = it.ID
+			}
 			filtered[reason]++
-			nFiltered++
 			continue
 		}
 		sig := score.DealSignal{Verdict: "unknown-no-reference"}
@@ -157,8 +161,8 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 		out.Items = append(out.Items, sc)
 	}
 	out.Filtered = len(out.Items)
-	if nFiltered > 0 {
-		s.logf("surface: %s: filtered out %d of %d: %s", q.Category, nFiltered, len(items), summariseReasons(filtered, maxLoggedReasons))
+	if n := len(items) - len(out.Items); n > 0 {
+		s.logf("surface: %s: filtered out %d of %d: %s", q.Category, n, len(items), summariseReasons(filtered, example, maxLoggedReasons))
 	}
 	sort.SliceStable(out.Items, func(a, b int) bool {
 		if out.Items[a].Score.Value != out.Items[b].Score.Value {

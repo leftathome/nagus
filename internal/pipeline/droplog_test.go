@@ -15,13 +15,23 @@ import (
 )
 
 // swapConnector serves whatever raws the test last set, so one Ingester can
-// see several passes over a changing catalogue.
-type swapConnector struct{ raws *[]listing.Raw }
+// see several passes over a changing catalogue. A non-nil *err fails the
+// fetch; *incomplete reports a truncated walk.
+type swapConnector struct {
+	raws       *[]listing.Raw
+	err        *error
+	incomplete *bool
+}
 
 func (c swapConnector) SourceID() string { return "fake" }
 func (c swapConnector) Fetch(context.Context) ([]listing.Raw, error) {
+	if c.err != nil && *c.err != nil {
+		return nil, *c.err
+	}
 	return *c.raws, nil
 }
+
+func (c swapConnector) FetchComplete() bool { return c.incomplete == nil || !*c.incomplete }
 
 // titleRejectingExtractor rejects every listing whose title starts with "x",
 // with a reason that names the title (so a changed listing changes the reason).
@@ -131,20 +141,71 @@ func TestDropAfterRecoveryIsLoggedAgain(t *testing.T) {
 	}
 }
 
-type refusingSanitizer struct{}
+type refusingSanitizer struct{ err error }
 
-func (refusingSanitizer) Sanitize(context.Context, listing.Raw) (listing.Sanitized, error) {
-	return listing.Sanitized{}, errors.New("refused by the gate")
+func (r refusingSanitizer) Sanitize(context.Context, listing.Raw) (listing.Sanitized, error) {
+	return listing.Sanitized{}, r.err
 }
 
-// Sanitize drops are deduplicated the same way.
-func TestUnchangedSanitizeDropIsLoggedOnce(t *testing.T) {
+// A glovebox quarantine is a verdict on the listing: deduplicated like an
+// extract drop.
+func TestUnchangedQuarantineIsLoggedOnce(t *testing.T) {
 	raws := []listing.Raw{raw("a", "anything", 100, "1")}
 	ing, logs := dropLogFixture(&raws)
-	ing.Sanitizer = refusingSanitizer{}
+	ing.Sanitizer = refusingSanitizer{err: fmt.Errorf("%w: score 0.91, signals x", sanitize.ErrQuarantined)}
 	ingestN(t, ing, 3)
 	if n := countContaining(*logs, "sanitize dropped a"); n != 1 {
-		t.Fatalf("logged the unchanged sanitize drop %d times, want 1: %q", n, *logs)
+		t.Fatalf("logged the unchanged quarantine %d times, want 1: %q", n, *logs)
+	}
+}
+
+// A fail-closed gate failure is an OUTAGE, not a verdict on the listing: it
+// is logged on every pass for as long as it lasts.
+func TestGateOutageIsLoggedEveryPass(t *testing.T) {
+	raws := []listing.Raw{raw("a", "anything", 100, "1")}
+	ing, logs := dropLogFixture(&raws)
+	ing.Sanitizer = refusingSanitizer{err: errors.New("sanitize: glovebox unreachable, dropping (fail closed): dial tcp: refused")}
+	ingestN(t, ing, 3)
+	if n := countContaining(*logs, "sanitize dropped a"); n != 3 {
+		t.Fatalf("logged the gate outage %d times over 3 passes, want 3: %q", n, *logs)
+	}
+}
+
+// A failed fetch changes nothing: the next good pass does not re-log drops
+// the pass before it already logged.
+func TestDropMemorySurvivesAFailedFetch(t *testing.T) {
+	raws := []listing.Raw{raw("a", "x-ssd", 100, "1")}
+	var fetchErr error
+	ing, logs := dropLogFixture(&raws)
+	ing.Connector = swapConnector{raws: &raws, err: &fetchErr}
+	ingestN(t, ing, 1)
+	fetchErr = errors.New("network down")
+	if _, err := ing.Ingest(context.Background()); err == nil {
+		t.Fatal("want the fetch error")
+	}
+	fetchErr = nil
+	ingestN(t, ing, 1)
+	if n := countContaining(*logs, "extract dropped a"); n != 1 {
+		t.Fatalf("logged %d drops, want 1 (the failed fetch must not reset the memory): %q", n, *logs)
+	}
+}
+
+// A truncated walk keeps the memory of listings it did not reach.
+func TestIncompleteFetchKeepsUnreachedListingsInMemory(t *testing.T) {
+	raws := []listing.Raw{raw("a", "x-ssd", 100, "1"), raw("b", "x-ssd", 100, "1")}
+	incomplete := false
+	ing, logs := dropLogFixture(&raws)
+	ing.Connector = swapConnector{raws: &raws, incomplete: &incomplete}
+	ingestN(t, ing, 1)
+	full := raws
+	raws = full[:1] // the walk stopped before "b"
+	incomplete = true
+	ingestN(t, ing, 1)
+	raws = full
+	incomplete = false
+	ingestN(t, ing, 1)
+	if n := countContaining(*logs, "extract dropped b"); n != 1 {
+		t.Fatalf("logged b %d times, want 1 (an unreached listing is not new): %q", n, *logs)
 	}
 }
 
@@ -182,7 +243,7 @@ func TestSurfaceSummarisesFilteredItems(t *testing.T) {
 		t.Fatalf("want one summary line, got %q", logs)
 	}
 	// The most common reason leads, with its count.
-	if !strings.Contains(logs[0], `2x attribute "capacity_tb" value 4 is below minimum 8`) {
+	if !strings.Contains(logs[0], `2x attribute "capacity_tb" value 4 is below minimum 8 (e.g. s`) {
 		t.Fatalf("summary lacks the reason counts: %q", logs[0])
 	}
 }

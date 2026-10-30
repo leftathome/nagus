@@ -9,6 +9,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/sanitize"
 	"github.com/leftathome/nagus/internal/store"
 )
 
@@ -91,24 +92,39 @@ type Ingester struct {
 	// uses it to settle each submitted line from the pass's skips.
 	AfterIngest func(ctx context.Context, res IngestResult)
 
-	// dropped is the last LOGGED drop verdict ("stage: reason") per source
-	// key, so a listing dropped for the same reason on every pass is logged
-	// once rather than once per pass (nagus-c6l: 21,752 identical lines in a
-	// week). It is rebuilt each pass from that pass's drops alone, so it holds
-	// only listings the source still shows and still drops; a listing that
-	// recovers or disappears is logged again if it is dropped later. Skips
-	// are still counted every pass -- only the log line is deduplicated.
+	// dropped is the previous pass's CONTENT drop verdict ("stage: reason")
+	// per source key, so a listing dropped for the same reason on every pass
+	// is logged once rather than once per pass (nagus-c6l: 21,752 identical
+	// lines in a week). It is rebuilt each pass from that pass's drops, so it
+	// holds only listings the source still shows and still drops; a listing
+	// that recovers or disappears is logged again if it is dropped later.
+	// After an incomplete fetch, listings the walk did not reach keep their
+	// entry. Skips are still counted every pass -- only the log line is
+	// deduplicated, and only for content verdicts (see contentVerdict).
 	droppedMu sync.Mutex
 	dropped   map[string]string
 }
 
-// logDrop logs a sanitize/extract drop unless the previous pass logged the
-// same verdict for the same listing, and records it in next.
+// contentVerdict reports whether a drop is a verdict on the listing itself,
+// which repeats identically while the listing is unchanged, rather than an
+// infrastructure failure. Every extract error is a content verdict; at the
+// sanitize stage only a glovebox quarantine is. A fail-closed gate failure
+// (glovebox unreachable, a rejected or missing token, an HTTP error) is
+// logged on EVERY pass: an outage must stay loud for as long as it lasts.
+func contentVerdict(stage string, err error) bool {
+	return stage == "extract" || errors.Is(err, sanitize.ErrQuarantined)
+}
+
+// logDrop logs a sanitize/extract drop unless it is a content verdict the
+// previous pass already logged for the same listing, and records content
+// verdicts in next.
 func (i *Ingester) logDrop(prev, next map[string]string, stage, key string, err error) {
-	verdict := stage + ": " + err.Error()
-	next[key] = verdict
-	if prev[key] == verdict {
-		return
+	if contentVerdict(stage, err) {
+		verdict := stage + ": " + err.Error()
+		next[key] = verdict
+		if prev[key] == verdict {
+			return
+		}
 	}
 	i.logf("ingest: %s dropped %s: %v", stage, key, err)
 }
@@ -152,12 +168,24 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 	prevDropped := i.dropped
 	i.droppedMu.Unlock()
 	nextDropped := map[string]string{}
+	seen := make(map[string]bool, len(raws))
 	defer func() {
+		// A truncated walk did not reach every listing: keep what the last
+		// pass knew about the ones it missed, or they are logged again as
+		// new on the next complete pass.
+		if rc, ok := i.Connector.(interface{ FetchComplete() bool }); ok && !rc.FetchComplete() {
+			for k, v := range prevDropped {
+				if !seen[k] {
+					nextDropped[k] = v
+				}
+			}
+		}
 		i.droppedMu.Lock()
 		i.dropped = nextDropped
 		i.droppedMu.Unlock()
 	}()
 	for _, r := range raws {
+		seen[r.SourceKey] = true
 		// For a text-hint source the gate runs FIRST, so the title is attached
 		// to the offer's hint only when glovebox passed it. The verdict is
 		// reused below: one gate call per listing either way.
