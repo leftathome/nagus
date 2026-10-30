@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leftathome/nagus/internal/listing"
@@ -89,6 +90,27 @@ type Ingester struct {
 	// Fetch succeeded, after offer housekeeping. The deal-submission ledger
 	// uses it to settle each submitted line from the pass's skips.
 	AfterIngest func(ctx context.Context, res IngestResult)
+
+	// dropped is the last LOGGED drop verdict ("stage: reason") per source
+	// key, so a listing dropped for the same reason on every pass is logged
+	// once rather than once per pass (nagus-c6l: 21,752 identical lines in a
+	// week). It is rebuilt each pass from that pass's drops alone, so it holds
+	// only listings the source still shows and still drops; a listing that
+	// recovers or disappears is logged again if it is dropped later. Skips
+	// are still counted every pass -- only the log line is deduplicated.
+	droppedMu sync.Mutex
+	dropped   map[string]string
+}
+
+// logDrop logs a sanitize/extract drop unless the previous pass logged the
+// same verdict for the same listing, and records it in next.
+func (i *Ingester) logDrop(prev, next map[string]string, stage, key string, err error) {
+	verdict := stage + ": " + err.Error()
+	next[key] = verdict
+	if prev[key] == verdict {
+		return
+	}
+	i.logf("ingest: %s dropped %s: %v", stage, key, err)
 }
 
 func (i *Ingester) now() time.Time {
@@ -126,6 +148,15 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 	// It is expressed as "no Extractor" rather than a flag because that IS the
 	// condition: without an extractor there is nothing to evaluate INTO.
 	evaluates := i.Extractor != nil && i.Store != nil
+	i.droppedMu.Lock()
+	prevDropped := i.dropped
+	i.droppedMu.Unlock()
+	nextDropped := map[string]string{}
+	defer func() {
+		i.droppedMu.Lock()
+		i.dropped = nextDropped
+		i.droppedMu.Unlock()
+	}()
 	for _, r := range raws {
 		// For a text-hint source the gate runs FIRST, so the title is attached
 		// to the offer's hint only when glovebox passed it. The verdict is
@@ -190,13 +221,13 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 		}
 		if sanErr != nil {
 			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "sanitize", Reason: sanErr.Error(), Err: sanErr})
-			i.logf("ingest: sanitize dropped %s: %v", r.SourceKey, sanErr)
+			i.logDrop(prevDropped, nextDropped, "sanitize", r.SourceKey, sanErr)
 			continue
 		}
 		it, err := i.Extractor.Extract(ctx, san)
 		if err != nil {
 			res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "extract", Reason: err.Error(), Err: err})
-			i.logf("ingest: extract dropped %s: %v", r.SourceKey, err)
+			i.logDrop(prevDropped, nextDropped, "extract", r.SourceKey, err)
 			if errors.Is(err, listing.ErrNotInCategory) && i.Store != nil {
 				// An item stored before the category rule existed must not
 				// outlive it: Shopify sources have no freshness purge.
