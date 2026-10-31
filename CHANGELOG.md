@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **golang.org/x/net v0.60.0 -> v0.62.0** (GO-2026-6860): quadratic
+  complexity when coalescing text nodes in `html.Parse`, which nagus reaches
+  from `promo.SelectImages` on untrusted retailer mail HTML. Minimum version
+  selection moves x/crypto (v0.58.0), x/sync (v0.24.0), x/sys (v0.49.0),
+  x/text (v0.43.0, a direct dependency) and x/tools (v0.51.0) with it.
+
 ### Changed
 
 - **Quieter logs** (nagus-c6l): a listing dropped at sanitize or extract for
