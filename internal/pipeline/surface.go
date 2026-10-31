@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/leftathome/nagus/internal/item"
@@ -79,6 +80,35 @@ const maxTopUps = 3
 // live category held 1,343 items on 2026-09-24.
 const DefaultMaxCandidates = 5000
 
+// maxLoggedReasons bounds the distinct filter reasons one summary line names.
+const maxLoggedReasons = 5
+
+// summariseReasons renders reason counts most-common first, each with one
+// example item ("2x reason (e.g. id1); 1x other (e.g. id2)"), naming at most
+// limit reasons and counting the rest. The example keeps "why is item X not
+// surfacing?" answerable from the log.
+func summariseReasons(counts map[string]int, example map[string]string, limit int) string {
+	reasons := make([]string, 0, len(counts))
+	for r := range counts {
+		reasons = append(reasons, r)
+	}
+	sort.Slice(reasons, func(a, b int) bool {
+		if counts[reasons[a]] != counts[reasons[b]] {
+			return counts[reasons[a]] > counts[reasons[b]]
+		}
+		return reasons[a] < reasons[b]
+	})
+	parts := make([]string, 0, limit+1)
+	for k, r := range reasons {
+		if k == limit {
+			parts = append(parts, fmt.Sprintf("and %d other reason(s)", len(reasons)-limit))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%dx %s (e.g. %s)", counts[r], r, example[r]))
+	}
+	return strings.Join(parts, "; ")
+}
+
 func (s *Surface) logf(format string, args ...any) {
 	if s.Logf != nil {
 		s.Logf(format, args...)
@@ -100,9 +130,17 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 		s.logf("surface: %s: candidate cap %d reached; ranking covers only part of the category", q.Category, candidates)
 	}
 	out := SurfaceResult{Matched: len(items), HiddenExpired: hidden, CapReached: capReached}
+	// Filtered items are summarised in ONE line per request, not one line per
+	// item per request: the same items fail the same filter on every request
+	// (nagus-c6l: ~28 items logged 334 times each in a week).
+	filtered := map[string]int{}
+	example := map[string]string{}
 	for _, it := range items {
 		if ok, reason := s.Filter.Pass(it); !ok {
-			s.logf("surface: filtered %s: %s", it.ID, reason)
+			if filtered[reason] == 0 {
+				example[reason] = it.ID
+			}
+			filtered[reason]++
 			continue
 		}
 		sig := score.DealSignal{Verdict: "unknown-no-reference"}
@@ -123,6 +161,9 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 		out.Items = append(out.Items, sc)
 	}
 	out.Filtered = len(out.Items)
+	if n := len(items) - len(out.Items); n > 0 {
+		s.logf("surface: %s: filtered out %d of %d: %s", q.Category, n, len(items), summariseReasons(filtered, example, maxLoggedReasons))
+	}
 	sort.SliceStable(out.Items, func(a, b int) bool {
 		if out.Items[a].Score.Value != out.Items[b].Score.Value {
 			return out.Items[a].Score.Value > out.Items[b].Score.Value

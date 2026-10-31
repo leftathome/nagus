@@ -14,6 +14,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   selection moves x/crypto (v0.58.0), x/sync (v0.24.0), x/sys (v0.49.0),
   x/text (v0.43.0, a direct dependency) and x/tools (v0.51.0) with it.
 
+### Changed
+
+- **Quieter logs** (nagus-c6l): a listing dropped at sanitize or extract for
+  the same reason on every pass is logged once, not once per pass, and the
+  surface logs one summary line per request ("filtered out N of M", with reason
+  counts and an example item each) instead of one line per filtered item.
+  Only verdicts on the listing itself are deduplicated: a fail-closed glovebox
+  failure (unreachable, token rejected, HTTP error) is still logged on every
+  pass for as long as it lasts. Skip counts are unchanged. In
+  the first production week these two lines were most of the ~66,000 log lines.
+
 ## [0.17.0] - 2026-10-23
 
 The release number jumps from 0.5.1 to 0.17.0 on purpose: between releases the
