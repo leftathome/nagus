@@ -111,8 +111,8 @@ type Ingester struct {
 // which repeats identically while the listing is unchanged, rather than an
 // infrastructure failure. Every extract error is a content verdict; at the
 // sanitize stage only a glovebox quarantine is. A fail-closed gate failure
-// (glovebox unreachable, a rejected or missing token, an HTTP error) is
-// logged on EVERY pass: an outage must stay loud for as long as it lasts.
+// (glovebox unreachable, a rejected or missing token, an HTTP error, a
+// misconfigured gate) is logged on EVERY pass: an outage must stay loud for as long as it lasts.
 func contentVerdict(stage string, err error) bool {
 	return stage == "extract" || errors.Is(err, sanitize.ErrQuarantined)
 }

@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-31
+
 ### Security
 
 - **golang.org/x/net v0.60.0 -> v0.62.0** (GO-2026-6860): quadratic
@@ -17,13 +19,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **Quieter logs** (nagus-c6l): a listing dropped at sanitize or extract for
-  the same reason on every pass is logged once, not once per pass, and the
-  surface logs one summary line per request ("filtered out N of M", with reason
-  counts and an example item each) instead of one line per filtered item.
-  Only verdicts on the listing itself are deduplicated: a fail-closed glovebox
-  failure (unreachable, token rejected, HTTP error) is still logged on every
-  pass for as long as it lasts. Skip counts are unchanged. In
-  the first production week these two lines were most of the ~66,000 log lines.
+  the same reason on every pass is logged once, not once per pass, and logged
+  again if the reason changes, the listing recovers or returns, or nagus
+  restarts (the memory is in-process). The surface logs one summary line per
+  request ("filtered out N of M", naming up to five reasons with counts and an
+  example item each) instead of one line per filtered item. Only verdicts on
+  the listing itself are deduplicated: a fail-closed glovebox failure
+  (unreachable, token rejected or missing, HTTP error, misconfigured gate) is
+  still logged on every pass for as long as it lasts, and the first good pass
+  after one logs each drop once more. Skip counts are unchanged. In the first
+  production week these two lines were most of the ~66,000 log lines.
 
 ## [0.17.0] - 2026-10-23
 

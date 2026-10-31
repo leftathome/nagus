@@ -132,7 +132,7 @@ func (s *Surface) Surface(ctx context.Context, q store.Query) (SurfaceResult, er
 	out := SurfaceResult{Matched: len(items), HiddenExpired: hidden, CapReached: capReached}
 	// Filtered items are summarised in ONE line per request, not one line per
 	// item per request: the same items fail the same filter on every request
-	// (nagus-c6l: ~28 items logged 334 times each in a week).
+	// (nagus-c6l: on the order of 100 items logged 334 times each in a week).
 	filtered := map[string]int{}
 	example := map[string]string{}
 	for _, it := range items {
