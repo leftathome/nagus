@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-31
+
 ### Security
 
 - **golang.org/x/net v0.60.0 -> v0.62.0** (GO-2026-6860): quadratic

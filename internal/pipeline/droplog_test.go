@@ -210,7 +210,7 @@ func TestIncompleteFetchKeepsUnreachedListingsInMemory(t *testing.T) {
 }
 
 // The surface logs ONE summary line per request for its filtered items, not
-// one line per item per request (nagus-c6l: ~28 items x 334 requests).
+// one line per item per request (nagus-c6l: on the order of 100 items x 334 requests).
 func TestSurfaceSummarisesFilteredItems(t *testing.T) {
 	raws := []listing.Raw{
 		raw("big", "Seagate 16TB", 12000, "16"),
