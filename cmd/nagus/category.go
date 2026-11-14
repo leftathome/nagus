@@ -269,8 +269,11 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		if s.Commerce7Tenant == "" && s.Fixture == "" {
 			return nil, fmt.Errorf("source %q: commerce7 needs commerce7Tenant (see nagus fingerprint)", s.Name)
 		}
+		if err := commerce7.ValidProductPath(s.Commerce7ProductPath); err != nil {
+			return nil, fmt.Errorf("source %q: %w", s.Name, err)
+		}
 		return commerce7.NewConnector(commerce7.Config{
-			Name: s.Name, Tenant: s.Commerce7Tenant, StoreURL: s.BaseURL,
+			Name: s.Name, Tenant: s.Commerce7Tenant, StoreURL: s.BaseURL, ProductPath: s.Commerce7ProductPath,
 			MaxPages: s.MaxPages, FixturePath: s.Fixture, Logf: o.logf,
 		}), nil
 	case "orderport":

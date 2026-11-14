@@ -44,7 +44,30 @@ const (
 	PageSize = 50
 	// DefaultMaxPages bounds one Fetch (50 x 20 = 1000 products).
 	DefaultMaxPages = 20
+	// DefaultProductPath is where most storefronts serve a product: the
+	// Commerce7 site template routes /product/<slug>.
+	DefaultProductPath = "/product/{slug}"
 )
+
+// ValidProductPath checks a product link template: a path under the
+// storefront root, naming the product's slug exactly once. A Squarespace
+// (or other hash-routed) storefront serves products at "/product#/{slug}";
+// a CMS-hosted store may use its own path ("/store/{slug}") -- nagus-ebw.
+func ValidProductPath(p string) error {
+	if p == "" {
+		return nil
+	}
+	if !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("commerce7 product path %q must start with /", p)
+	}
+	if strings.Count(p, "{slug}") != 1 {
+		return fmt.Errorf("commerce7 product path %q must contain {slug} exactly once", p)
+	}
+	if strings.ContainsAny(p, " ?\\") || strings.Contains(p, "//") {
+		return fmt.Errorf("commerce7 product path %q: no spaces, query, backslashes or //", p)
+	}
+	return nil
+}
 
 // Config configures one winery.
 type Config struct {
@@ -55,6 +78,10 @@ type Config struct {
 	// StoreURL is the winery's storefront root, for product links
 	// ("https://tablascreek.com" -> https://tablascreek.com/product/<slug>).
 	StoreURL string
+	// ProductPath is the product link under StoreURL, with {slug} replaced
+	// by the product's (path-escaped) slug; "" = DefaultProductPath. Check
+	// it with ValidProductPath.
+	ProductPath string
 	// APIBase overrides DefaultAPIBase (tests).
 	APIBase     string
 	MaxPages    int
@@ -80,6 +107,9 @@ func NewConnector(cfg Config) *Connector {
 	}
 	cfg.APIBase = strings.TrimRight(cfg.APIBase, "/")
 	cfg.StoreURL = strings.TrimRight(cfg.StoreURL, "/")
+	if cfg.ProductPath == "" {
+		cfg.ProductPath = DefaultProductPath
+	}
 	if cfg.MaxPages <= 0 {
 		cfg.MaxPages = DefaultMaxPages
 	}
@@ -272,7 +302,7 @@ func (c *Connector) raw(p product, v variant, variants int, now time.Time) listi
 	}
 	link := ""
 	if c.cfg.StoreURL != "" && p.Slug != "" {
-		link = c.cfg.StoreURL + "/product/" + url.PathEscape(p.Slug)
+		link = c.cfg.StoreURL + strings.Replace(c.cfg.ProductPath, "{slug}", url.PathEscape(p.Slug), 1)
 	}
 	return listing.Raw{
 		SourceID:   c.SourceID(),
