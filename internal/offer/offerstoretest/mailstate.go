@@ -28,6 +28,66 @@ func runMailState(t *testing.T, newStore NewStore) {
 	t.Run("PromoReadingRoundTrips", func(t *testing.T) { promoReadingRoundTrips(t, ms(t)) })
 	t.Run("VisionUsageAccumulates", func(t *testing.T) { visionUsageAccumulates(t, ms(t)) })
 	t.Run("PurgeMailState", func(t *testing.T) { purgeMailState(t, ms(t)) })
+	t.Run("AuthPassRoundTrips", func(t *testing.T) { authPassRoundTrips(t, ms(t)) })
+	t.Run("PurgeAuthPasses", func(t *testing.T) { purgeAuthPasses(t, ms(t)) })
+}
+
+// authPassRoundTrips: a pass is stored per (source, message key), replaced
+// in place, and needs its identity and path (nagus-aoq).
+func authPassRoundTrips(t *testing.T, s offer.MailState) {
+	ctx := context.Background()
+	if _, ok, err := s.GetAuthPass(ctx, "imap:deals", "k1"); err != nil || ok {
+		t.Fatalf("missing pass: ok %v err %v", ok, err)
+	}
+	if err := s.PutAuthPass(ctx, "imap:deals", "k1", "dkim", T0); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok, err := s.GetAuthPass(ctx, "imap:deals", "k1"); err != nil || !ok || p != "dkim" {
+		t.Fatalf("round trip: %q ok %v err %v", p, ok, err)
+	}
+	if err := s.PutAuthPass(ctx, "imap:deals", "k1", "arc", T1); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, _ := s.GetAuthPass(ctx, "imap:deals", "k1"); p != "arc" {
+		t.Fatalf("replace: %q", p)
+	}
+	if _, ok, _ := s.GetAuthPass(ctx, "imap:other", "k1"); ok {
+		t.Fatal("a pass leaked across sources")
+	}
+	for _, bad := range [][3]string{{"", "k", "dkim"}, {"imap:deals", "", "dkim"}, {"imap:deals", "k", ""}} {
+		if err := s.PutAuthPass(ctx, bad[0], bad[1], bad[2], T0); !errors.Is(err, offer.ErrNoAuthPassKey) {
+			t.Fatalf("put %q: %v, want ErrNoAuthPassKey", bad, err)
+		}
+	}
+}
+
+// purgeAuthPasses deletes only the named source's passes recorded before
+// the cutoff, and leaves the shared promo state alone.
+func purgeAuthPasses(t *testing.T, s offer.MailState) {
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(s.PutAuthPass(ctx, "imap:deals", "old", "dkim", T0))
+	must(s.PutAuthPass(ctx, "imap:deals", "new", "dkim", T1))
+	must(s.PutAuthPass(ctx, "imap:other", "old", "dkim", T0))
+	must(s.PutPromoReading(ctx, "img", []byte(`[]`), T0))
+	must(s.PurgeAuthPasses(ctx, "imap:deals", T1))
+	if _, ok, _ := s.GetAuthPass(ctx, "imap:deals", "old"); ok {
+		t.Fatal("a pass before the cutoff survived")
+	}
+	if _, ok, _ := s.GetAuthPass(ctx, "imap:deals", "new"); !ok {
+		t.Fatal("a pass at the cutoff was purged")
+	}
+	if _, ok, _ := s.GetAuthPass(ctx, "imap:other", "old"); !ok {
+		t.Fatal("another source's pass was purged")
+	}
+	if _, ok, _ := s.GetPromoReading(ctx, "img"); !ok {
+		t.Fatal("purging passes purged shared promo state")
+	}
 }
 
 func promoMessageRoundTrips(t *testing.T, s offer.MailState) {

@@ -19,7 +19,13 @@ import (
 //   - promo_readings: the two vision readings of an image, keyed by the
 //     SHA-256 of its bytes, shared by every source;
 //   - vision_usage: vision calls per UTC day, shared by every source, so a
-//     restart does not reset the daily budget.
+//     restart does not reset the daily budget;
+//   - mail_auth_passes: one row per (source, message) whose sender
+//     authentication PASSED when the message was first read (nagus-aoq), so
+//     a DKIM signature that expires while its mail is still inside the
+//     lookback window (Gmail signs with x= = t + 7 days, the window is 14)
+//     does not turn a genuine message into a refused one -- after a restart
+//     too.
 //
 // Payloads are opaque to the store. Every adapter of Store implements it;
 // it is a separate interface because only the mail readers use it.
@@ -41,7 +47,21 @@ type MailState interface {
 	// before, every reading stored before before, and the usage of days
 	// before before's UTC day. It runs in the retention pass.
 	PurgeMailState(ctx context.Context, sourceID string, before time.Time) error
+
+	// GetAuthPass returns the authentication path ("dkim", "arc", ...) a
+	// message passed by when it was first read, if it did.
+	GetAuthPass(ctx context.Context, sourceID, messageKey string) (string, bool, error)
+	// PutAuthPass records that a message passed authentication by path at
+	// at. Callers record only a pass they verified themselves.
+	PutAuthPass(ctx context.Context, sourceID, messageKey, path string, at time.Time) error
+	// PurgeAuthPasses deletes sourceID's passes recorded before before. It is
+	// separate from PurgeMailState, which also purges state every source
+	// shares, so a mail reader can purge only its own.
+	PurgeAuthPasses(ctx context.Context, sourceID string, before time.Time) error
 }
+
+// ErrNoAuthPassKey is an auth pass without its identity or path.
+var ErrNoAuthPassKey = errors.New("offer: an auth pass needs a source, a message key and a path")
 
 // PromoMessage is one processed promo message.
 type PromoMessage struct {
@@ -80,6 +100,12 @@ type memMailState struct {
 	messages map[[2]string]PromoMessage
 	readings map[string]memReading
 	usage    map[string]int
+	passes   map[[2]string]memPass
+}
+
+type memPass struct {
+	path string
+	at   time.Time
 }
 
 type memReading struct {
@@ -89,7 +115,7 @@ type memReading struct {
 
 func (m *MemoryStore) mail() *memMailState {
 	m.mailOnce.Do(func() {
-		m.mailState = &memMailState{messages: map[[2]string]PromoMessage{}, readings: map[string]memReading{}, usage: map[string]int{}}
+		m.mailState = &memMailState{messages: map[[2]string]PromoMessage{}, readings: map[string]memReading{}, usage: map[string]int{}, passes: map[[2]string]memPass{}}
 	})
 	return m.mailState
 }
@@ -196,6 +222,49 @@ func (m *MemoryStore) PurgeMailState(ctx context.Context, sourceID string, befor
 	for d := range s.usage {
 		if d < cut {
 			delete(s.usage, d)
+		}
+	}
+	return nil
+}
+
+// GetAuthPass implements MailState.
+func (m *MemoryStore) GetAuthPass(ctx context.Context, sourceID, key string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	s := m.mail()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.passes[[2]string{sourceID, key}]
+	return p.path, ok, nil
+}
+
+// PutAuthPass implements MailState.
+func (m *MemoryStore) PutAuthPass(ctx context.Context, sourceID, key, path string, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sourceID == "" || key == "" || path == "" {
+		return ErrNoAuthPassKey
+	}
+	s := m.mail()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.passes[[2]string{sourceID, key}] = memPass{path: path, at: at}
+	return nil
+}
+
+// PurgeAuthPasses implements MailState.
+func (m *MemoryStore) PurgeAuthPasses(ctx context.Context, sourceID string, before time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s := m.mail()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, p := range s.passes {
+		if k[0] == sourceID && p.at.Before(before) {
+			delete(s.passes, k)
 		}
 	}
 	return nil
