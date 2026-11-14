@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -231,11 +232,24 @@ func TestAuthConfigFingerprintCoversTrust(t *testing.T) {
 	if authConfigFingerprint(reordered) != fp {
 		t.Fatal("sender order changed the fingerprint")
 	}
+	// Adding a submitter or a household forwarder revokes nothing and must
+	// not throw every pass away (that would refuse week-old Gmail again).
+	grown := base
+	grown.Senders = append(slices.Clone(base.Senders), "d@w.com")
+	grown.Forwarders = []string{"f@g.com"}
+	if authConfigFingerprint(grown) != fp {
+		t.Fatal("adding a sender or forwarder changed the fingerprint")
+	}
+	// List entries are length-prefixed: ["a,b"] is not ["a", "b"].
+	one, two := base, base
+	one.TrustARCSealers, two.TrustARCSealers = []string{"a,b"}, []string{"a", "b"}
+	if authConfigFingerprint(one) == authConfigFingerprint(two) {
+		t.Fatal("list entries are ambiguous")
+	}
 	for name, mut := range map[string]func(*Config){
 		"auth-results off": func(c *Config) { c.TrustAuthResults = false },
-		"sender removed":   func(c *Config) { c.Senders = []string{"b@y.com"} },
 		"dkim domain":      func(c *Config) { c.DKIMDomain = "other.com" },
-		"forwarder added":  func(c *Config) { c.Forwarders = []string{"f@g.com"} },
+		"from":             func(c *Config) { c.From = "z@x.com" },
 		"arc sealer":       func(c *Config) { c.TrustARCSealers = []string{"s.com"} },
 		"arc authserv":     func(c *Config) { c.TrustARCAuthServ = []string{"s.com"} },
 		"arc recipients":   func(c *Config) { c.TrustARCRecipients = []string{"r@s.com"} },
@@ -277,6 +291,7 @@ func TestAPassDoesNotSkipTheOtherChecks(t *testing.T) {
 	noID := strings.Replace(eml("x@lb", sender, "No message id", ""), "Message-ID: <x@lb>\r\n", "", 1)
 	dupSubject := strings.Replace(eml("dup@lb", sender, "Dup subject", ""), "Subject: Dup subject\r\n", "Subject: Dup subject\r\nSubject: Another\r\n", 1)
 	for name, raw := range map[string]string{
+		"sender not listed":         eml("gone@x", "former@elsewhere.example", "Former sender", ""),
 		"no message-id":             noID,
 		"duplicate identity header": dupSubject,
 		"forward of another sender": fwd("fwd-x@gmail", household, "news@somewhere.com"),

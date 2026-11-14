@@ -127,8 +127,10 @@ and is committed at `internal/deal/deal-v1.schema.json`.
   message that authenticated when it was first read, and does not
   authenticate those exact bytes again (no signature, key lookup or expiry
   check; nagus-aoq). The sender, forwarder and header checks still run on
-  every read, and changing the source's trust settings makes every message
-  authenticate again. A message whose signature had already expired when
+  every read. Adding or removing a sender or forwarder keeps the memory;
+  changing how mail authenticates (the DKIM domain, Authentication-Results or
+  ARC trust) makes every message authenticate again, so after such a change
+  Gmail mail older than about 7 days is refused. A message whose signature had already expired when
   nagus first read it is refused.
 
 ## Checking what happened

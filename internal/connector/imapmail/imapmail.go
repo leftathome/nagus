@@ -284,9 +284,11 @@ type AuthPasses interface {
 // config (salt), where the message is in the mailbox and a digest of its
 // exact bytes. Another message at a reused UID, or the same UID after
 // UIDVALIDITY changes, never inherits a pass; nor does any message after the
-// operator changes who is trusted (a sender, a forwarder, the DKIM domain,
-// Authentication-Results or ARC trust): revoking trust takes effect on the
-// next poll, as it did before passes were remembered.
+// operator changes how mail authenticates (the DKIM domain,
+// Authentication-Results or ARC trust; authConfigFingerprint): revoking that
+// trust takes effect on the next poll, as it did before passes were
+// remembered. Removing a sender or forwarder needs no salt: that is checked
+// on every read.
 func passKey(salt string, uidValidity, uid uint32, raw []byte) string {
 	h := sha256.New()
 	_, _ = fmt.Fprintf(h, "%s\n%d:%d:", salt, uidValidity, uid)
@@ -294,8 +296,18 @@ func passKey(salt string, uidValidity, uid uint32, raw []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// authConfigFingerprint digests every setting that decides whether a
-// message authenticates. Order-insensitive for the lists.
+// authLogicVersion is mixed into every pass key. Bump it with any fix to how
+// a message authenticates (dkimSigned, aligned, coversFrom, the A-R or ARC
+// paths) so passes recorded by the old code are not honoured.
+const authLogicVersion = "1"
+
+// authConfigFingerprint digests the settings that decide whether a message
+// AUTHENTICATES: the From's DKIM domain and the A-R and ARC trust. Senders
+// and Forwarders are left out on purpose: who may send is checked on every
+// read whatever a pass says (whyNotSender, whyOtherSender), and a pass's
+// domain follows from the address itself, so adding a deal submitter must not
+// throw every pass away (which would refuse every week-old Gmail message
+// again). Order-insensitive for the lists.
 func authConfigFingerprint(cfg Config) string {
 	sorted := func(in []string) string {
 		out := slices.Clone(in)
@@ -303,12 +315,16 @@ func authConfigFingerprint(cfg Config) string {
 			out[i] = strings.ToLower(out[i])
 		}
 		slices.Sort(out)
-		return strings.Join(out, ",")
+		var b strings.Builder
+		for _, v := range out {
+			fmt.Fprintf(&b, "%d:%s,", len(v), v)
+		}
+		return b.String()
 	}
 	h := sha256.New()
 	for _, f := range []string{
+		"logic=" + authLogicVersion,
 		"from=" + cfg.From, "dkim=" + cfg.DKIMDomain,
-		"senders=" + sorted(cfg.Senders), "forwarders=" + sorted(cfg.Forwarders),
 		fmt.Sprintf("ar=%t", cfg.TrustAuthResults), "authserv=" + sorted(cfg.TrustedAuthServ),
 		"arcsealers=" + sorted(cfg.TrustARCSealers), "arcauthserv=" + sorted(cfg.TrustARCAuthServ),
 		"arcrcpt=" + sorted(cfg.TrustARCRecipients), "arcage=" + cfg.ARCMaxAge.String(),
