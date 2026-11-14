@@ -11,6 +11,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/quark"
+	"github.com/leftathome/nagus/internal/textclean"
 )
 
 var t0 = time.Unix(1_788_000_000, 0).UTC()
@@ -44,6 +45,12 @@ func (f *fakeQuark) Resolve(_ context.Context, hints []quark.Hint, retry bool) (
 	}
 	out := quark.Response{CatalogGeneration: f.generation, Results: make([]quark.Result, len(hints))}
 	for i, h := range hints {
+		// quark's gate 1 (quark-d0r): any invisible or format character in
+		// any field refuses the whole hint.
+		if strings.ContainsFunc(h.Brand+h.MPN+h.GTIN+h.Model+h.Text, textclean.Invisible) {
+			out.Results[i] = quark.Result{Route: quark.RouteRefused, Reason: "field_sanity"}
+			continue
+		}
 		if h.Text != "" {
 			// QUARK-02: text naming ST12000NM002J resolves; anything else is unmatched.
 			if strings.Contains(h.Text, "ST12000NM002J") {
@@ -333,5 +340,39 @@ func TestTextHintsAreSentAndStamped(t *testing.T) {
 	}
 	if r := state(t, s, miss); r.State != offer.ResolutionRefused {
 		t.Errorf("unmatched route: %+v, want refused (retryable)", r)
+	}
+}
+
+// nagus-78w: a listing title with an emoji (VS16), a ZWJ sequence or a soft
+// hyphen is sent to quark without them, so its hint is judged on what it
+// says; nagus stores the hint as it came, and the answer still applies.
+func TestInvisibleCharactersAreStrippedFromTheSentHintOnly(t *testing.T) {
+	s := offer.NewMemoryStore()
+	hint := offer.ProductHint{
+		Brand: "Sea\u00adgate",
+		Text:  "HP/Seagate \u2764\ufe0f Exos ST12000NM002J \U0001F468\u200d\U0001F469 12TB",
+	}
+	o := offer.Offer{SourceID: "ebay:ebay", SourceKey: "emoji", PriceCents: 100, LastSeen: t0, ProductHint: hint}
+	if err := s.Put(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	o.ID = offer.DeterministicID(o.SourceID, o.SourceKey)
+	q := &fakeQuark{}
+	if _, err := newEnricher(s, q).RunPass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.calls) != 1 || len(q.calls[0].hints) != 1 {
+		t.Fatalf("calls %+v", q.calls)
+	}
+	sent := q.calls[0].hints[0]
+	if strings.ContainsFunc(sent.Brand+sent.Text, textclean.Invisible) || sent.Brand != "Seagate" || !strings.Contains(sent.Text, "ST12000NM002J") {
+		t.Fatalf("sent hint %+q", sent)
+	}
+	if r := state(t, s, o); r.State != offer.ResolutionResolved || r.ProductID != "p-ST12000NM002J" {
+		t.Fatalf("resolution %+v, want resolved (the answer applies to the stored hint)", r)
+	}
+	got, _, _ := s.Get(context.Background(), o.ID)
+	if got.ProductHint != hint {
+		t.Fatalf("stored hint changed: %+q", got.ProductHint)
 	}
 }
