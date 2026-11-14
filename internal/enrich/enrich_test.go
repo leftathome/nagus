@@ -349,8 +349,9 @@ func TestTextHintsAreSentAndStamped(t *testing.T) {
 func TestInvisibleCharactersAreStrippedFromTheSentHintOnly(t *testing.T) {
 	s := offer.NewMemoryStore()
 	hint := offer.ProductHint{
-		Brand: "Sea\u00adgate",
-		Text:  "HP/Seagate \u2764\ufe0f Exos ST12000NM002J \U0001F468\u200d\U0001F469 12TB",
+		Brand:  "Sea\u00adgate",
+		Text:   "HP/Seagate \u2764\ufe0f Exos ST12000NM002J \U0001F468\u200d\U0001F469 12TB",
+		Vetted: true, // as the pipeline stores a gated hint (nagus-voe)
 	}
 	o := offer.Offer{SourceID: "ebay:ebay", SourceKey: "emoji", PriceCents: 100, LastSeen: t0, ProductHint: hint}
 	if err := s.Put(context.Background(), o); err != nil {
@@ -373,6 +374,6 @@ func TestInvisibleCharactersAreStrippedFromTheSentHintOnly(t *testing.T) {
 	}
 	got, _, _ := s.Get(context.Background(), o.ID)
 	if got.ProductHint != hint {
-		t.Fatalf("stored hint changed: %+q", got.ProductHint)
+		t.Fatalf("stored hint changed: %+v", got.ProductHint)
 	}
 }
