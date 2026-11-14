@@ -5,9 +5,11 @@ import "testing"
 func TestStripInvisible(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"Seagate 8TB", "Seagate 8TB"},
-		{"Seagate \u2764\ufe0f 8TB", "Seagate \u2764 8TB"},                                   // VS16 emoji
-		{"\U0001F468\u200d\U0001F469 family", "\U0001F468\U0001F469 family"},                 // ZWJ sequence
-		{"ultra\u00adstar", "ultrastar"},                                                     // soft hyphen
+		{"Seagate \u2764\ufe0f 8TB", "Seagate \u2764 8TB"},                   // VS16 emoji
+		{"\U0001F468\u200d\U0001F469 family", "\U0001F468\U0001F469 family"}, // ZWJ sequence
+		{"ultra\u00adstar", "ultrastar"},
+		{"ST12000NM002J\u200b12TB", "ST12000NM002J 12TB"},
+		{"WD \u200b Red", "WD Red"},                                                          // soft hyphen
 		{"\ufeffWD Red", "WD Red"},                                                           // BOM
 		{"\u202eevil\u202c \u2066x\u2069", "evil x"},                                         // bidi override + isolates
 		{"tag\U000E0041\U000E0042", "tag"},                                                   // Tags block

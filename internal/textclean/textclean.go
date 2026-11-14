@@ -16,16 +16,26 @@ func Invisible(r rune) bool {
 		unicode.Is(unicode.Variation_Selector, r)
 }
 
-// StripInvisible removes every Invisible rune and trims the ends. A string
-// with none is returned unchanged (no allocation).
+// separator reports the invisible runes that stand BETWEEN words: ZERO
+// WIDTH SPACE and MONGOLIAN VOWEL SEPARATOR. Removing them would join two
+// tokens ("ST12000NM002J" + "12TB"), so they become a space.
+func separator(r rune) bool { return r == 0x200B || r == 0x180E }
+
+// StripInvisible removes every Invisible rune (a separator becomes a space),
+// collapses the whitespace runs that leaves and trims the ends. A string with
+// none is returned unchanged (no allocation).
 func StripInvisible(s string) string {
 	if strings.IndexFunc(s, Invisible) < 0 {
 		return s
 	}
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if Invisible(r) {
+	out := strings.Map(func(r rune) rune {
+		switch {
+		case separator(r):
+			return ' '
+		case Invisible(r):
 			return -1
 		}
 		return r
-	}, s))
+	}, s)
+	return strings.Join(strings.Fields(out), " ")
 }
