@@ -134,7 +134,7 @@ func TestStructuredHintsNeedTheGate(t *testing.T) {
 		want string
 	}{
 		{"passed", func(o offer.Store, r []listing.Raw) *Ingester {
-			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o, Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
+			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o, Sanitizer: vettingGate{}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
 		}, "ST8000NM000A"},
 		{"refused", func(o offer.Store, r []listing.Raw) *Ingester {
 			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o, Sanitizer: refusingSanitizer{err: errors.New("quarantined")}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
@@ -153,8 +153,8 @@ func TestStructuredHintsNeedTheGate(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatalf("offer: ok=%v err=%v (the offer itself is always recorded)", ok, err)
 			}
-			if o.ProductHint.MPN != tc.want || (tc.want == "" && !o.ProductHint.Empty()) {
-				t.Fatalf("hint %+v, want MPN %q", o.ProductHint, tc.want)
+			if o.ProductHint.MPN != tc.want || (tc.want == "" && !o.ProductHint.Empty()) || o.ProductHint.Vetted != (tc.want != "") {
+				t.Fatalf("hint %+v, want MPN %q (vetted only when passed)", o.ProductHint, tc.want)
 			}
 		})
 	}
@@ -193,7 +193,9 @@ func TestStoredHintsAreKeptOnlyWhenVetted(t *testing.T) {
 		}
 		return o
 	}
-	refuse := refusingSanitizer{err: errors.New("quarantined")}
+	refuse := refusingSanitizer{err: fmt.Errorf("%w: test", sanitize.ErrQuarantined)}
+	outage := refusingSanitizer{err: errors.New("sanitize: glovebox unreachable")}
+	pass := vettingGate{}
 
 	if o := ingest(t, seed(t, false), refuse); !o.ProductHint.Empty() || o.Resolution.ProductID != "" {
 		t.Fatalf("legacy unvetted hint survived a refusal: %+v %+v", o.ProductHint, o.Resolution)
@@ -201,7 +203,24 @@ func TestStoredHintsAreKeptOnlyWhenVetted(t *testing.T) {
 	if o := ingest(t, seed(t, true), refuse); o.ProductHint.MPN != "ST8000NM000A" || o.Resolution.ProductID != "p-1" {
 		t.Fatalf("a vetted hint was not kept through a refusal: %+v %+v", o.ProductHint, o.Resolution)
 	}
-	if o := ingest(t, seed(t, false), sanitize.Passthrough{}); !o.ProductHint.Vetted || o.Resolution.ProductID != "p-1" {
+	if o := ingest(t, seed(t, false), pass); !o.ProductHint.Vetted || o.Resolution.ProductID != "p-1" {
 		t.Fatalf("a passing listing did not vet the stored hint in place: %+v %+v", o.ProductHint, o.Resolution)
 	}
+	// An outage is not a verdict: a legacy hint is kept, still unvetted (so
+	// still never sent to quark), and the product id survives.
+	if o := ingest(t, seed(t, false), outage); o.ProductHint.MPN != "ST8000NM000A" || o.ProductHint.Vetted || o.Resolution.ProductID != "p-1" {
+		t.Fatalf("an outage cleared or vetted a legacy hint: %+v %+v", o.ProductHint, o.Resolution)
+	}
+	// Passthrough (no glovebox configured) scans nothing and vets nothing.
+	if o := ingest(t, seed(t, false), sanitize.Passthrough{}); o.ProductHint.Vetted {
+		t.Fatalf("Passthrough vetted a hint: %+v", o.ProductHint)
+	}
+}
+
+// vettingGate passes every listing like glovebox would, without being the
+// Passthrough.
+type vettingGate struct{}
+
+func (vettingGate) Sanitize(ctx context.Context, r listing.Raw) (listing.Sanitized, error) {
+	return sanitize.Passthrough{Name: "test.gate"}.Sanitize(ctx, r)
 }
