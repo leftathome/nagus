@@ -200,5 +200,11 @@ func TestColourHead_ColourLedBrand(t *testing.T) {
 		{"Rose All Day Lanyard", "", ErrNotWine},
 		{"Rose All Day Beanie", "", ErrNotWine},
 		{"Rose Gold Lanyard", "", ErrNotWine},
+		{"2023 Rose All Day", "", nil},
+		// A trailing slogan is not the brand (review of the fix).
+		{"Lanyard Rose All Day", "", ErrNotWine},
+		{"Beanie | Rose All Day", "", ErrNotWine},
+		{"Doormat Rose All Day", "", ErrNotWine},
+		{"Gift Set Rose All Day", "", ErrNotWine},
 	})
 }

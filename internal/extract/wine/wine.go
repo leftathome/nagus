@@ -725,7 +725,10 @@ func titleColourEvidence(title, body string) (ok, culinary bool) {
 // title's wine.
 func titleColourCounts(words []string, i, j int) bool {
 	for _, b := range colourLedBrands {
-		if phraseAt(words, i, b) {
+		// Only where the brand OPENS the title (after a vintage at most):
+		// "Rose All Day" is also a merchandise slogan, and a trailing one
+		// must not become the head ("Tumbler Rose All Day").
+		if brandOpensTitle(words, i) && phraseAt(words, i, b) {
 			// The brand is the colour phrase; what follows it is judged as
 			// what follows a colour ("Rose All Day Tumbler" is a tumbler).
 			j = i + len(strings.Fields(b))
@@ -756,6 +759,15 @@ func titleColourCounts(words []string, i, j int) bool {
 // on with words no wine table holds, so the colour alone would not vouch for
 // them (nagus-cvo). Normalized words; add a brand only with a real label.
 var colourLedBrands = []string{"rose all day"}
+
+// vintageWordRe is a four-digit vintage.
+var vintageWordRe = regexp.MustCompile(`^(19|20)[0-9]{2}$`)
+
+// brandOpensTitle reports whether words[i] starts the title, a vintage at
+// most before it ("2023 Rose All Day").
+func brandOpensTitle(words []string, i int) bool {
+	return i == 0 || (i == 1 && vintageWordRe.MatchString(words[0]))
+}
 
 // colourWineNouns are wines a colour word may name that no other table holds
 // ("Chateau Diana Sparkling Moscato").
