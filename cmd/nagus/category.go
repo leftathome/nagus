@@ -306,8 +306,8 @@ func buildConnectorForSource(s SourceConfig, cc CategoryConfig, o categoryOpts) 
 		conn, err := imapmail.NewConnector(imapmail.Config{
 			Name: s.Name, From: s.IMAPFrom, DKIMDomain: s.IMAPDKIMDomain, Mailbox: s.IMAPMailbox,
 			LookbackDays: s.IMAPLookbackDays, Forwarders: s.IMAPForwarders, Parser: p, Logf: o.logf,
-			TrustAuthResults: s.IMAPTrustAuthResults,
-			Host:             envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
+			TrustAuthResults: s.IMAPTrustAuthResults, Passes: authPassesOf(o.offers),
+			Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 			Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
 		})
 		if err != nil {
