@@ -161,7 +161,8 @@ func buildDealConnector(s SourceConfig, o categoryOpts) (listing.Connector, erro
 	conn, err := imapmail.NewConnector(imapmail.Config{
 		Name: s.Name, Senders: s.IMAPSenders, Forwarders: s.IMAPForwarders, Mailbox: s.IMAPMailbox,
 		LookbackDays: s.IMAPLookbackDays, Parser: p, CountIgnored: true, Observe: hub.Observer(), Logf: o.logf,
-		Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
+		Passes: authPassesOf(o.offers),
+		Host:   envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 		Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
 		TrustARCSealers: s.IMAPTrustARCSealers, TrustARCAuthServ: s.IMAPTrustARCAuthservIDs,
 		TrustARCRecipients: s.IMAPTrustARCRecipients, ARCMaxAge: time.Duration(s.IMAPTrustARCMaxAgeMinutes) * time.Minute,
