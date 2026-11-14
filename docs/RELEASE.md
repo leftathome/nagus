@@ -70,5 +70,10 @@ HelmRelease consumes:
 ## Version stamping
 
 The binary reports its version via `nagus version`; it is injected at build time
-(`-ldflags "-X main.version=..."`, from the `VERSION` build-arg / tag). An
-untagged build reports `dev`.
+(`-ldflags "-X main.version=..."`, from the `VERSION` build-arg). Both CI
+systems pass it: GitHub Actions and GitLab (the `build-amd64`/`build-arm64`
+legs, via ci-templates v0.2.2 `EXTRA_BUILD_ARGS`) stamp a tag build with the
+tag (`v0.17.2`) and GitLab stamps a main build with the short commit sha. Only
+a local `docker build` without `--build-arg VERSION=...` reports `dev`.
+Check a deployed image with `nagus version` or the MCP `initialize`
+`serverInfo.version`.
