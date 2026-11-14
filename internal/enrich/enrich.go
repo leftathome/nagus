@@ -18,6 +18,7 @@ import (
 
 	"github.com/leftathome/nagus/internal/offer"
 	"github.com/leftathome/nagus/internal/quark"
+	"github.com/leftathome/nagus/internal/textclean"
 )
 
 // Resolver is the one quark call this pass makes; *quark.Client satisfies it.
@@ -226,13 +227,18 @@ func (e *Enricher) resolveBatch(ctx context.Context, all []offer.Offer, retry bo
 		if e.CategoryFor != nil {
 			cat = e.CategoryFor(o.SourceID)
 		}
+		// Invisible and format characters (an emoji's VS16, a ZWJ, a soft
+		// hyphen, a BOM) make quark refuse the WHOLE hint (field_sanity,
+		// quark-d0r), so they are stripped from what is SENT -- never from
+		// what nagus stores, and the fingerprint stays the stored hint's
+		// (nagus-78w).
 		hints[i] = quark.Hint{
 			Category: cat,
-			Brand:    o.ProductHint.Brand,
-			MPN:      o.ProductHint.MPN,
-			GTIN:     o.ProductHint.GTIN,
-			Model:    o.ProductHint.Model,
-			Text:     o.ProductHint.Text,
+			Brand:    textclean.StripInvisible(o.ProductHint.Brand),
+			MPN:      textclean.StripInvisible(o.ProductHint.MPN),
+			GTIN:     textclean.StripInvisible(o.ProductHint.GTIN),
+			Model:    textclean.StripInvisible(o.ProductHint.Model),
+			Text:     textclean.StripInvisible(o.ProductHint.Text),
 		}
 	}
 
