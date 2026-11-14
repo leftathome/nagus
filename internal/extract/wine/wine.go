@@ -724,6 +724,14 @@ func titleColourEvidence(title, body string) (ok, culinary bool) {
 // titleColourCounts reports whether the colour words at words[i:j] name the
 // title's wine.
 func titleColourCounts(words []string, i, j int) bool {
+	for _, b := range colourLedBrands {
+		if phraseAt(words, i, b) {
+			// The brand is the colour phrase; what follows it is judged as
+			// what follows a colour ("Rose All Day Tumbler" is a tumbler).
+			j = i + len(strings.Fields(b))
+			break
+		}
+	}
 	if j < len(words) && words[j] == "wine" {
 		j++ // "Rose Wine", "Sparkling Wine"
 	}
@@ -743,6 +751,11 @@ func titleColourCounts(words []string, i, j int) bool {
 	}
 	return len(findAppellations(words[:s])) == 0 // "Napa Valley Tumbler Rose"
 }
+
+// colourLedBrands are real wine brands that open with a colour word and go
+// on with words no wine table holds, so the colour alone would not vouch for
+// them (nagus-cvo). Normalized words; add a brand only with a real label.
+var colourLedBrands = []string{"rose all day"}
 
 // colourWineNouns are wines a colour word may name that no other table holds
 // ("Chateau Diana Sparkling Moscato").
