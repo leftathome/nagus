@@ -262,9 +262,11 @@ type Config struct {
 	// expiry (x=; Gmail's is the signing time plus 7 days) and the lookback
 	// window is longer, so re-verifying on every poll would turn a genuine
 	// message into a refused one part-way through its window. A message
-	// whose exact bytes, at the same UIDVALIDITY and UID, already passed is
-	// accepted by that path without checking the signature again; every
-	// other check still runs. Only a pass this connector verified itself is
+	// whose exact bytes, at the same UIDVALIDITY and UID and under the same
+	// authentication config, already passed is accepted by that path without
+	// authenticating it again (no signature, key lookup or expiry check:
+	// receipt-time semantics, so a sender revoking a DKIM key later does not
+	// un-accept it); every other check still runs. Only a pass this connector verified itself is
 	// recorded, so a signature already expired at first sight never passes.
 	// nil = verify on every poll (the old behaviour).
 	Passes AuthPasses
@@ -278,13 +280,41 @@ type AuthPasses interface {
 	PurgeAuthPasses(ctx context.Context, sourceID string, before time.Time) error
 }
 
-// passKey identifies a message for AuthPasses: where it is in the mailbox
-// and a digest of its exact bytes, so another message at a reused UID (or
-// the same UID after UIDVALIDITY changes) never inherits a pass.
-func passKey(uidValidity, uid uint32, raw []byte) string {
+// passKey identifies a message for AuthPasses: the source's authentication
+// config (salt), where the message is in the mailbox and a digest of its
+// exact bytes. Another message at a reused UID, or the same UID after
+// UIDVALIDITY changes, never inherits a pass; nor does any message after the
+// operator changes who is trusted (a sender, a forwarder, the DKIM domain,
+// Authentication-Results or ARC trust): revoking trust takes effect on the
+// next poll, as it did before passes were remembered.
+func passKey(salt string, uidValidity, uid uint32, raw []byte) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%d:%d:", uidValidity, uid)
+	_, _ = fmt.Fprintf(h, "%s\n%d:%d:", salt, uidValidity, uid)
 	_, _ = h.Write(raw)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// authConfigFingerprint digests every setting that decides whether a
+// message authenticates. Order-insensitive for the lists.
+func authConfigFingerprint(cfg Config) string {
+	sorted := func(in []string) string {
+		out := slices.Clone(in)
+		for i := range out {
+			out[i] = strings.ToLower(out[i])
+		}
+		slices.Sort(out)
+		return strings.Join(out, ",")
+	}
+	h := sha256.New()
+	for _, f := range []string{
+		"from=" + cfg.From, "dkim=" + cfg.DKIMDomain,
+		"senders=" + sorted(cfg.Senders), "forwarders=" + sorted(cfg.Forwarders),
+		fmt.Sprintf("ar=%t", cfg.TrustAuthResults), "authserv=" + sorted(cfg.TrustedAuthServ),
+		"arcsealers=" + sorted(cfg.TrustARCSealers), "arcauthserv=" + sorted(cfg.TrustARCAuthServ),
+		"arcrcpt=" + sorted(cfg.TrustARCRecipients), "arcage=" + cfg.ARCMaxAge.String(),
+	} {
+		_, _ = fmt.Fprintf(h, "%d:%s;", len(f), f)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -315,6 +345,9 @@ type Connector struct {
 	// NEW-10). Bounded; entries expire so a sender that fixes its DKIM is
 	// picked up again.
 	verdicts map[string]verdict
+	// passSalt fingerprints the authentication config (passKey): a pass
+	// recorded under another config is never honoured.
+	passSalt string
 }
 
 type verdict struct {
@@ -439,7 +472,7 @@ func NewConnector(cfg Config) (*Connector, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Connector{cfg: cfg}, nil
+	return &Connector{cfg: cfg, passSalt: authConfigFingerprint(cfg)}, nil
 }
 
 // SourceID returns "imap:<Name>".
@@ -562,7 +595,7 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			}
 			known, key := "", ""
 			if c.cfg.Passes != nil {
-				key = passKey(sel.UIDValidity, uint32(m.UID), raw)
+				key = passKey(c.passSalt, sel.UIDValidity, uint32(m.UID), raw)
 				path, ok, err := c.cfg.Passes.GetAuthPass(ctx, c.SourceID(), key)
 				switch {
 				case err != nil:

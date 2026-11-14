@@ -59,7 +59,7 @@ func (k *keyring) signUntil(raw, domain string, exp time.Time) string {
 	return out.String()
 }
 
-func passConnector(t *testing.T, addr string, p Parser, kr *keyring, passes AuthPasses) *Connector {
+func passConnector(t *testing.T, addr string, p Parser, kr *keyring, passes AuthPasses, mut ...func(*Config)) *Connector {
 	t.Helper()
 	if p == nil {
 		p = &recorder{}
@@ -72,6 +72,9 @@ func passConnector(t *testing.T, addr string, p Parser, kr *keyring, passes Auth
 	}
 	if passes != nil {
 		cfg.Passes = passes
+	}
+	for _, m := range mut {
+		m(&cfg)
 	}
 	c, err := NewConnector(cfg)
 	if err != nil {
@@ -100,8 +103,10 @@ func fetchSubjects(t *testing.T, c *Connector) []string {
 // memory refuses it (the bug).
 func TestAPassSurvivesTheSignatureExpiring(t *testing.T) {
 	kr := newKeyring(t)
-	// go-msgauth checks x= against the real clock, in whole seconds.
-	exp := time.Now().Add(2 * time.Second)
+	// go-msgauth checks x= against the real clock, in whole seconds (it has
+	// no clock option), so this one test waits for a real expiry. The
+	// margin covers a loaded CI node reaching the first fetch.
+	exp := time.Now().Add(5 * time.Second)
 	addr := server(t, map[string]time.Time{
 		kr.signUntil(eml("exp-1@lb", sender, "Expiring offer", ""), "lastbottlewines.com", exp): now.Add(-time.Hour),
 	})
@@ -168,18 +173,19 @@ func TestAPassStoreErrorFallsBackToVerification(t *testing.T) {
 // another key.
 func TestPassKeyIsBoundToTheBytesAndTheUID(t *testing.T) {
 	raw := []byte("From: a@b\r\n\r\nbody\r\n")
-	k := passKey(7, 42, raw)
+	k := passKey("salt", 7, 42, raw)
 	for name, other := range map[string]string{
-		"other bytes":       passKey(7, 42, []byte("From: a@b\r\n\r\nbodY\r\n")),
-		"other uid":         passKey(7, 43, raw),
-		"other uidvalidity": passKey(8, 42, raw),
-		"digit shift":       passKey(74, 2, raw),
+		"other bytes":       passKey("salt", 7, 42, []byte("From: a@b\r\n\r\nbodY\r\n")),
+		"other uid":         passKey("salt", 7, 43, raw),
+		"other uidvalidity": passKey("salt", 8, 42, raw),
+		"digit shift":       passKey("salt", 74, 2, raw),
+		"other config":      passKey("tlas", 7, 42, raw),
 	} {
 		if other == k {
 			t.Errorf("%s: same pass key", name)
 		}
 	}
-	if passKey(7, 42, raw) != k {
+	if passKey("salt", 7, 42, raw) != k {
 		t.Fatal("pass key is not deterministic")
 	}
 }
@@ -213,3 +219,79 @@ func (f *forcedPasses) PutAuthPass(context.Context, string, string, string, time
 }
 
 func (f *forcedPasses) PurgeAuthPasses(context.Context, string, time.Time) error { return nil }
+
+// Changing who is trusted re-verifies everything: a pass recorded under the
+// old config is not honoured (revoking AR/ARC trust or a sender takes effect
+// on the next poll).
+func TestAuthConfigFingerprintCoversTrust(t *testing.T) {
+	base := Config{From: "a@x.com", Senders: []string{"b@y.com", "c@z.com"}, TrustAuthResults: true}
+	fp := authConfigFingerprint(base)
+	reordered := base
+	reordered.Senders = []string{"c@z.com", "b@y.com"}
+	if authConfigFingerprint(reordered) != fp {
+		t.Fatal("sender order changed the fingerprint")
+	}
+	for name, mut := range map[string]func(*Config){
+		"auth-results off": func(c *Config) { c.TrustAuthResults = false },
+		"sender removed":   func(c *Config) { c.Senders = []string{"b@y.com"} },
+		"dkim domain":      func(c *Config) { c.DKIMDomain = "other.com" },
+		"forwarder added":  func(c *Config) { c.Forwarders = []string{"f@g.com"} },
+		"arc sealer":       func(c *Config) { c.TrustARCSealers = []string{"s.com"} },
+		"arc authserv":     func(c *Config) { c.TrustARCAuthServ = []string{"s.com"} },
+		"arc recipients":   func(c *Config) { c.TrustARCRecipients = []string{"r@s.com"} },
+		"arc age":          func(c *Config) { c.ARCMaxAge = time.Hour },
+		"authserv":         func(c *Config) { c.TrustedAuthServ = []string{"mx.example"} },
+	} {
+		c := base
+		mut(&c)
+		if authConfigFingerprint(c) == fp {
+			t.Errorf("%s: fingerprint unchanged", name)
+		}
+	}
+}
+
+// End to end: a pass recorded by one config is not honoured by a connector
+// whose trust changed; the message is verified again.
+func TestAPassIsNotHonouredAfterTrustChanges(t *testing.T) {
+	kr := newKeyring(t)
+	// Passes only through the opt-in Authentication-Results path.
+	addr := server(t, map[string]time.Time{
+		eml("ar-1@lb", sender, "AR offer", passAR("lastbottlewines.com")): now.Add(-time.Hour),
+	})
+	passes := newMemPasses()
+	trusting := passConnector(t, addr, nil, kr, passes, func(c *Config) { c.TrustAuthResults = true })
+	if got := fetchSubjects(t, trusting); len(got) != 1 || passes.len() != 1 {
+		t.Fatalf("trusting A-R: parser saw %v, %d passes", got, passes.len())
+	}
+	// The operator turns A-R trust off: the remembered auth_results pass
+	// must not keep the message accepted.
+	if got := fetchSubjects(t, passConnector(t, addr, nil, kr, passes)); len(got) != 0 {
+		t.Fatalf("after revoking A-R trust: parser saw %v, want refused", got)
+	}
+}
+
+// A stored pass replaces only authentication: every other check still runs.
+func TestAPassDoesNotSkipTheOtherChecks(t *testing.T) {
+	kr := newKeyring(t)
+	const household = "forwarder@example.org"
+	noID := strings.Replace(eml("x@lb", sender, "No message id", ""), "Message-ID: <x@lb>\r\n", "", 1)
+	dupSubject := strings.Replace(eml("dup@lb", sender, "Dup subject", ""), "Subject: Dup subject\r\n", "Subject: Dup subject\r\nSubject: Another\r\n", 1)
+	for name, raw := range map[string]string{
+		"no message-id":             noID,
+		"duplicate identity header": dupSubject,
+		"forward of another sender": fwd("fwd-x@gmail", household, "news@somewhere.com"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			addr := server(t, map[string]time.Time{raw: now.Add(-time.Hour)})
+			c := passConnector(t, addr, nil, kr, &forcedPasses{path: PathDKIM}, func(c *Config) { c.Forwarders = []string{household} })
+			if got := fetchSubjects(t, c); len(got) != 0 {
+				t.Fatalf("parser saw %v, want refused despite a stored pass", got)
+			}
+		})
+	}
+	// Control: the same forced pass does accept a well-formed message.
+	addr := server(t, map[string]time.Time{eml("ok@lb", sender, "Well formed", ""): now.Add(-time.Hour)})
+	if got := fetchSubjects(t, passConnector(t, addr, nil, kr, &forcedPasses{path: PathDKIM})); len(got) != 1 {
+		t.Fatalf("control: parser saw %v", got)
+	}
+}
