@@ -474,9 +474,6 @@ func buildIngester(s SourceConfig, cc CategoryConfig, st store.Store, o category
 			OfferRetention: offerRetention, OfferExpireAfter: expireAfter,
 		})
 		ing.TextHints = s.QuarkTextHints
-		// A submitted drive's brand/mpn/gtin reach quark only after the gate
-		// passed the line (rv35 I3).
-		ing.HintsNeedGate = isMailDealSource(s)
 		withDealLedger(ing, conn)
 		if isPromoSource(s) {
 			ing.MailStateWindow = promoStateWindow(s)

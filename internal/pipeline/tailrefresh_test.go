@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,10 @@ import (
 	"time"
 
 	"github.com/leftathome/nagus/internal/connector/shopify"
+	"github.com/leftathome/nagus/internal/listing"
 	"github.com/leftathome/nagus/internal/offer"
+	"github.com/leftathome/nagus/internal/sanitize"
+	"github.com/leftathome/nagus/internal/store"
 )
 
 // nagus-bu2, end to end through the real Shopify connector: a product that sat
@@ -70,7 +74,12 @@ func TestTailOfferReResolvesAfterACompleteWalk(t *testing.T) {
 			BrandTag: "brand:", SKUIsMPN: true, SKUSuffixes: []string{"_SR", "_MR", "_NB"},
 			Now: func() time.Time { return now },
 		})
-		ing := &Ingester{Connector: conn, Offers: offers, OfferExpireAfter: 24 * time.Hour, Now: func() time.Time { return now }}
+		// Evaluating, with a passing gate: hints are recorded only for a
+		// listing glovebox passed (nagus-voe).
+		ing := &Ingester{
+			Connector: conn, Offers: offers, OfferExpireAfter: 24 * time.Hour, Now: func() time.Time { return now },
+			Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore(),
+		}
 		if _, err := ing.Ingest(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -104,5 +113,49 @@ func TestTailOfferReResolvesAfterACompleteWalk(t *testing.T) {
 	}
 	if g := get(gone.ID); g.Status != offer.StatusExpired {
 		t.Fatalf("withdrawn offer status = %s, want expired after a complete walk", g.Status)
+	}
+}
+
+// nagus-voe: no structured hint reaches quark unless glovebox passed the
+// listing. A refused listing's hint is withheld (its stored one, if any, is
+// kept); an offer-only source -- which never crosses glovebox -- records no
+// hint at all.
+func TestStructuredHintsNeedTheGate(t *testing.T) {
+	ctx := context.Background()
+	mk := func(key string) listing.Raw {
+		return listing.Raw{
+			SourceID: "shopify:spd", SourceKey: key, Title: "Seagate 8TB", PriceCents: 100, Currency: "USD",
+			Aspects: map[string]string{"brand": "Seagate", "mpn": "ST8000NM000A"},
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		ing  func(offers offer.Store, raws []listing.Raw) *Ingester
+		want string
+	}{
+		{"passed", func(o offer.Store, r []listing.Raw) *Ingester {
+			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o, Sanitizer: sanitize.Passthrough{}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
+		}, "ST8000NM000A"},
+		{"refused", func(o offer.Store, r []listing.Raw) *Ingester {
+			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o, Sanitizer: refusingSanitizer{err: errors.New("quarantined")}, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
+		}, ""},
+		{"offer-only", func(o offer.Store, r []listing.Raw) *Ingester {
+			return &Ingester{Connector: fakeConnector{raws: r}, Offers: o}
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			offers := offer.NewMemoryStore()
+			raw := mk("k")
+			if _, err := tc.ing(offers, []listing.Raw{raw}).Ingest(ctx); err != nil {
+				t.Fatal(err)
+			}
+			o, ok, err := offers.Get(ctx, offer.DeterministicID(raw.SourceID, raw.SourceKey))
+			if err != nil || !ok {
+				t.Fatalf("offer: ok=%v err=%v (the offer itself is always recorded)", ok, err)
+			}
+			if o.ProductHint.MPN != tc.want || (tc.want == "" && !o.ProductHint.Empty()) {
+				t.Fatalf("hint %+v, want MPN %q", o.ProductHint, tc.want)
+			}
+		})
 	}
 }
