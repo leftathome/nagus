@@ -62,7 +62,9 @@ package imapmail
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -130,6 +132,8 @@ type Message struct {
 	HTML    string // the text/html part, if any
 	// UIDValidity and UID are where the message is in the mailbox.
 	UIDValidity, UID uint32
+	// AuthPath is how the sender was authenticated (one of AuthPaths).
+	AuthPath string
 }
 
 // SkipReason is why the connector skipped a message before any parser saw
@@ -253,6 +257,48 @@ type Config struct {
 	Parser      Parser
 	Now         func() time.Time
 	Logf        func(string, ...any)
+	// Passes, when set, persists each message whose authentication PASSED
+	// when it was first read (nagus-aoq). A DKIM signature carries an
+	// expiry (x=; Gmail's is the signing time plus 7 days) and the lookback
+	// window is longer, so re-verifying on every poll would turn a genuine
+	// message into a refused one part-way through its window. A message
+	// whose exact bytes, at the same UIDVALIDITY and UID, already passed is
+	// accepted by that path without checking the signature again; every
+	// other check still runs. Only a pass this connector verified itself is
+	// recorded, so a signature already expired at first sight never passes.
+	// nil = verify on every poll (the old behaviour).
+	Passes AuthPasses
+}
+
+// AuthPasses is where a connector remembers authenticated messages
+// (offer.MailState implements it).
+type AuthPasses interface {
+	GetAuthPass(ctx context.Context, sourceID, messageKey string) (string, bool, error)
+	PutAuthPass(ctx context.Context, sourceID, messageKey, path string, at time.Time) error
+	PurgeAuthPasses(ctx context.Context, sourceID string, before time.Time) error
+}
+
+// passKey identifies a message for AuthPasses: where it is in the mailbox
+// and a digest of its exact bytes, so another message at a reused UID (or
+// the same UID after UIDVALIDITY changes) never inherits a pass.
+func passKey(uidValidity, uid uint32, raw []byte) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d:%d:", uidValidity, uid)
+	_, _ = h.Write(raw)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// logf logs when the source has a logger.
+func (c *Connector) logf(format string, args ...any) {
+	if c.cfg.Logf != nil {
+		c.cfg.Logf(format, args...)
+	}
+}
+
+// passWindow is how long a pass is kept: the lookback window plus two days
+// of slack, like the promo state.
+func (c *Connector) passWindow() time.Duration {
+	return time.Duration(c.cfg.LookbackDays+2) * 24 * time.Hour
 }
 
 // Connector implements listing.Connector.
@@ -514,7 +560,25 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 			for _, b := range m.BodySection {
 				raw = b.Bytes
 			}
-			msg, why, temporary := c.verifyMessage(raw, at)
+			known, key := "", ""
+			if c.cfg.Passes != nil {
+				key = passKey(sel.UIDValidity, uint32(m.UID), raw)
+				path, ok, err := c.cfg.Passes.GetAuthPass(ctx, c.SourceID(), key)
+				switch {
+				case err != nil:
+					// Verified as if never seen: a store error must
+					// not accept anything.
+					c.logf("imapmail %s: read auth pass: %v", c.cfg.Name, err)
+				case ok && slices.Contains(AuthPaths, path):
+					known = path
+				}
+			}
+			msg, why, temporary := c.verifyMessage(raw, at, known)
+			if why == "" && known == "" && key != "" {
+				if err := c.cfg.Passes.PutAuthPass(ctx, c.SourceID(), key, msg.AuthPath, now); err != nil {
+					c.logf("imapmail %s: record auth pass: %v", c.cfg.Name, err)
+				}
+			}
 			if why != "" {
 				skipped[why]++
 				if !temporary {
@@ -565,6 +629,11 @@ func (c *Connector) Fetch(ctx context.Context) ([]listing.Raw, error) {
 	if c.cfg.Logf != nil {
 		c.cfg.Logf("imapmail %s: %d messages from %d sender(s) in %d days -> %d offers, skipped %v",
 			c.cfg.Name, len(uids), len(c.senders()), c.cfg.LookbackDays, len(out), skipped)
+	}
+	if c.cfg.Passes != nil {
+		if err := c.cfg.Passes.PurgeAuthPasses(ctx, c.SourceID(), now.Add(-c.passWindow())); err != nil {
+			c.logf("imapmail %s: purge auth passes: %v", c.cfg.Name, err)
+		}
 	}
 	c.setComplete(true)
 	c.mu.Lock()
@@ -677,29 +746,32 @@ func (c *Connector) dial() (*imapclient.Client, error) {
 // declared forwarder) with a DKIM pass for that address's domain. A non-empty
 // reason means it was skipped.
 func (c *Connector) verify(raw []byte) (Message, string) {
-	m, why, _ := c.verifyMessage(raw, time.Time{})
+	m, why, _ := c.verifyMessage(raw, time.Time{}, "")
 	return m, why
 }
 
 // verifyAt is verify for a message the server received at received (IMAP
 // INTERNALDATE), which the ARC path needs for its recency check.
 func (c *Connector) verifyAt(raw []byte, received time.Time) (Message, string) {
-	m, why, _ := c.verifyMessage(raw, received)
+	m, why, _ := c.verifyMessage(raw, received, "")
 	return m, why
 }
 
 // verifyMessage is verify, also reporting whether a refusal is TEMPORARY (a
 // DNS lookup that failed or timed out): only permanent refusals are
 // remembered.
-func (c *Connector) verifyMessage(raw []byte, received time.Time) (Message, string, bool) {
+//
+// known is the path the message already passed by on an earlier read
+// (Config.Passes), "" when it has not: authentication is then not repeated.
+func (c *Connector) verifyMessage(raw []byte, received time.Time, known string) (Message, string, bool) {
 	// Atomic: go-msgauth verifies a message's signatures concurrently, so
 	// several key lookups may report a temporary failure at once (rv35c R1).
 	var temporary atomic.Bool
-	m, why := c.verifyWith(raw, received, &temporary)
+	m, why := c.verifyWith(raw, received, known, &temporary)
 	return m, why, temporary.Load() && why == whyNoDKIM
 }
 
-func (c *Connector) verifyWith(raw []byte, received time.Time, temporary *atomic.Bool) (Message, string) {
+func (c *Connector) verifyWith(raw []byte, received time.Time, known string, temporary *atomic.Bool) (Message, string) {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
 		return Message{}, "unparseable"
@@ -735,6 +807,9 @@ func (c *Connector) verifyWith(raw []byte, received time.Time, temporary *atomic
 	}
 	path := ""
 	switch {
+	case known != "":
+		// These exact bytes passed when first read (Config.Passes).
+		path = known
 	case c.cfg.TrustAuthResults && c.dkimVerified(h.Values("Authentication-Results"), domain):
 		path = PathAuthResults
 	case c.dkimSigned(raw, domain, temporary):
@@ -764,7 +839,7 @@ func (c *Connector) verifyWith(raw []byte, received time.Time, temporary *atomic
 	date, _ := h.Date()
 	msg := Message{
 		ID: id, From: addr, Subject: subject, Date: date, ForwardedBy: forwarder,
-		Reply: h.Has("In-Reply-To") || h.Has("References"),
+		Reply: h.Has("In-Reply-To") || h.Has("References"), AuthPath: path,
 	}
 	for {
 		p, err := mr.NextPart()

@@ -122,7 +122,11 @@ and is committed at `internal/deal/deal-v1.schema.json`.
   message never duplicates a deal. Sending the same deal in a NEW message is a
   new submission.
 - A deal stays live while its email is inside the lookback window (14 days
-  by default), then drops off the surface.
+  by default), then drops off the surface. That holds even though Gmail's
+  DKIM signatures expire after 7 days: nagus remembers, in its database, each
+  message that verified when it was first read, and does not re-check the
+  signature's expiry for those exact bytes (nagus-aoq). A message whose
+  signature had already expired when nagus first read it is refused.
 
 ## Checking what happened
 

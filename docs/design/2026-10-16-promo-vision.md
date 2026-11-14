@@ -429,6 +429,7 @@ implement the same `offer.MailState` contract, `offerstoretest`):
 | `promo_messages` | (source_id, message_key) | uid_validity, uid (hints), processed_at_ns, outcome, products (JSON), rules_version | when a message reaches a FINAL outcome (every image final) | on the first poll that meets the message in a process: its products are re-emitted, nothing is fetched or read |
 | `promo_readings` | image_sha256 | readings (JSON: both reads), stored_at_ns | after both reads of an image | before reading an image, behind the in-memory front |
 | `vision_usage` | day (UTC, `2006-01-02`) | calls | every reservation and refund (one upsert, never below 0) | at startup and at each UTC day change |
+| `mail_auth_passes` (nagus-aoq; every imap source, not only promo) | (source_id, message_key) | path (`dkim`, `auth_results`, `arc`), verified_at_ns | when a message's sender authentication PASSES on its first read | before verifying a message: a stored pass is accepted by its path without re-checking the signature, so a DKIM x= expiry inside the lookback window does not refuse genuine mail. `message_key` is SHA-256 of `<uidvalidity>:<uid>:` plus the raw bytes. Purged by the connector itself (`PurgeAuthPasses`, its own source only) at lookback + 2 days |
 
 - `message_key` is a hash of the verified sender and the Message-ID (the
   id itself is not stored); `products` are the products' `nagus.deal/v1`

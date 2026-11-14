@@ -58,6 +58,16 @@ func (rt *promoRuntime) useState(store offer.Store) {
 	}
 }
 
+// authPassesOf is the offer store's memory of authenticated mail
+// (nagus-aoq), nil without an offer layer that keeps mail state: an imap
+// source then re-verifies its whole window on every poll.
+func authPassesOf(st offer.Store) imapmail.AuthPasses {
+	if ms, ok := st.(offer.MailState); ok {
+		return ms
+	}
+	return nil
+}
+
 // promoStateWindow is how long a promo source's persisted state is kept:
 // its mail is re-read for the lookback window, plus two days of slack.
 func promoStateWindow(s SourceConfig) time.Duration {
@@ -188,7 +198,7 @@ func buildPromoConnector(s SourceConfig, o categoryOpts) (listing.Connector, err
 	}
 	conn, err := imapmail.NewConnector(imapmail.Config{
 		Name: s.Name, Senders: s.IMAPSenders, Mailbox: s.IMAPMailbox, LookbackDays: s.IMAPLookbackDays,
-		Parser: p, Logf: o.logf, NewestFirst: true,
+		Parser: p, Logf: o.logf, NewestFirst: true, Passes: authPassesOf(o.offers),
 		Host: envOr("NAGUS_IMAP_HOST", ""), Port: envOr("NAGUS_IMAP_PORT", ""), TLS: envOr("NAGUS_IMAP_TLS", ""),
 		Username: envOr("NAGUS_IMAP_USERNAME", ""), Password: envOr("NAGUS_IMAP_PASSWORD", ""),
 		TrustARCSealers: s.IMAPTrustARCSealers, TrustARCAuthServ: s.IMAPTrustARCAuthservIDs,

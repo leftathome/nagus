@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS vision_usage (
 	day   TEXT PRIMARY KEY,
 	calls INTEGER NOT NULL DEFAULT 0
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS mail_auth_passes (
+	source_id      TEXT NOT NULL,
+	message_key    TEXT NOT NULL,
+	path           TEXT NOT NULL,
+	verified_at_ns INTEGER NOT NULL,
+	PRIMARY KEY (source_id, message_key)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_mail_auth_passes_verified ON mail_auth_passes(source_id, verified_at_ns);
 `
 
 // migrateMailState adds columns added after promo_messages first shipped.
@@ -168,6 +176,41 @@ func (s *Store) PurgeMailState(ctx context.Context, sourceID string, before time
 		if _, err := s.db.ExecContext(ctx, q.sql, q.args...); err != nil {
 			return fmt.Errorf("sqliteoffer: purge mail state: %w", err)
 		}
+	}
+	return nil
+}
+
+// GetAuthPass implements offer.MailState.
+func (s *Store) GetAuthPass(ctx context.Context, sourceID, key string) (string, bool, error) {
+	var path string
+	err := s.db.QueryRowContext(ctx, `SELECT path FROM mail_auth_passes WHERE source_id = ? AND message_key = ?`, sourceID, key).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("sqliteoffer: get auth pass: %w", err)
+	}
+	return path, true, nil
+}
+
+// PutAuthPass implements offer.MailState.
+func (s *Store) PutAuthPass(ctx context.Context, sourceID, key, path string, at time.Time) error {
+	if sourceID == "" || key == "" || path == "" {
+		return offer.ErrNoAuthPassKey
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO mail_auth_passes (source_id, message_key, path, verified_at_ns) VALUES (?, ?, ?, ?)
+		ON CONFLICT (source_id, message_key) DO UPDATE SET path = excluded.path, verified_at_ns = excluded.verified_at_ns`,
+		sourceID, key, path, at.UnixNano())
+	if err != nil {
+		return fmt.Errorf("sqliteoffer: put auth pass: %w", err)
+	}
+	return nil
+}
+
+// PurgeAuthPasses implements offer.MailState.
+func (s *Store) PurgeAuthPasses(ctx context.Context, sourceID string, before time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM mail_auth_passes WHERE source_id = ? AND verified_at_ns < ?`, sourceID, before.UnixNano()); err != nil {
+		return fmt.Errorf("sqliteoffer: purge auth passes: %w", err)
 	}
 	return nil
 }
