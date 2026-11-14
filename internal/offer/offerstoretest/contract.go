@@ -84,6 +84,7 @@ func Run(t *testing.T, newStore NewStore) {
 	t.Run("PendingResolutionLimitPrefersUnattempted", func(t *testing.T) { pendingResolutionLimitPrefersUnattempted(t, newStore(t)) })
 	t.Run("QueryByProductID", func(t *testing.T) { queryByProductID(t, newStore(t)) })
 	t.Run("UnidentifiableIsNeverPending", func(t *testing.T) { unidentifiableIsNeverPending(t, newStore(t)) })
+	t.Run("UnvettedHintIsNeverPending", func(t *testing.T) { unvettedHintIsNeverPending(t, newStore(t)) })
 	t.Run("TextHintRoundTripsAndReopens", func(t *testing.T) { textHintRoundTripsAndReopens(t, newStore(t)) })
 	t.Run("TextHintStaleAnswerIsDiscarded", func(t *testing.T) { textHintStaleAnswerIsDiscarded(t, newStore(t)) })
 	t.Run("VintageModeRoundTripsAndResets", func(t *testing.T) { vintageModeRoundTripsAndResets(t, newStore(t)) })
@@ -483,7 +484,7 @@ func sellerFilterIsCaseSensitive(t *testing.T, s offer.Store) {
 func aspectsRoundTrip(t *testing.T, s offer.Store) {
 	o := Offer("shopify:x", "k", 100, T0)
 	o.Aspects = map[string]string{"vendor": "Western Digital", "sku": "WUH-1", "weird": `quote" and \ backslash`}
-	o.ProductHint = offer.ProductHint{Brand: "Western Digital", MPN: "WUH722424AL5201", Model: "HC580"}
+	o.ProductHint = offer.ProductHint{Brand: "Western Digital", MPN: "WUH722424AL5201", Model: "HC580", Vetted: true}
 	put(t, s, o)
 	got, ok, err := s.Get(context.Background(), offer.DeterministicID("shopify:x", "k"))
 	if err != nil || !ok {

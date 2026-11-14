@@ -326,6 +326,8 @@ func (m *MemoryStore) PendingResolution(ctx context.Context, limit int, retryBel
 	var fresh, retry []Offer
 	for _, o := range m.offers {
 		switch {
+		case !o.ProductHint.Empty() && !o.ProductHint.Vetted:
+			// Never sent to quark (nagus-voe).
 		case o.Resolution.State == ResolutionUnattempted || o.Resolution.State == "":
 			fresh = append(fresh, o)
 		case o.Resolution.State == ResolutionRefused && retryBelowGeneration > 0 && o.Resolution.Generation < retryBelowGeneration:

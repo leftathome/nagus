@@ -66,7 +66,7 @@ func seed(t *testing.T, s offer.Store, source, key, mpn string) offer.Offer {
 	t.Helper()
 	o := offer.Offer{
 		SourceID: source, SourceKey: key, PriceCents: 100, LastSeen: t0,
-		ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn},
+		ProductHint: offer.ProductHint{Brand: "Seagate", MPN: mpn, Vetted: true},
 	}
 	if err := s.Put(context.Background(), o); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -311,7 +311,7 @@ func TestTextHintsAreSentAndStamped(t *testing.T) {
 	mk := func(key, text string) offer.Offer {
 		o := offer.Offer{
 			SourceID: "ebay:ebay", SourceKey: key, PriceCents: 100, LastSeen: t0,
-			ProductHint: offer.ProductHint{Text: text},
+			ProductHint: offer.ProductHint{Text: text, Vetted: true},
 		}
 		if err := s.Put(context.Background(), o); err != nil {
 			t.Fatal(err)

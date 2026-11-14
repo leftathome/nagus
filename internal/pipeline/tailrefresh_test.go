@@ -159,3 +159,49 @@ func TestStructuredHintsNeedTheGate(t *testing.T) {
 		})
 	}
 }
+
+// nagus-voe: hints stored before the rule were never vetted. A listing the
+// gate refuses keeps only a VETTED previous hint; a passing listing vets the
+// stored strings in place, keeping their resolution.
+func TestStoredHintsAreKeptOnlyWhenVetted(t *testing.T) {
+	ctx := context.Background()
+	raw := listing.Raw{
+		SourceID: "shopify:spd", SourceKey: "k", Title: "Seagate 8TB", PriceCents: 100, Currency: "USD",
+		Aspects: map[string]string{"brand": "Seagate", "mpn": "ST8000NM000A"},
+	}
+	id := offer.DeterministicID(raw.SourceID, raw.SourceKey)
+	seed := func(t *testing.T, vetted bool) offer.Store {
+		offers := offer.NewMemoryStore()
+		hint := offer.ProductHint{Brand: "Seagate", MPN: "ST8000NM000A", Vetted: vetted}
+		o := offer.Offer{SourceID: raw.SourceID, SourceKey: raw.SourceKey, PriceCents: 100, Currency: "USD", LastSeen: time.Unix(1, 0), ProductHint: hint}
+		if err := offers.Put(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := offers.RecordResolution(ctx, id, hint.Fingerprint(), offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-1"}); err != nil || !ok {
+			t.Fatalf("seed resolution: %v %v", ok, err)
+		}
+		return offers
+	}
+	ingest := func(t *testing.T, offers offer.Store, san listing.Sanitizer) offer.Offer {
+		ing := &Ingester{Connector: fakeConnector{raws: []listing.Raw{raw}}, Offers: offers, Sanitizer: san, Extractor: fakeExtractor{}, Store: store.NewMemoryStore()}
+		if _, err := ing.Ingest(ctx); err != nil {
+			t.Fatal(err)
+		}
+		o, _, err := offers.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	refuse := refusingSanitizer{err: errors.New("quarantined")}
+
+	if o := ingest(t, seed(t, false), refuse); !o.ProductHint.Empty() || o.Resolution.ProductID != "" {
+		t.Fatalf("legacy unvetted hint survived a refusal: %+v %+v", o.ProductHint, o.Resolution)
+	}
+	if o := ingest(t, seed(t, true), refuse); o.ProductHint.MPN != "ST8000NM000A" || o.Resolution.ProductID != "p-1" {
+		t.Fatalf("a vetted hint was not kept through a refusal: %+v %+v", o.ProductHint, o.Resolution)
+	}
+	if o := ingest(t, seed(t, false), sanitize.Passthrough{}); !o.ProductHint.Vetted || o.Resolution.ProductID != "p-1" {
+		t.Fatalf("a passing listing did not vet the stored hint in place: %+v %+v", o.ProductHint, o.Resolution)
+	}
+}

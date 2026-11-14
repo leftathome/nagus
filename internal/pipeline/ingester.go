@@ -233,6 +233,12 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title
 			}
+			// Only text glovebox just passed is vetted; a kept hint carries
+			// its own flag (previousHint), and only a vetted hint is ever sent
+			// to quark (offer.PendingResolution).
+			if gated && sanErr == nil {
+				o.ProductHint.Vetted = !o.ProductHint.Empty()
+			}
 			if !keep {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: "could not read the stored hint to preserve it"})
 			} else if err := i.Offers.Put(ctx, o); err != nil {
@@ -387,7 +393,10 @@ func (i *Ingester) previousHint(ctx context.Context, id string) (offer.ProductHi
 		i.logf("ingest: reading offer %s to preserve its hint: %v", id, err)
 		return offer.ProductHint{}, false
 	}
-	if !found {
+	if !found || !prev.ProductHint.Vetted {
+		// Nothing to keep, or a hint stored before nagus-voe that glovebox
+		// never passed: it is not kept for a listing the gate did not pass
+		// now. (Clearing it resets the offer's resolution.)
 		return offer.ProductHint{}, true
 	}
 	return prev.ProductHint, true
