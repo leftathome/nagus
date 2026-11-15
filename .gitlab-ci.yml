@@ -16,7 +16,7 @@
 
 include:
   - project: 'homelab/ci-templates'
-    ref: v0.2.1
+    ref: v0.2.2
     file: '/kaniko.yml'
 
 stages:
@@ -140,6 +140,22 @@ cache:
     when: never
   - if: '$CI_COMMIT_BRANCH == "main"'
   - if: '$CI_COMMIT_TAG'
+
+# The image legs' rules: the same, plus the VERSION build-arg the Dockerfile
+# stamps into main.version (nagus-m0q). Without it every GitLab image
+# reported "dev" (MCP serverInfo.version, `nagus version`), the v0.17.0 tag
+# included. A tag stamps the tag itself ("v0.17.2", as the GitHub workflow
+# does); main stamps the short sha. EXTRA_BUILD_ARGS is ci-templates v0.2.2's
+# passthrough (space-separated NAME=VALUE pairs, no spaces in values).
+.build_rules_versioned: &build_rules_versioned
+  - if: '$CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web"'
+    when: never
+  - if: '$CI_COMMIT_TAG'
+    variables:
+      EXTRA_BUILD_ARGS: "VERSION=$CI_COMMIT_TAG"
+  - if: '$CI_COMMIT_BRANCH == "main"'
+    variables:
+      EXTRA_BUILD_ARGS: "VERSION=$CI_COMMIT_SHORT_SHA"
 
 # ---------------------------------------------------------------------------
 # vulncheck -- govulncheck against the Go vulnerability database. A SEPARATE
@@ -346,7 +362,7 @@ build-amd64:
   stage: build
   needs: ["test", "lint"]
   retry: *build_retry
-  rules: *build_rules
+  rules: *build_rules_versioned
   variables:
     IMAGE: nagus
     DOCKERFILE: ./Dockerfile
@@ -357,7 +373,7 @@ build-arm64:
   stage: build
   needs: ["test", "lint"]
   retry: *build_retry
-  rules: *build_rules
+  rules: *build_rules_versioned
   variables:
     IMAGE: nagus
     DOCKERFILE: ./Dockerfile
