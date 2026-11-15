@@ -109,6 +109,8 @@ var resolutionColumns = []struct{ name, ddl string }{
 	{"price_changed_at_ns", `INTEGER NOT NULL DEFAULT 0`},
 	{"previous_price_cents", `INTEGER NOT NULL DEFAULT 0`},
 	{"ends_at_ns", `INTEGER NOT NULL DEFAULT 0`},
+	// nagus-voe: 0 (unvetted) is exactly true of every existing row.
+	{"hint_vetted", `INTEGER NOT NULL DEFAULT 0`},
 }
 
 // resolutionIndexes run AFTER migrateResolution, because on an existing
@@ -291,8 +293,8 @@ INSERT INTO offers (
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
-  price_changed_at_ns, previous_price_cents, ends_at_ns
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  price_changed_at_ns, previous_price_cents, ends_at_ns, hint_vetted
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions see the row as it was BEFORE this update, so these
@@ -316,13 +318,13 @@ ON CONFLICT(id) DO UPDATE SET
   outcome=excluded.outcome, expired_at_ns=excluded.expired_at_ns,
   price_changed_at_ns=excluded.price_changed_at_ns,
   previous_price_cents=excluded.previous_price_cents,
-  ends_at_ns=excluded.ends_at_ns`,
+  ends_at_ns=excluded.ends_at_ns, hint_vetted=excluded.hint_vetted`,
 		o.ID, o.SourceID, o.SourceKey, o.SourceURL, o.Title, o.Body,
 		o.PriceCents, o.Currency, o.Condition, o.Seller, string(aspects),
 		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
-		nsOrZero(o.PriceChangedAt), o.PreviousPriceCents, nsOrZero(o.EndsAt),
+		nsOrZero(o.PriceChangedAt), o.PreviousPriceCents, nsOrZero(o.EndsAt), o.ProductHint.Vetted,
 	)
 	if err != nil {
 		return fmt.Errorf("sqliteoffer: upsert: %w", err)
@@ -521,6 +523,9 @@ ORDER BY offer_id, observed_at_ns`, append(args, perOffer)...)
 // column. Used inside the upsert's CASE expressions.
 const sameHint = `(offers.hint_brand = excluded.hint_brand AND offers.hint_mpn = excluded.hint_mpn AND offers.hint_gtin = excluded.hint_gtin AND offers.hint_model = excluded.hint_model AND offers.hint_text = excluded.hint_text)`
 
+// emptyHint is offer.ProductHint.Empty in SQL.
+const emptyHint = `(hint_brand = '' AND hint_mpn = '' AND hint_gtin = '' AND hint_model = '' AND hint_text = '')`
+
 // storedFingerprint computes offer.ProductHint.Fingerprint in SQL.
 const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model || CASE WHEN hint_text <> '' THEN '|' || hint_text ELSE '' END)`
 
@@ -528,8 +533,10 @@ const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin ||
 // under a generation below retryBelowGeneration, each in id order.
 func (s *Store) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]offer.Offer, error) {
 	sqlStr := selectCols + ` FROM offers
-WHERE resolution_state IN ('unattempted', '')
-   OR (resolution_state = 'refused' AND ? > 0 AND resolution_generation < ?)
+WHERE (resolution_state IN ('unattempted', '')
+   OR (resolution_state = 'refused' AND ? > 0 AND resolution_generation < ?))
+  -- nagus-voe: a hint glovebox has not passed never reaches quark.
+  AND (hint_vetted = 1 OR ` + emptyHint + `)
 ORDER BY CASE WHEN resolution_state = 'refused' THEN 1 ELSE 0 END, id`
 	if limit > 0 {
 		sqlStr += fmt.Sprintf(` LIMIT %d`, limit)
@@ -564,7 +571,7 @@ const selectCols = `SELECT
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
   resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode,
-  price_changed_at_ns, previous_price_cents, ends_at_ns`
+  price_changed_at_ns, previous_price_cents, ends_at_ns, hint_vetted`
 
 func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 	var out []offer.Offer
@@ -579,7 +586,7 @@ func scanOffers(rows *sql.Rows) ([]offer.Offer, error) {
 			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS, &o.Resolution.VintageMode,
-			&changedNS, &o.PreviousPriceCents, &endsNS,
+			&changedNS, &o.PreviousPriceCents, &endsNS, &o.ProductHint.Vetted,
 		); err != nil {
 			return nil, fmt.Errorf("sqliteoffer: scan: %w", err)
 		}

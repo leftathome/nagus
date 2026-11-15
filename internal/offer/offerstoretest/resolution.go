@@ -3,6 +3,7 @@ package offerstoretest
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/leftathome/nagus/internal/offer"
@@ -19,7 +20,7 @@ import (
 
 func hinted(source, key, mpn string) offer.Offer {
 	o := Offer(source, key, 100, T0)
-	o.ProductHint = offer.ProductHint{Brand: "Seagate", MPN: mpn}
+	o.ProductHint = offer.ProductHint{Brand: "Seagate", MPN: mpn, Vetted: true}
 	return o
 }
 
@@ -268,7 +269,7 @@ func textHintRoundTripsAndReopens(t *testing.T, s offer.Store) {
 	}
 	withText := Offer("ebay:ebay", "v1|123", 100, T0)
 	withText.LastSeen = T2
-	withText.ProductHint = offer.ProductHint{Text: "Seagate Exos X18 ST12000NM002J 12TB"}
+	withText.ProductHint = offer.ProductHint{Text: "Seagate Exos X18 ST12000NM002J 12TB", Vetted: true}
 	put(t, s, withText)
 	pending, err := s.PendingResolution(context.Background(), 0, 0)
 	if err != nil || len(pending) != 1 {
@@ -293,13 +294,60 @@ func textHintRoundTripsAndReopens(t *testing.T, s offer.Store) {
 // An answer computed for an OLD title must not stamp once the title changed.
 func textHintStaleAnswerIsDiscarded(t *testing.T, s offer.Store) {
 	old := Offer("ebay:ebay", "v1|9", 100, T0)
-	old.ProductHint = offer.ProductHint{Text: "ST12000NM002J 12TB"}
+	old.ProductHint = offer.ProductHint{Text: "ST12000NM002J 12TB", Vetted: true}
 	put(t, s, old)
 	changed := Offer("ebay:ebay", "v1|9", 100, T0)
 	changed.LastSeen = T1
-	changed.ProductHint = offer.ProductHint{Text: "WUH721818ALE600 18TB"}
+	changed.ProductHint = offer.ProductHint{Text: "WUH721818ALE600 18TB", Vetted: true}
 	put(t, s, changed)
 	if record(t, s, old, offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-old", At: T1}) {
 		t.Fatal("an answer for the old title stamped the offer")
+	}
+}
+
+// unvettedHintIsNeverPending (nagus-voe): a hint glovebox has not passed --
+// every hint stored before v0.17.2 -- is never offered to quark; an empty
+// hint still is (it is recorded locally), and vetting the SAME strings later
+// makes the offer pending without resetting a resolution it already has.
+func unvettedHintIsNeverPending(t *testing.T, s offer.Store) {
+	ctx := context.Background()
+	legacy := hinted("shop:a", "legacy", "ST1")
+	legacy.ProductHint.Vetted = false
+	empty := Offer("shop:a", "empty", 100, T0)
+	vetted := hinted("shop:a", "vetted", "ST2")
+	legacyResolved := hinted("shop:a", "legacy-resolved", "ST3")
+	legacyResolved.ProductHint.Vetted = false
+	for _, o := range []offer.Offer{legacy, empty, vetted, legacyResolved} {
+		put(t, s, o)
+	}
+	record(t, s, legacyResolved, offer.Resolution{State: offer.ResolutionResolved, ProductID: "p3", Generation: 1, At: T1})
+	keys := func() []string {
+		got, err := s.PendingResolution(ctx, 0, 5)
+		if err != nil {
+			t.Fatalf("PendingResolution: %v", err)
+		}
+		var out []string
+		for _, o := range got {
+			out = append(out, o.SourceKey)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got := strings.Join(keys(), ","); got != "empty,vetted" {
+		t.Fatalf("pending = %s, want empty,vetted (the unvetted hint withheld)", got)
+	}
+	if got := get(t, s, legacy); got.ProductHint.Vetted {
+		t.Fatal("Vetted did not round-trip as false")
+	}
+	// The listing passes the gate: same strings, now vetted.
+	legacy.ProductHint.Vetted = true
+	legacyResolved.ProductHint.Vetted = true
+	put(t, s, legacy)
+	put(t, s, legacyResolved)
+	if got := strings.Join(keys(), ","); got != "empty,legacy,vetted" {
+		t.Fatalf("after vetting: pending = %s, want empty,legacy,vetted", got)
+	}
+	if got := get(t, s, legacyResolved); !got.ProductHint.Vetted || got.Resolution.State != offer.ResolutionResolved || got.Resolution.ProductID != "p3" {
+		t.Fatalf("vetting the same hint changed its resolution: %+v %+v", got.ProductHint, got.Resolution)
 	}
 }

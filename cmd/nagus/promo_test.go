@@ -91,9 +91,6 @@ func TestBuildPromoIngesters(t *testing.T) {
 		if s.Category == "wine" && ing.NameHintProducer != "wine_producer" {
 			t.Errorf("%s: wine promo source must send name hints", s.Name)
 		}
-		if s.Category == "hdd" && !ing.HintsNeedGate {
-			t.Errorf("%s: hdd promo hints must wait for the gate", s.Name)
-		}
 	}
 	// Vision unset: the runtime is off and says which settings are missing.
 	t.Setenv(envVisionAPIKey, "")

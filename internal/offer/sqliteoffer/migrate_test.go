@@ -57,9 +57,21 @@ func TestMigrationAddsResolutionToExistingDatabase(t *testing.T) {
 	if got.Resolution.State != offer.ResolutionUnattempted {
 		t.Fatalf("legacy offer state = %q, want unattempted", got.Resolution.State)
 	}
+	// A legacy hint was never vetted by glovebox (nagus-voe): it migrates as
+	// unvetted and is not offered to quark until its listing next passes.
+	if got.ProductHint.Vetted {
+		t.Fatal("legacy hint migrated as vetted")
+	}
 	pending, err := s.PendingResolution(ctx, 0, 0)
-	if err != nil || len(pending) != 1 {
-		t.Fatalf("legacy offer not pending resolution: n=%d err=%v", len(pending), err)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("unvetted legacy offer is pending resolution: n=%d err=%v", len(pending), err)
+	}
+	got.ProductHint.Vetted = true
+	if err := s.Put(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err = s.PendingResolution(ctx, 0, 0); err != nil || len(pending) != 1 {
+		t.Fatalf("vetted legacy offer not pending resolution: n=%d err=%v", len(pending), err)
 	}
 	applied, err := s.RecordResolution(ctx, "legacy-1", got.ProductHint.Fingerprint(),
 		offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-1", At: time.Unix(1_760_000_000, 0).UTC()})

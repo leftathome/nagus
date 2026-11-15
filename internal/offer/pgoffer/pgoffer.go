@@ -102,6 +102,9 @@ ALTER TABLE offers ADD COLUMN IF NOT EXISTS vintage_mode TEXT NOT NULL DEFAULT '
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS price_changed_at_ns BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS previous_price_cents BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS ends_at_ns BIGINT NOT NULL DEFAULT 0;
+-- nagus-voe: false (unvetted) is exactly true of every existing row;
+-- catalog-only with a constant default.
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS hint_vetted BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_offers_source ON offers(source_id);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
@@ -256,8 +259,8 @@ INSERT INTO offers (
   price_cents, currency, condition, seller, aspects_json,
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
-  price_changed_at_ns, ends_at_ns
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+  price_changed_at_ns, ends_at_ns, hint_vetted
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 ON CONFLICT (id) DO UPDATE SET
   -- Price change (offer.Store.Put): a different non-zero price stamps the
   -- observation time (never earlier than the stored stamp) and records the
@@ -270,6 +273,7 @@ ON CONFLICT (id) DO UPDATE SET
   previous_price_cents = CASE WHEN `+priceChanged+` THEN offers.price_cents ELSE offers.previous_price_cents END,
   -- what the source states now; 0 when it states no end
   ends_at_ns = EXCLUDED.ends_at_ns,
+  hint_vetted = EXCLUDED.hint_vetted,
   -- Resolution survives a re-ingest of the SAME hint and resets on a changed
   -- one. SET expressions read the row as it was before this update, so these
   -- compare the stored hint with the incoming one even though the hint columns
@@ -316,7 +320,7 @@ RETURNING price_changed_at_ns, (xmax = 0)`,
 		o.ProductHint.Brand, o.ProductHint.MPN, o.ProductHint.GTIN, o.ProductHint.Model, o.ProductHint.Text,
 		o.FirstSeen.UnixNano(), o.LastSeen.UnixNano(), o.MinPriceSeen,
 		string(o.Status), string(o.Outcome), nsOrZero(o.ExpiredAt),
-		o.FirstSeen.UnixNano(), nsOrZero(o.EndsAt),
+		o.FirstSeen.UnixNano(), nsOrZero(o.EndsAt), o.ProductHint.Vetted,
 	).Scan(&changedNS, &inserted)
 	if err != nil {
 		return false, fmt.Errorf("pgoffer: upsert: %w", err)
@@ -539,7 +543,7 @@ const selectCols = `SELECT
   hint_brand, hint_mpn, hint_gtin, hint_model, hint_text,
   first_seen_ns, last_seen_ns, min_price_cents, status, outcome, expired_at_ns,
   resolution_state, product_id, resolution_generation, resolved_at_ns, vintage_mode,
-  price_changed_at_ns, previous_price_cents, ends_at_ns`
+  price_changed_at_ns, previous_price_cents, ends_at_ns, hint_vetted`
 
 // priceChanged is true when the incoming price and the stored (last known)
 // price are both known and differ (offer.Store.Put's price-change rule).
@@ -555,6 +559,9 @@ const storedPriceChangedAtBare = `(CASE WHEN price_changed_at_ns = 0 THEN first_
 // column. Used inside the upsert's CASE expressions.
 const sameHint = `(offers.hint_brand = EXCLUDED.hint_brand AND offers.hint_mpn = EXCLUDED.hint_mpn AND offers.hint_gtin = EXCLUDED.hint_gtin AND offers.hint_model = EXCLUDED.hint_model AND offers.hint_text = EXCLUDED.hint_text)`
 
+// emptyHint is offer.ProductHint.Empty in SQL.
+const emptyHint = `(hint_brand = '' AND hint_mpn = '' AND hint_gtin = '' AND hint_model = '' AND hint_text = '')`
+
 // storedFingerprint computes offer.ProductHint.Fingerprint in SQL.
 const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin || '|' || hint_model || CASE WHEN hint_text <> '' THEN '|' || hint_text ELSE '' END)`
 
@@ -562,8 +569,10 @@ const storedFingerprint = `(hint_brand || '|' || hint_mpn || '|' || hint_gtin ||
 // under a generation below retryBelowGeneration, each in id order.
 func (s *Store) PendingResolution(ctx context.Context, limit int, retryBelowGeneration int64) ([]offer.Offer, error) {
 	sqlStr := selectCols + ` FROM offers
-WHERE resolution_state IN ('unattempted', '')
-   OR (resolution_state = 'refused' AND $1 > 0 AND resolution_generation < $1)
+WHERE (resolution_state IN ('unattempted', '')
+   OR (resolution_state = 'refused' AND $1 > 0 AND resolution_generation < $1))
+  -- nagus-voe: a hint glovebox has not passed never reaches quark.
+  AND (hint_vetted OR ` + emptyHint + `)
 ORDER BY CASE WHEN resolution_state = 'refused' THEN 1 ELSE 0 END, id`
 	if limit > 0 {
 		sqlStr += fmt.Sprintf(` LIMIT %d`, limit)
@@ -601,7 +610,7 @@ func scanOffers(rows pgx.Rows) ([]offer.Offer, error) {
 			&o.ProductHint.Brand, &o.ProductHint.MPN, &o.ProductHint.GTIN, &o.ProductHint.Model, &o.ProductHint.Text,
 			&firstNS, &lastNS, &o.MinPriceSeen, &status, &outcome, &expiredNS,
 			&resState, &o.Resolution.ProductID, &o.Resolution.Generation, &resolvedNS, &o.Resolution.VintageMode,
-			&changedNS, &o.PreviousPriceCents, &endsNS,
+			&changedNS, &o.PreviousPriceCents, &endsNS, &o.ProductHint.Vetted,
 		); err != nil {
 			return nil, fmt.Errorf("pgoffer: scan: %w", err)
 		}

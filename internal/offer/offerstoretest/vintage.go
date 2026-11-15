@@ -13,7 +13,7 @@ import (
 // product.
 func vintageModeRoundTripsAndResets(t *testing.T, s offer.Store) {
 	o := Offer("shop:w", "bsc", 100, T0)
-	o.ProductHint = offer.ProductHint{Brand: "Bollinger", Text: "Special Cuvee Brut NV"}
+	o.ProductHint = offer.ProductHint{Brand: "Bollinger", Text: "Special Cuvee Brut NV", Vetted: true}
 	put(t, s, o)
 	if !record(t, s, o, offer.Resolution{State: offer.ResolutionResolved, ProductID: "p-bsc", VintageMode: "non_vintage", Generation: 1, At: T1}) {
 		t.Fatal("RecordResolution not applied")

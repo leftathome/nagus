@@ -174,7 +174,6 @@ func TestEndToEndNeweggToItems(t *testing.T) {
 	src := &Source{Inner: conn, Parser: r.p}
 	items, offers := store.NewMemoryStore(), offer.NewMemoryStore()
 	ing := category.NewHDDIngester(src, category.HDDDeps{Store: items, Sanitizer: passGate(t), Offers: offers, Logf: t.Logf})
-	ing.HintsNeedGate = true
 	ing.Now = func() time.Time { return testNow }
 	ing.AfterIngest = func(_ context.Context, res pipeline.IngestResult) { r.m.ObserveIngest(src.SourceID(), res) }
 

@@ -107,6 +107,12 @@ type ProductHint struct {
 	// the listing passed the glovebox gate. quark looks it up against keys it
 	// already holds (QUARK-02); it never mints from text.
 	Text string
+	// Vetted reports that the fields above come from a listing glovebox
+	// PASSED (nagus-voe). Only a vetted hint is sent to quark: hints stored
+	// before v0.17.2 are unvetted until their listing next passes the gate.
+	// Not part of the fingerprint or of Empty: vetting the same strings
+	// keeps their resolution.
+	Vetted bool
 }
 
 // Fingerprint identifies the exact hint an offer carried when it was resolved.

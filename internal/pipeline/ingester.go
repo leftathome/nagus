@@ -72,14 +72,6 @@ type Ingester struct {
 	// keeps its structured hint. Needs an evaluating ingester (a Sanitizer).
 	NameHintProducer string
 
-	// HintsNeedGate withholds a listing's STRUCTURED product hint
-	// (brand/mpn/gtin/model) from quark unless the listing passed the sanitize
-	// gate, as NameHintProducer already does for name hints. Set for
-	// deal-submission sources, whose hints are typed by a person on an open
-	// channel (rv35 I3). Other sources record their hint before the gate
-	// (nagus-voe tracks whether they should too). Needs a Sanitizer.
-	HintsNeedGate bool
-
 	// StaleAfter, when > 0, enables a post-ingest freshness purge of this
 	// source's items older than the window (eBay License 8.1(b)). 0 disables it.
 	StaleAfter time.Duration
@@ -188,13 +180,16 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 	}()
 	for _, r := range raws {
 		seen[r.SourceKey] = true
-		// For a text-hint source the gate runs FIRST, so the title is attached
-		// to the offer's hint only when glovebox passed it. The verdict is
-		// reused below: one gate call per listing either way.
+		// The gate runs FIRST for every evaluating source: NO product hint --
+		// structured (brand/mpn/gtin/model), name or text -- reaches quark
+		// unless glovebox passed the listing (nagus-voe; rule: glovebox vets
+		// all seller text before anything downstream, quark or an agent, can
+		// act on it). The verdict is reused below: one gate call per listing
+		// either way.
 		var san listing.Sanitized
 		var sanErr error
 		gated := false
-		if (i.TextHints || i.NameHintProducer != "" || i.HintsNeedGate) && evaluates && i.Sanitizer != nil {
+		if evaluates && i.Sanitizer != nil {
 			san, sanErr = i.Sanitizer.Sanitize(ctx, r)
 			gated = true
 		}
@@ -224,14 +219,26 @@ func (i *Ingester) Ingest(ctx context.Context) (IngestResult, error) {
 				// resolution) it already has: replacing it would change the
 				// fingerprint and throw away a resolved wine's product id
 				// every time glovebox has an outage.
-				o.ProductHint, keep = i.previousHint(ctx, o.ID)
-			case gated && sanErr != nil && i.HintsNeedGate:
+				o.ProductHint, keep = i.previousHint(ctx, o.ID, contentVerdict("sanitize", sanErr))
+			case gated && sanErr != nil:
 				// The gate did not pass this listing: its structured hint is
 				// withheld from quark, exactly as a name hint is (the stored
 				// hint, if any, is kept -- an outage must not unresolve it).
-				o.ProductHint, keep = i.previousHint(ctx, o.ID)
+				o.ProductHint, keep = i.previousHint(ctx, o.ID, contentVerdict("sanitize", sanErr))
+			case !gated:
+				// No gate ran: an OFFER-ONLY source (nagus-7yq) or an
+				// ingester without a Sanitizer. Its seller text never crossed
+				// glovebox, so it carries no hint to quark at all.
+				o.ProductHint = offer.ProductHint{}
 			case gated && sanErr == nil && i.TextHints && o.ProductHint.Empty():
 				o.ProductHint.Text = r.Title
+			}
+			// Only text glovebox just passed is vetted; a kept hint carries
+			// its own flag (previousHint), and only a vetted hint is ever sent
+			// to quark (offer.PendingResolution). The in-process Passthrough
+			// (no glovebox configured) scans nothing, so it vets nothing.
+			if gated && sanErr == nil {
+				o.ProductHint.Vetted = !o.ProductHint.Empty() && !isPassthrough(i.Sanitizer)
 			}
 			if !keep {
 				res.Skips = append(res.Skips, Skip{SourceKey: r.SourceKey, Stage: "offer", Reason: "could not read the stored hint to preserve it"})
@@ -378,16 +385,34 @@ func offerFromRaw(r listing.Raw, now time.Time) offer.Offer {
 	}
 }
 
+// isPassthrough reports the in-process Passthrough boundary, which copies a
+// listing without scanning it.
+func isPassthrough(s listing.Sanitizer) bool {
+	switch s.(type) {
+	case sanitize.Passthrough, *sanitize.Passthrough:
+		return true
+	}
+	return false
+}
+
 // previousHint is the hint the stored offer carries, or the empty hint for an
 // offer not stored yet. ok is false when the store could not be read: the
 // caller then skips the offer for this pass rather than guess.
-func (i *Ingester) previousHint(ctx context.Context, id string) (offer.ProductHint, bool) {
+//
+// refused is a CONTENT verdict (glovebox quarantined the listing): an
+// unvetted stored hint -- one recorded before nagus-voe -- is then dropped.
+// After an outage (unreachable, token, misconfiguration) the stored hint is
+// kept with its flag: an unvetted one stays unvetted and is still never sent
+// to quark, but the offer's resolution survives the outage.
+func (i *Ingester) previousHint(ctx context.Context, id string, refused bool) (offer.ProductHint, bool) {
 	prev, found, err := i.Offers.Get(ctx, id)
 	if err != nil {
 		i.logf("ingest: reading offer %s to preserve its hint: %v", id, err)
 		return offer.ProductHint{}, false
 	}
-	if !found {
+	if !found || (refused && !prev.ProductHint.Vetted) {
+		// Nothing to keep, or a hint glovebox never passed for a listing it
+		// has now refused. (Clearing it resets the offer's resolution.)
 		return offer.ProductHint{}, true
 	}
 	return prev.ProductHint, true

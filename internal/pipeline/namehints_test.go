@@ -35,7 +35,7 @@ func TestNameHintsCarryProducerAndTitleAfterTheGate(t *testing.T) {
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := offer.ProductHint{Brand: "Leonetti Cellar", Text: good.Title}
+	want := offer.ProductHint{Brand: "Leonetti Cellar", Text: good.Title, Vetted: true}
 	if got := hintOf(t, offers, good); got != want {
 		t.Errorf("passing listing: hint %+v, want %+v", got, want)
 	}
@@ -60,7 +60,7 @@ func TestNameHintsWithoutAProducerSendTheTitleAlone(t *testing.T) {
 	if _, err := ing.Ingest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := hintOf(t, offers, r); got != (offer.ProductHint{Text: r.Title}) {
+	if got := hintOf(t, offers, r); got != (offer.ProductHint{Text: r.Title, Vetted: true}) {
 		t.Errorf("hint %+v, want the title alone", got)
 	}
 }
@@ -101,7 +101,7 @@ func TestNameHintsUseSanitizedTextAndSurviveAGateOutage(t *testing.T) {
 	if _, err := ing.Ingest(ctx); err != nil {
 		t.Fatal(err)
 	}
-	want := offer.ProductHint{Brand: "[s] Leonetti Cellar", Text: "[s] " + r.Title}
+	want := offer.ProductHint{Brand: "[s] Leonetti Cellar", Text: "[s] " + r.Title, Vetted: true}
 	if got := hintOf(t, offers, r); got != want {
 		t.Fatalf("hint %+v, want the sanitized %+v", got, want)
 	}

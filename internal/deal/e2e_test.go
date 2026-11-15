@@ -193,7 +193,6 @@ func newRig(t *testing.T, addr string, kr *keyring) *rig {
 			}
 		} else {
 			ing = category.NewHDDIngester(src, category.HDDDeps{Store: r.items, Sanitizer: gate, Offers: r.offers, Logf: t.Logf})
-			ing.HintsNeedGate = true // as cmd/nagus wires a deal hdd source
 		}
 		ing.Now = func() time.Time { return now }
 		ing.AfterIngest = r.hub.Ledger.AfterIngest(conn.SourceID())

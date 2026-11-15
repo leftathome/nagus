@@ -42,7 +42,7 @@ func TestWineNameHintsStampOnlyTheAutoBand(t *testing.T) {
 	mk := func(key, title string) offer.Offer {
 		o := offer.Offer{
 			SourceID: "shopify:leonetti", SourceKey: key, PriceCents: 100, LastSeen: t0,
-			ProductHint: offer.ProductHint{Brand: "Leonetti Cellar", Text: title},
+			ProductHint: offer.ProductHint{Brand: "Leonetti Cellar", Text: title, Vetted: true},
 		}
 		if err := s.Put(context.Background(), o); err != nil {
 			t.Fatal(err)
