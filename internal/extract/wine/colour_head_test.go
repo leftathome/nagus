@@ -189,3 +189,22 @@ func TestColourHead_ColourAttributeUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// nagus-cvo: a real brand that opens with a colour word vouches for itself,
+// and what follows it is judged as what follows a colour.
+func TestColourHead_ColourLedBrand(t *testing.T) {
+	checkVerdicts(t, []verdictCase{
+		{"Rose All Day", "", nil},
+		{"Rose All Day 750ml", "", nil},
+		{"Rose All Day Rose 2023", "", nil},
+		{"Rose All Day Lanyard", "", ErrNotWine},
+		{"Rose All Day Beanie", "", ErrNotWine},
+		{"Rose Gold Lanyard", "", ErrNotWine},
+		{"2023 Rose All Day", "", nil},
+		// A trailing slogan is not the brand (review of the fix).
+		{"Lanyard Rose All Day", "", ErrNotWine},
+		{"Beanie | Rose All Day", "", ErrNotWine},
+		{"Doormat Rose All Day", "", ErrNotWine},
+		{"Gift Set Rose All Day", "", ErrNotWine},
+	})
+}
