@@ -97,6 +97,10 @@ type SourceConfig struct {
 	// commerce7: the store's Commerce7 tenant slug (nagus fingerprint);
 	// baseUrl is the storefront root used for product links.
 	Commerce7Tenant string `json:"commerce7Tenant,omitempty"`
+	// commerce7ProductPath is the product link under baseUrl, with {slug}
+	// for the product's slug; default "/product/{slug}". Squarespace
+	// storefronts route "/product#/{slug}" (nagus-ebw).
+	Commerce7ProductPath string `json:"commerce7ProductPath,omitempty"`
 	// orderport: baseUrl is the <store>.orderport.net root; catalogPath
 	// overrides /wines/All-Wines.
 	// dynamics365: baseUrl is the site root; catalogPath (required) is the

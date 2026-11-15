@@ -103,3 +103,45 @@ func TestFetchShapeChangeIsLoud(t *testing.T) {
 		t.Fatal("a response without products must be an error, not an empty catalogue")
 	}
 }
+
+// nagus-ebw: hash-routed (Squarespace) and CMS-hosted storefronts do not
+// serve /product/<slug>; the source names its own product path.
+func TestProductPathBuildsTheStorefrontsLink(t *testing.T) {
+	for _, tc := range []struct{ path, prefix string }{
+		{"", "https://tablascreek.com/product/"},
+		{"/product#/{slug}", "https://tablascreek.com/product#/"},
+		{"/store/{slug}", "https://tablascreek.com/store/"},
+	} {
+		c := NewConnector(Config{Name: "tablas", FixturePath: fixture, StoreURL: "https://tablascreek.com/", ProductPath: tc.path})
+		raws, err := c.Fetch(context.Background())
+		if err != nil || len(raws) == 0 {
+			t.Fatalf("%q: Fetch: %d listings, %v", tc.path, len(raws), err)
+		}
+		for _, r := range raws {
+			slug, ok := strings.CutPrefix(r.SourceURL, tc.prefix)
+			if !ok || slug == "" || strings.ContainsAny(slug, "/{}") {
+				t.Fatalf("%q: link %q, want %s<slug>", tc.path, r.SourceURL, tc.prefix)
+			}
+		}
+	}
+}
+
+func TestValidProductPath(t *testing.T) {
+	for p, ok := range map[string]bool{
+		"":                  true,
+		"/product/{slug}":   true,
+		"/product#/{slug}":  true,
+		"/store/{slug}":     true,
+		"/wines/{slug}/buy": true,
+		"store/{slug}":      false,
+		"/store/":           false,
+		"/{slug}/{slug}":    false,
+		"/store/{slug}?x=1": false,
+		"//evil/{slug}":     false,
+		"/a b/{slug}":       false,
+	} {
+		if err := ValidProductPath(p); (err == nil) != ok {
+			t.Errorf("ValidProductPath(%q) = %v, want ok=%v", p, err, ok)
+		}
+	}
+}

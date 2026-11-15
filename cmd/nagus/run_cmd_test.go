@@ -416,3 +416,13 @@ func TestWiringRunSearchTextFilterNoMatches(t *testing.T) {
 		t.Fatalf("expected matched=0 for a non-matching text filter, got: %q", out)
 	}
 }
+
+func TestCommerce7ProductPathIsValidated(t *testing.T) {
+	_, err := buildConnectorForSource(SourceConfig{Name: "c7", Type: "commerce7", Commerce7Tenant: "t", BaseURL: "https://x.example", Commerce7ProductPath: "store/{slug}"}, CategoryConfig{}, categoryOpts{})
+	if err == nil || !strings.Contains(err.Error(), "c7") {
+		t.Fatalf("a bad product path was accepted: %v", err)
+	}
+	if _, err := buildConnectorForSource(SourceConfig{Name: "c7", Type: "commerce7", Commerce7Tenant: "t", BaseURL: "https://x.example", Commerce7ProductPath: "/product#/{slug}"}, CategoryConfig{}, categoryOpts{}); err != nil {
+		t.Fatalf("a hash-routed product path was refused: %v", err)
+	}
+}
