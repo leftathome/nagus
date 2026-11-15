@@ -25,6 +25,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/leftathome/nagus/internal/textclean"
 )
 
 // SchemaID is the format's name, and the only value the optional "schema"
@@ -513,12 +515,8 @@ func cleanText(s string, max int) bool {
 // object replacement character and the musical null notehead.
 func blank(r rune) bool { return r == 0x2800 || r == 0xFFFC || r == 0x1D159 }
 
-// invisible is Cf, Other_Default_Ignorable_Code_Point or a variation
-// selector: together, Unicode's Default_Ignorable_Code_Point set.
-func invisible(r rune) bool {
-	return unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) ||
-		unicode.Is(unicode.Variation_Selector, r)
-}
+// invisible is textclean.Invisible: the set quark's hint gate refuses.
+func invisible(r rune) bool { return textclean.Invisible(r) }
 
 func contains(list []string, s string) bool {
 	for _, v := range list {
