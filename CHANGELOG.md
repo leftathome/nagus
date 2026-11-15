@@ -6,6 +6,62 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-11-14
+
+### Security
+
+- **Go 1.26.11** (GO-2026-6859, `net/http`): the CI gates, the lint job's
+  GOTOOLCHAIN and both Dockerfile builders move from golang 1.26.10 to
+  1.26.11, pinned by single-platform digest (amd64 `sha256:6327cb29...`,
+  arm64 `sha256:3df77c84...`). govulncheck: no called vulnerabilities.
+- **No product hint reaches quark unless glovebox passed the listing**
+  (nagus-voe). Rule: glovebox vets all seller text before anything
+  downstream -- quark or an agent -- can act on it. Every evaluating source
+  now calls the sanitize gate before recording an offer (the same one call
+  per listing); structured hints (brand, MPN, GTIN, model) used to be
+  recorded from the raw listing whatever the verdict, except for deal
+  submissions. An offer-only source records no hint. New column
+  `offers.hint_vetted` (SQLite INTEGER / Postgres BOOLEAN, default false,
+  added on startup, catalog-only): set when glovebox passes the listing; the
+  in-process Passthrough (no glovebox configured) vets nothing; only vetted
+  hints are offered to quark. Every hint stored before this release starts
+  unvetted and is re-vetted by its listing's next poll at the normal gate
+  rate; a content refusal drops an unvetted hint (and its resolution), an
+  outage keeps it unvetted and unsent so the product id survives. Hints on
+  offers no longer listed are never sent again.
+
+### Fixed
+
+- **Gmail deal and promo mail no longer turns "unverified" at day 7**
+  (nagus-aoq). Gmail's DKIM signatures expire after 7 days and imap sources
+  re-verify their 14-day window on every poll. A message whose sender
+  authentication passed on its first read is now recorded (new table
+  `mail_auth_passes`, keyed by a SHA-256 of the source's authentication
+  config, UIDVALIDITY, UID and the raw bytes) and accepted by that path on
+  later reads without re-checking the signature; every other check still
+  runs. Persisted, so restarts keep it. A signature already expired at
+  first sight is still refused. Changing how a source authenticates (DKIM
+  domain, Authentication-Results or ARC trust) re-authenticates its mail;
+  adding a sender or forwarder does not. Messages already 7-14 days old at
+  deploy were never recorded and age out of the window.
+- **Commerce7 product links** (nagus-ebw): mark-ryan, matthiasson and
+  wt-vintners sent every link to a 404. New source field
+  `commerce7ProductPath` (a path under `baseUrl` with `{slug}`; default
+  `/product/{slug}`): Squarespace storefronts use `/product#/{slug}`,
+  Matthiasson `/store/{slug}`. Existing offers get the corrected link on
+  their next poll.
+- **Invisible characters in hints** (nagus-78w): an emoji's variation
+  selector, a ZWJ sequence, a soft hyphen or a BOM in a listing title made
+  quark refuse the whole hint. They are stripped from what is sent (zero
+  width space becomes a space); what nagus stores is unchanged.
+- **'Rose All Day'** (nagus-cvo), a real rose brand, read as not-wine. A
+  colour-led brand now vouches for itself where it opens the title;
+  merchandise ('Rose All Day Tumbler', 'Tumbler Rose All Day') is still
+  rejected.
+- **GitLab-built images report their version** (nagus-m0q): every GitLab
+  image said "dev". The image legs now pass `VERSION` (the tag on a tag, the
+  short sha on main) via homelab/ci-templates v0.2.2 `EXTRA_BUILD_ARGS`.
+
 ## [0.17.1] - 2026-10-31
 
 ### Security
